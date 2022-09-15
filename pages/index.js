@@ -2,9 +2,29 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import Link from "next/link";
 import Editor from "../components/editor";
+import { useAppContext } from "../context/state";
+import Image from "next/image";
+import Menu from "../components/menu";
+
+const NaturalImage = (props) => {
+  const [ratio, setRatio] = useState(16 / 9); // default to 16:9
+
+  return (
+    <Image
+      {...props}
+      // set the dimension (affected by layout)
+      width={250}
+      height={200 / ratio}
+      layout="fixed" // you can use "responsive", "fill" or the default "intrinsic"
+      onLoadingComplete={({ naturalWidth, naturalHeight }) =>
+        setRatio(naturalWidth / naturalHeight)
+      }
+    />
+  );
+};
 
 const Home = () => {
-  const [currentQuest, setCurrentQuest] = useState({ wordsToWin: 50 });
+  const [currentQuest] = useAppContext();
   const [progress, setProgress] = useState(0);
   const [wordCount, setWordCount] = useState(0);
 
@@ -13,64 +33,41 @@ const Home = () => {
   };
 
   useEffect(() => {
-    setProgress(Math.floor((wordCount / currentQuest.wordsToWin) * 100));
+    setProgress(Math.floor((wordCount / currentQuest?.wordsToWin) * 100));
   }, [wordCount]);
 
-  const onCurrentQuestChange = (newQuest) => {
-    setCurrentQuest(newQuest);
-  };
-
   return (
-    <div className="container">
+    <div>
       <Head>
         <title>Create Next App</title>
         <meta name="writinator" content="Writinating" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-      <section class="section"></section>
 
       <main>
-        <div class="tile is-ancestor">
-          <div class="tile is-parent is-narrow">
-            <article class="tile is-child notification is-success">
-              <aside class="menu">
-                <h2>
-                  <Link href="/quest-picker">Quest Picker</Link>
-                </h2>
-              </aside>
-            </article>
-          </div>
-          <div class="tile is-vertical is-10" styles={{ height: '500px'}}>
-            <div class="tile is-parent" styles={{ height: '500px'}}>
-              <article class="tile is-child notification is-info" styles={{ height: '500px'}}>
-                <Editor onWordCountChange={onWordCountChange} />
-              </article>
-            </div>
-            <div class="tile">
-              <div class="tile is-parent is-vertical">
-                <article class="tile is-child notification is-info">
-                  <progress class="progress is-success" value={progress} max="100">
-                    {progress}
-                  </progress>
-                  <h6>
-                    {" "}
-                    {progress}% to Goal ({wordCount} of{" "}
-                    {currentQuest.wordsToWin} words){" "}
-                  </h6>
-                </article>
-              </div>
-              <div class="tile is-parent">
-                <article class="tile is-child notification is-info">
-                  <figure class="image is-4by3">
-                    <img src="https://bulma.io/images/placeholders/640x480.png" />
-                  </figure>
-                </article>
+        <div className="tile">
+          <div className="tile is-vertical is-12">
+            <Editor onWordCountChange={onWordCountChange} />
+            <progress className="progress is-info" value={progress} max="100">
+              {progress}
+            </progress>
+            <div>{wordCount} of {currentQuest?.wordsToWin} words ({progress}%)</div>
+            <div className="tile is-parent">
+              <Link href="/quest-picker">
+                <a>
+                  <NaturalImage src={currentQuest?.poster} />
+                </a>
+              </Link>
+              <div style={{ maxHeight: `${progress}%`, overflow: "hidden" }}>
+                <figure className="image">
+                  <NaturalImage src={currentQuest?.questImage} />
+                </figure>
               </div>
             </div>
           </div>
         </div>
       </main>
-      <footer class="footer has-background-black"></footer>
+      <footer className="footer has-background-black"></footer>
     </div>
   );
 };
