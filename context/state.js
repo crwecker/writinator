@@ -8,7 +8,7 @@ const defaultQuest = {
   poster: "/digging.png",
   description:
     "Ruby was digging in her backyard one day and came across the most beautiful colored rock. Her life would never be the same!",
-  questImage: "https://res.cloudinary.com/dku43ldks/image/upload/e_pixelate:100/v1662353577/writinator/unicorn_dragon_egg.jpg",
+  questImage: "v1662353577/writinator/unicorn_dragon_egg.jpg",
   direction: "TTB",
   wordsToWin: 50,
 }

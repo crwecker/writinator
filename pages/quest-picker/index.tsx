@@ -3,6 +3,8 @@ import QuestCard from "./quest-card";
 import Link from "next/link";
 import { useAppContext } from "../../context/state"
 import { useRouter } from "next/router";
+const cloudinaryBase = 'https://res.cloudinary.com/dku43ldks/image/upload/'
+
 const data = [
   {
     title: "Strange Pet",
@@ -14,8 +16,7 @@ const data = [
         poster: "/digging.png",
         description:
           "Ruby was digging in her backyard one day and came across the most beautiful colored rock. Her life would never be the same!",
-        // questImage: "https://res.cloudinary.com/dku43ldks/image/upload/e_pixelate:100/v1662353577/writinator/unicorn_dragon_egg.jpg",
-        questImage: "/unicorn_dragon_egg.jpg",
+        questImage: "v1662353577/writinator/unicorn_dragon_egg.jpg",
         direction: "TTB",
         wordsToWin: 50,
       },

@@ -11,12 +11,6 @@ import localforage from "localforage";
 import Menu from "./menu";
 import { editorStateHasDirtySelection } from "lexical/LexicalEditorState";
 
-const myTheme = {
-  ltr: 'ltr',
-  rtl: 'rtl',
-  placeholder: 'editor-placeholder',
-  paragraph: 'editor-paragraph',
-}
 // Lexical React plugins are React components, which makes them
 // highly composable. Furthermore, you can lazy load plugins if
 // desired, so you don't pay the cost for plugins until you
@@ -33,6 +27,7 @@ function MyCustomAutoFocusPlugin() {
 }
 
 function LocalForagePlugin({ editorStateData }) {
+  const [isHidden, setIsHidden] = useState(false)
   const [currentChapter, setCurrentChapter] = useState('Chapter 1')
   const [editor] = useLexicalComposerContext()
 
@@ -69,10 +64,13 @@ function LocalForagePlugin({ editorStateData }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 150, padding: 16 }}>
-      <div className="button" onClick={saveToDisk}>Save</div>
-      <div className="button" onClick={loadFromDisk}>Load</div>
-      <Menu clickCurrentChapter={clickCurrentChapter} />
+    <div style={{ position: 'absolute', left: 0, display: 'flex', flexDirection: 'row' }}>
+      <div className="button" style={{ padding: 1, backgroundColor: '#333', border: 'none', margin: 0, height: '100vh' }} onClick={() => setIsHidden(was => !was)}></div>
+      <div style={{ flexDirection: 'column', minWidth: 150, padding: 16, display: isHidden ? 'none' : 'flex' }}>
+        <div className="button" onClick={saveToDisk}>Save</div>
+        <div className="button" onClick={loadFromDisk}>Load</div>
+        <Menu clickCurrentChapter={clickCurrentChapter} />
+      </div>
     </div>
   )
 }
@@ -84,7 +82,7 @@ function onError(error) {
   console.error(error);
 }
 
-function Editor({ onWordCountChange }) {
+function Editor({ onWordCountChange, editorHeight }) {
   const [editorStateData, setEditorStateData] = useState()
   const [wordCount, setWordCount] = useState(0);
   // When the editor changes, you can get notified via the
@@ -107,26 +105,31 @@ function Editor({ onWordCountChange }) {
     onWordCountChange(wordCount);
   }, [wordCount]);
 
+  const myTheme = {
+    ltr: 'ltr',
+    rtl: 'rtl',
+    placeholder: 'editor-placeholder',
+    paragraph: 'editor-paragraph',
+  }
+
   const initialConfig = {
     namespace: "MyEditor",
     theme: myTheme,
     onError,
   };
   return (
-    <div className="editor-wrapper">
-      <LexicalComposer initialConfig={initialConfig}>
-        <div className="editor-container">
-          <LocalForagePlugin editorStateData={editorStateData} />
-          <PlainTextPlugin
-            contentEditable={<ContentEditable />}
-            placeholder={<div>...</div>}
-          />
-          <OnChangePlugin onChange={onChange} />
-          <HistoryPlugin />
-          <MyCustomAutoFocusPlugin />
-        </div>
-      </LexicalComposer>
-    </div>
+    <LexicalComposer initialConfig={initialConfig}>
+      <div className="editor-container" style={{ height: editorHeight }}>
+        <LocalForagePlugin editorStateData={editorStateData} />
+        <PlainTextPlugin
+          contentEditable={<ContentEditable />}
+          placeholder={<div>...</div>}
+        />
+        <OnChangePlugin onChange={onChange} />
+        <HistoryPlugin />
+        <MyCustomAutoFocusPlugin />
+      </div>
+    </LexicalComposer>
   );
 }
 

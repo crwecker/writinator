@@ -88,7 +88,7 @@ function Menu({ clickCurrentChapter }) {
           >
             <ul className="menu-list chapter">
               <li>
-                <a onClick={() => clickCurrentChapter(chapter.name)}>{chapter.name}</a>
+                <a onClick={() => clickCurrentChapter(chapter.name)} style={{ color: 'white' }}>{chapter.name}</a>
               </li>
             </ul>
           </div>
