@@ -18,7 +18,13 @@
     "module": "esnext",
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "alwaysStrict": true,
+    "paths": {
+      "~*": [
+        "./*"
+      ]
+    }
   },
   "include": [
     "next-env.d.ts",

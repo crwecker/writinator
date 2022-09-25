@@ -3,7 +3,6 @@ import QuestCard from "./quest-card";
 import Link from "next/link";
 import { useAppContext } from "../../context/state"
 import { useRouter } from "next/router";
-const cloudinaryBase = 'https://res.cloudinary.com/dku43ldks/image/upload/'
 
 const data = [
   {
@@ -13,10 +12,10 @@ const data = [
         author: "Ruby Mae",
         created: "3 Sep 2022",
         title: "Egg",
-        poster: "/digging.png",
+        poster: "https://res.cloudinary.com/dku43ldks/image/upload/v1662353342/writinator/digging.png",
         description:
           "Ruby was digging in her backyard one day and came across the most beautiful colored rock. Her life would never be the same!",
-        questImage: "v1662353577/writinator/unicorn_dragon_egg.jpg",
+        questImage: "/v1662353577/writinator/unicorn_dragon_egg.jpg",
         direction: "TTB",
         wordsToWin: 50,
       },
@@ -24,10 +23,10 @@ const data = [
         author: "Ruby Mae",
         created: "3 Sep 2022",
         title: "Cracks",
-        poster: "/hatching.png",
+        poster: "https://res.cloudinary.com/dku43ldks/image/upload/v1662353342/writinator/hatching.png",
         description:
           "Ruby kept the rock on her dresser and it started to wiggle! 'What is inside?' Ruby said.",
-        questImage: "/baby_unicorn_dragon.png",
+        questImage: "/v1662353342/writinator/baby_unicorn_dragon.png",
         direction: "TTB",
         wordsToWin: 100,
       },
@@ -35,10 +34,10 @@ const data = [
         author: "Ruby Mae",
         created: "4 Sep 2022",
         title: "Baby Unicorn Dragon",
-        poster: "/person_and_egg.png",
+        poster: "https://res.cloudinary.com/dku43ldks/image/upload/v1662353343/writinator/person_and_egg.png",
         description:
           "rock on her dresser and it started to wiggle! 'What is inside?' Ruby said.",
-        questImage: "/its_a_toddler.png",
+        questImage: "/v1662353342/writinator/its_a_toddler.png",
         direction: "TTB",
         wordsToWin: 100,
       },
@@ -78,7 +77,7 @@ const data = [
         title: "Goblins!",
         poster: "/burninate.png",
         description: "We are under attack",
-        questImage: "/unicorn_dragon_egg.png",
+        questImage: "/woman.jpg",
         direction: "TTB",
         wordsToWin: 200,
       },
