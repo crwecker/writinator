@@ -1,9 +1,9 @@
-import { useState } from "react";
-import Image from "next/image";
-import { useAppContext } from "../../context/state";
+import { useState } from 'react'
+import Image from 'next/image'
+import { useAppContext } from '../../context/state'
 
 const NaturalImage = (props) => {
-  const [ratio, setRatio] = useState(16/9) // default to 16:9
+  const [ratio, setRatio] = useState(16 / 9) // default to 16:9
 
   return (
     <Image
@@ -12,37 +12,24 @@ const NaturalImage = (props) => {
       width={250}
       height={200 / ratio}
       layout="fixed" // you can use "responsive", "fill" or the default "intrinsic"
-      onLoadingComplete={({ naturalWidth, naturalHeight }) => 
-        setRatio(naturalWidth / naturalHeight)
-      }
+      onLoadingComplete={({ naturalWidth, naturalHeight }) => setRatio(naturalWidth / naturalHeight)}
     />
   )
 }
 
 const QuestCard = ({ quest, onQuestCardClicked }) => {
-  const [currentQuest] = useAppContext();
-  const isCurrent = currentQuest == quest;
+  const { quest: currentQuest } = useAppContext()
+  const isCurrent = currentQuest == quest
   // TODO: Currently each card renders twice, and rerenders after each click
   // Should definitely go about the isCurrent a different way :)
   return (
-    <div
-      className="card is-clickable"
-      onClick={() => onQuestCardClicked(quest)}
-    >
+    <div className="card is-clickable" onClick={() => onQuestCardClicked(quest)}>
       <div className="card-image">
         <figure className="image">
-          <NaturalImage
-            src={quest?.poster}
-            alt={quest?.title}
-            layout="responsive"
-          />
+          <NaturalImage src={quest?.poster} alt={quest?.title} layout="responsive" />
         </figure>
       </div>
-      <div
-        className={
-          isCurrent ? "card-content has-background-primary" : "card-content"
-        }
-      >
+      <div className={isCurrent ? 'card-content has-background-primary' : 'card-content'}>
         <div className="content is-4">
           {quest?.description}
           {isCurrent}
@@ -53,7 +40,7 @@ const QuestCard = ({ quest, onQuestCardClicked }) => {
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default QuestCard;
+export default QuestCard
