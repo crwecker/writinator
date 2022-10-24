@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Image from 'next/image'
-import { useAppContext } from '../../context/state'
+import { useAppContext } from '../state'
 
 const NaturalImage = (props) => {
   const [ratio, setRatio] = useState(16 / 9) // default to 16:9

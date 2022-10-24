@@ -2,13 +2,13 @@ import { $getRoot, $getSelection } from "lexical";
 import { useEffect, useState } from "react";
 
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
-import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
+import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import localforage from "localforage";
-import Menu from "./menu";
+import Menu from "../menu/menu";
 import { editorStateHasDirtySelection } from "lexical/LexicalEditorState";
 
 // Lexical React plugins are React components, which makes them
@@ -121,7 +121,7 @@ function Editor({ onWordCountChange, editorHeight }) {
     <LexicalComposer initialConfig={initialConfig}>
       <div className="editor-container" style={{ height: editorHeight }}>
         <LocalForagePlugin editorStateData={editorStateData} />
-        <PlainTextPlugin
+        <RichTextPlugin
           contentEditable={<ContentEditable />}
           placeholder={<div>...</div>}
         />

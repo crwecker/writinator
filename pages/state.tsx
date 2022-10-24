@@ -9,6 +9,7 @@ export interface Quest {
   questImage: string
   direction?: string
   wordsToWin?: number
+  winningMessage?: string
 }
 
 export interface QuestArc {
@@ -40,18 +41,48 @@ export const defaultQuestArcs: QuestArc[] = [
           "Ruby kept the rock on her dresser and it started to wiggle! 'What is inside?' Ruby said.",
         questImage: "/v1662353342/writinator/Ruby/baby_unicorn_dragon.png",
         direction: "TTB",
-        wordsToWin: 100,
+        wordsToWin: 50,
       },
       {
         author: "Ruby Mae",
         created: "4 Sep 2022",
         title: "Baby Unicorn Dragon",
         poster: "https://res.cloudinary.com/dku43ldks/image/upload/v1662353343/writinator/Ruby/person_and_egg.png",
-        description:
-          "rock on her dresser and it started to wiggle! 'What is inside?' Ruby said.",
+        description: "Woah, a unicorn popped out of the thing! Is it an egg or a rock? Maybe it is both. I wonder what it will look like when it is a toddler!",
         questImage: "/v1662353342/writinator/Ruby/its_a_toddler.png",
         direction: "TTB",
-        wordsToWin: 100,
+        wordsToWin: 50,
+      },
+      {
+        author: "Ruby Mae",
+        created: "6 Oct 2022",
+        title: "Baby Unicorn Dragon",
+        poster: "https://res.cloudinary.com/dku43ldks/image/upload/v1665107671/writinator/Ruby/rainbow-heart.png",
+        description: "Oh, no! The village is on fire! What's that? How are we going to do this? The firefighters are already busy!? Help us someone!!",
+        questImage: "/v1665107671/writinator/Ruby/put-out-the-fire.png",
+        direction: "TTB",
+        wordsToWin: 50,
+      },
+      {
+        author: "Ruby Mae",
+        created: "6 Oct 2022",
+        title: "Baby Unicorn Dragon",
+        poster: "https://res.cloudinary.com/dku43ldks/image/upload/v1665107671/writinator/Ruby/rainbow-heart.png",
+        description: "Later... The unnamed unicorn dragon is now a teenager! And Ruby rides her to different villages that need help. And they put fires out!",
+        questImage: "/v1665107671/writinator/Ruby/you-saved-us.png",
+        direction: "TTB",
+        wordsToWin: 50,
+      },
+      {
+        author: "Ruby Mae",
+        created: "6 Oct 2022",
+        title: "Baby Unicorn Dragon",
+        poster: "https://res.cloudinary.com/dku43ldks/image/upload/v1665107671/writinator/Ruby/rainbow-heart.png",
+        description: "It's an adult. It's so big and winged. What should I name him?",
+        questImage: "/v1665108037/writinator/Ruby/bubs-the-adult.png",
+        direction: "TTB",
+        wordsToWin: 50,
+        winningMessage: "Let's call him Bubs!",
       },
     ],
   },

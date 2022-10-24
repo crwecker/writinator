@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
-import Editor from '../components/editor'
-import { useAppContext } from '../context/state'
+import Editor from './editor/editor'
+import { useAppContext } from './state'
 import Image from 'next/image'
-import Menu from '../components/menu'
+import Menu from './menu/menu'
 
 interface NaturalImageProps {
   src: string
@@ -141,7 +141,7 @@ const Home = () => {
                   <div
                     style={{
                       maxHeight: currentQuestWon ? '100%' : `${progress % 100}%`,
-                      overflow: 'hidden',
+                      // overflow: 'hidden',
                       position: 'absolute',
                       left: 0,
                       top: 0,

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import QuestCard from "./questCard";
 import Link from "next/link";
-import { useAppContext, Quest, defaultQuestArcs } from "../../context/state";
+import { useAppContext, Quest, defaultQuestArcs } from "../state";
 import { useRouter } from "next/router";
 
 const QuestPicker = () => {
