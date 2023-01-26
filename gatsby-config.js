@@ -1,0 +1,1 @@
+export const plugins = [`gatsby-plugin-gatsby-cloud`]
