@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
 import Editor from './editor/editor'
-import { useAppContext } from './state'
+import { useAppContext } from '../src/state'
 import Image from 'next/image'
 import Menu from './menu/menu'
 
