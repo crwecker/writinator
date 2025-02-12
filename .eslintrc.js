@@ -31,7 +31,6 @@ module.exports = {
     'react/jsx-handler-names': 0,
     'react/jsx-no-bind': 'warn',
     'react/react-in-jsx-scope': 'off',
-    'react-native/no-inline-styles': 0,
     'react-hooks/exhaustive-deps': 'off',
     camelcase: 0,
     radix: 0,
