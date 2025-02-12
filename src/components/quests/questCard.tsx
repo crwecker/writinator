@@ -8,7 +8,7 @@ const NaturalImage = (props) => {
   return (
     <Image
       {...props}
-      // set the dimension (affected by layout)
+      alt={props.alt || ""}
       width={250}
       height={200 / ratio}
       layout="fixed" // you can use "responsive", "fill" or the default "intrinsic"

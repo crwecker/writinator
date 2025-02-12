@@ -16,6 +16,7 @@ const NaturalImage = ({ src, height }: NaturalImageProps) => {
   return (
     <Image
       src={src}
+      alt=""
       width={height / ratio}
       height={height}
       layout="fixed" // you can use "responsive", "fill" or the default "intrinsic"

@@ -22,7 +22,7 @@ const QuestPicker = () => {
         {questArcs.map((questArc, i) => (
           <div className="column is-one-fifth" key={i + questArc.title}>
             {questArc.quests.map((quest, i) => (
-              <div>
+              <div key={i + quest.title}>
                 <QuestCard
                   quest={quest}
                   onQuestCardClicked={onQuestCardClicked}
