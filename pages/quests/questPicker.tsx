@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import QuestCard from "./questCard";
+import QuestCard from "../../src/components/quests/questCard";
 import Link from "next/link";
 import { useAppContext, Quest, defaultQuestArcs } from "../../src/state";
 import { useRouter } from "next/router";

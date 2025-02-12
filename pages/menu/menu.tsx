@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import localforage from "localforage";
-import { useDrag } from "./useDrag";
+import { useDrag } from "../../src/hooks/useDrag";
 
 // localforage.setItem("collections", [
 //   {
