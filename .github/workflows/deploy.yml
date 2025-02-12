@@ -25,7 +25,9 @@ jobs:
 
       - name: Create .nojekyll
         run: |
+          mkdir -p out
           touch out/.nojekyll
+          cp CNAME out/
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
