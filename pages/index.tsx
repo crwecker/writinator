@@ -91,10 +91,11 @@ const Home = () => {
     setQuestBarHeight(ref.current.clientHeight)
   }, [ref.current])
 
+  console.log("progress % 100", progress % 100)
   return (
     <>
       <Head>
-        <title>Create Next App</title>
+        <title>Writinator</title>
         <meta name="writinator" content="Writinating" />
         <link rel="icon" href="/favicon.ico" />
       </Head>

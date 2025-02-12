@@ -6,5 +6,8 @@ const nextConfig = {
   images: {
     domains: ['res.cloudinary.com'],
   },
+  assetPrefix: process.env.NODE_ENV === 'production' ? '/writinator' : '/',
+  basePath: process.env.NODE_ENV === 'production' ? '/writinator' : '',
 }
-module.exports = nextConfig
+
+export default nextConfig

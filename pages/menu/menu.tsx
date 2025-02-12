@@ -49,7 +49,7 @@ function Menu({ clickCurrentChapter }) {
   const getMenu = async () => {
     const collections: Collections = await localforage.getItem("collections");
     console.log("GOT FROM STORAGE: ", JSON.stringify(collections));
-    const book: Book = await localforage.getItem(collections[0].title);
+    const book: Book = await localforage.getItem(collections?.[0]?.title);
     console.log("GOT FROM STORAGE: ", JSON.stringify(book));
     setCurrentBook(book);
   };
