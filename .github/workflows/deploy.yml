@@ -25,11 +25,11 @@ jobs:
 
       - name: Create .nojekyll
         run: |
-          mkdir -p out
           touch out/.nojekyll
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./out 
+          publish_dir: ./out
+          force_orphan: true
