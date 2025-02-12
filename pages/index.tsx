@@ -1,29 +1,32 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Head from 'next/head'
 import Link from 'next/link'
-import Editor from './editor/editor'
+import Editor from '../src/components/editor/Editor'
 import { useAppContext } from '../src/state'
 import Image from 'next/image'
-import Menu from './menu/menu'
+import Menu from '../src/components/menu/Menu'
 
 interface NaturalImageProps {
   src: string
   height: number
 }
-const NaturalImage = ({ src, height }: NaturalImageProps) => {
-  const [ratio, setRatio] = useState(16 / 9) // default to 16:9
 
+const NaturalImage = ({ src, height }: NaturalImageProps) => {
+  const [ratio, setRatio] = useState(16 / 9)
   return (
-    <Image
-      src={src}
-      alt=""
-      width={height / ratio}
-      height={height}
-      layout="fixed" // you can use "responsive", "fill" or the default "intrinsic"
-      onLoadingComplete={({ naturalWidth, naturalHeight }) => {
-        if (naturalHeight > 0 && naturalWidth > 0) setRatio(naturalHeight / naturalWidth)
-      }}
-    />
+    <div style={{ height: height, position: 'relative' }}>
+      <Image
+        src={src}
+        alt=""
+        fill
+        sizes="(max-width: 768px) 100vw, 50vw"
+        style={{ 
+          objectFit: 'contain',
+          width: '100%',
+          height: '100%'
+        }}
+      />
+    </div>
   )
 }
 
@@ -101,15 +104,15 @@ const Home = () => {
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
-      <div style={{ height: '100vh', maxHeight: '100vh', overflow: 'hidden' }}>
+      <div style={{ height: '100vh', maxHeight: '100vh', backgroundColor: 'blue'}}>
         <main>
           <div className="tile">
             <div className="tile is-vertical is-12">
               <div className="editor-wrapper" style={{ height: editorHeight }}>
                 <Editor onWordCountChange={onWordCountChange} editorHeight={editorHeight} />
-                <a>
+                <div className="progress-wrapper" onClick={() => setIsGameHidden((was) => !was)}>
                   {!currentQuestWon && (
-                    <div className="progress-wrapper" onClick={() => setIsGameHidden((was) => !was)}>
+                    <div>
                       <progress className="progress is-info is-small" value={progress % 100} max="100">
                         {progress}
                       </progress>
@@ -119,7 +122,7 @@ const Home = () => {
                     </div>
                   )}
                   {currentQuestWon && (
-                    <div className="progress-wrapper" onClick={() => setIsGameHidden((was) => !was)}>
+                    <div>
                       <progress className="progress is-success is-small" value={100} max="100">
                         {progress}
                       </progress>
@@ -128,30 +131,36 @@ const Home = () => {
                       </p>
                     </div>
                   )}
-                </a>
+                </div>
               </div>
-              <div className="tile is-parent" style={{ display: isGameHidden ? 'none' : 'flex', margin: 10}} ref={ref}>
-                <Link href="/quests/questPicker">
-                  <a>
-                    <NaturalImage src={currentQuest?.poster} height={questBarHeight} />
-                  </a>
+              <div 
+                className="tile is-parent" 
+                style={{ 
+                  display: isGameHidden ? 'none' : 'flex', 
+                  margin: 10,
+                  height: 200
+                }} 
+                ref={ref}
+              >
+                <Link href="/quests/questPicker" className="quest-link" style={{ height: '100%', flex: 1 }}>
+                  <NaturalImage src={currentQuest?.poster} height={200} />
                 </Link>
-                <div style={{ maxHeight: '100%', position: 'relative', marginLeft: 10 }}>
-                  <figure className="image">
-                    <NaturalImage src={backgroundPath} height={questBarHeight} />
+                <div style={{ flex: 1, position: 'relative', marginLeft: 10 }}>
+                  <figure className="image" style={{ height: '100%' }}>
+                    <NaturalImage src={backgroundPath} height={200} />
                   </figure>
                   <div
                     style={{
-                      maxHeight: currentQuestWon ? '100%' : `${progress % 100}%`,
-                      // overflow: 'hidden',
+                      height: currentQuestWon ? '100%' : `${progress % 100}%`,
                       position: 'absolute',
                       left: 0,
                       top: 0,
-                      borderBottom: '1px solid #777',
+                      right: 0,
+                      overflow: 'hidden'
                     }}
                   >
-                    <figure className="image">
-                      <NaturalImage src={path} height={questBarHeight} />
+                    <figure className="image" style={{ height: '100%' }}>
+                      <NaturalImage src={path} height={200} />
                     </figure>
                   </div>
                 </div>

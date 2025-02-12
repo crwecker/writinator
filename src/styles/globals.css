@@ -68,7 +68,6 @@ body {
 
 .editor-paragraph {
   max-width: 1200px;
-  height: 100%;
   overflow: scroll;
   padding: 16px;
 }
