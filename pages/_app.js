@@ -1,4 +1,4 @@
-import "./styles/globals.css";
+import "../src/styles/globals.css";
 import { AppWrapper } from "../src/state";
 
 function Application({ Component, pageProps }) {
