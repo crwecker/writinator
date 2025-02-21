@@ -1,52 +1,95 @@
 export const useDrag = () => {
+  let currentContainer = null;
+  let draggedElement = null;
+  let orderChangeCallback = null;
 
-  const registerDraggables = (draggables) => {
+  const registerDraggables = (draggables, onOrderChange) => {
+    orderChangeCallback = onOrderChange;
     draggables?.forEach((draggable) => {
-      draggable.addEventListener("dragstart", () => {
-        draggable.classList.add("dragging");
+      draggable.addEventListener("dragstart", (e) => {
+        // Get the closest draggable parent element (in case we clicked a child element)
+        draggedElement = e.target.closest('.draggable');
+        if (draggedElement) {
+          draggedElement.classList.add("dragging");
+        }
       });
+
       draggable.addEventListener("dragend", () => {
-        draggable.classList.remove("dragging");
+        if (!draggedElement) return;
+        draggedElement.classList.remove("dragging");
+        
+        if (currentContainer) {
+          const newOrder = [...currentContainer.children].map(
+            el => parseInt(el.getAttribute('data-index'))
+          ).filter(index => !isNaN(index));
+          
+          if (newOrder.length > 0) {
+            orderChangeCallback?.(newOrder);
+          }
+        }
+        draggedElement = null;
+        currentContainer = null;
       });
     });
   }
 
-  function getDragAfterElement(container, y, className) {
-    const draggableElements = [
-      ...container.querySelectorAll(`.${className}:not(.dragging)`),
-    ];
+  const setupDraggable = (containerRefs, type, dragType, onOrderChange) => {
+    containerRefs?.forEach((containerRef) => {
+      const container = containerRef?.current ? containerRef.current : containerRef;
+      const chapterList = container.querySelector('.chapter-list');
+      
+      if (!chapterList) return;
 
-    return draggableElements.reduce(
-      (closest, child) => {
-        const box = child.getBoundingClientRect();
-        const offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closest.offset) {
-          return { offset: offset, element: child };
-        } else {
-          return closest;
-        }
-      },
-      { offset: Number.NEGATIVE_INFINITY }
-    ).element;
-  }
+      let lastY = 0;
+      let rafId = null;
 
-  const setupDraggable = (containerType, type, dragType) => {
-    containerType?.forEach((container) => {
-      const containerObj = container?.current ? container.current : container;
-      containerObj.addEventListener("dragover", (e) => {
+      const handleDragOver = (e) => {
+        if (!draggedElement || rafId) return;
+
+        rafId = requestAnimationFrame(() => {
+          const y = e.clientY;
+          currentContainer = chapterList;
+
+          const draggableElements = [...chapterList.children].filter(
+            child => child !== draggedElement && child.classList.contains('draggable')
+          );
+
+          const afterElement = draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            
+            if (offset < 0 && offset > closest.offset) {
+              return { offset, element: child };
+            }
+            return closest;
+          }, { offset: Number.NEGATIVE_INFINITY }).element;
+
+          if (afterElement) {
+            if (afterElement.nextSibling !== draggedElement) {
+              chapterList.insertBefore(draggedElement, afterElement);
+            }
+          } else {
+            chapterList.appendChild(draggedElement);
+          }
+          
+          rafId = null;
+        });
+      };
+
+      chapterList.addEventListener("dragover", (e) => {
         e.preventDefault();
+        handleDragOver(e);
+      });
 
-        const afterElement = getDragAfterElement(containerObj, e.clientY, type);
-        const draggable = containerObj.querySelector(`.${dragType}`);
-        if (afterElement == null) {
-          containerObj.appendChild(draggable);
-          // TODO: rewrite order and save to localforage
-        } else {
-          containerObj.insertBefore(draggable, afterElement);
-          // TODO: rewrite order and save to localforage
+      chapterList.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
         }
       });
     });
   };
-  return {registerDraggables, setupDraggable}
+
+  return { registerDraggables, setupDraggable };
 }

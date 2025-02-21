@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $getRoot, $createParagraphNode } from "lexical";
-import localforage from "localforage";
-import Menu from "../../menu/Menu";
+import { useEffect, useState } from 'react'
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
+import { $getRoot, $createParagraphNode } from 'lexical'
+import localforage from 'localforage'
+import Menu from '../../menu/Menu'
 
 export function LocalForagePlugin({ editorStateData }) {
-  const [isHidden, setIsHidden] = useState(false)
   const [currentChapter, setCurrentChapter] = useState('Chapter 1')
   const [currentBook, setCurrentBook] = useState('')
   const [editor] = useLexicalComposerContext()
@@ -16,7 +15,7 @@ export function LocalForagePlugin({ editorStateData }) {
     try {
       const storageKey = getStorageKey(bookTitle, chapterName)
       const editorStateJSON: string = await localforage.getItem(storageKey)
-      
+
       // Always start with a clean slate
       editor.update(() => {
         const root = $getRoot()
@@ -41,7 +40,7 @@ export function LocalForagePlugin({ editorStateData }) {
       })
     }
   }
-  
+
   const saveEditorState = () => {
     try {
       const state = editor.getEditorState()
@@ -56,93 +55,85 @@ export function LocalForagePlugin({ editorStateData }) {
   }
 
   const saveToDisk = async () => {
-    const keys = await localforage.keys();
-    const chapterKeys = keys.filter(key => key.startsWith(currentBook + ':'));
-    
-    const chapters = {};
+    const keys = await localforage.keys()
+    const chapterKeys = keys.filter((key) => key.startsWith(currentBook + ':'))
+
+    const chapters = {}
     for (const key of chapterKeys) {
       const chapterName = key.split(':')[1]
-      chapters[chapterName] = await localforage.getItem(key);
+      chapters[chapterName] = await localforage.getItem(key)
     }
-    
-    const blob = new Blob([JSON.stringify(chapters, null, 2)], { type: 'application/json' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${currentBook}.json`;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+
+    const blob = new Blob([JSON.stringify(chapters, null, 2)], { type: 'application/json' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${currentBook}.json`
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
   }
 
   const loadFromDisk = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'application/json';
-    
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json'
+
     input.onchange = async (e: Event) => {
-      const target = e.target as HTMLInputElement;
-      const file = target.files?.[0];
-      if (!file) return;
-      
+      const target = e.target as HTMLInputElement
+      const file = target.files?.[0]
+      if (!file) return
+
       try {
-        const text = await file.text();
-        const chapters = JSON.parse(text);
-        
+        const text = await file.text()
+        const chapters = JSON.parse(text)
+
         for (const [chapterName, content] of Object.entries(chapters)) {
           const storageKey = getStorageKey(currentBook, chapterName)
-          await localforage.setItem(storageKey, content);
+          await localforage.setItem(storageKey, content)
         }
-        
-        loadEditorState(currentChapter, currentBook);
+
+        loadEditorState(currentChapter, currentBook)
       } catch (err) {
-        console.error('Failed to load chapters:', err);
+        console.error('Failed to load chapters:', err)
       }
-    };
-    
-    input.click();
+    }
+
+    input.click()
   }
 
   useEffect(() => {
-    loadEditorState(currentChapter, currentBook) 
+    loadEditorState(currentChapter, currentBook)
   }, [currentChapter, currentBook])
 
   useEffect(() => {
     saveEditorState()
   }, [editorStateData])
-  
+
   const clickCurrentChapter = (chapterName, bookTitle) => {
     setCurrentBook(bookTitle)
     setCurrentChapter(chapterName)
   }
 
   return (
-    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, display: 'flex', flexDirection: 'row', zIndex: 10 }}>
-      <div 
-        className="button" 
-        style={{ 
-          padding: 1, 
-          backgroundColor: '#333', 
-          border: 'none', 
-          margin: 0, 
-          width: '20px',
-          cursor: 'pointer'
-        }} 
-        onClick={() => setIsHidden(was => !was)}
-      />
-      <div style={{ 
-        flexDirection: 'column', 
-        minWidth: 150, 
-        padding: 16, 
-        display: isHidden ? 'none' : 'flex',
-        backgroundColor: '#1a1a1a'
-      }}>
-        <button className="menu-button" onClick={saveToDisk}>Save to Disk</button>
-        <button className="menu-button" onClick={loadFromDisk}>Load from Disk</button>
-        <div className="menu-divider" />
-        <Menu clickCurrentChapter={clickCurrentChapter} />
-      </div>
+    <div
+      style={{
+        flexDirection: 'column',
+        minWidth: 150,
+        padding: 16,
+        display: 'flex',
+        backgroundColor: '#1a1a1a',
+      }}
+    >
+      <button className="menu-button" onClick={saveToDisk}>
+        Save to Disk
+      </button>
+      <button className="menu-button" onClick={loadFromDisk}>
+        Load from Disk
+      </button>
+      <div className="menu-divider" />
+      <Menu clickCurrentChapter={clickCurrentChapter} />
     </div>
   )
-} 
+}

@@ -10,7 +10,6 @@ export const editorStyles = `
 
 .editor-input {
   flex: 1;
-  resize: none;
   font-size: 15px;
   position: relative;
   tab-size: 1;
@@ -20,7 +19,6 @@ export const editorStyles = `
   overflow-y: auto;
   caret-color: #444;
   max-width: 1200px;
-  margin: 0 auto;
   background: #222;
   color: #fff;
 }
@@ -29,6 +27,10 @@ export const editorStyles = `
   margin: 0;
   padding: 0;
   min-height: 1.2em;
+}
+
+.editor-inner {
+  flex: 1;
 }
 
 .editor-paragraph {

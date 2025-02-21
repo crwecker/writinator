@@ -1,9 +1,9 @@
 export const menuStyles = `
 .side-menu {
+  flex: 1;
   background: #2a2a2a;
   color: #fff;
   padding: 16px;
-  min-width: 200px;
   border-right: 1px solid #3a3a3a;
 }
 
@@ -92,11 +92,13 @@ export const menuStyles = `
 }
 
 .chapter-link:hover {
-  background: #3a3a3a;
+  background: #444;
+  color: #fff;
 }
 
 .chapter-link.active {
-  background: #444;
+  background: #4a4a4a;
+  color: #fff;
   font-weight: 500;
 }
 
