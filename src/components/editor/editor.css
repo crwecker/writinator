@@ -1,0 +1,92 @@
+/* CodeMirror 6 editor styles */
+
+.cm-editor {
+  height: 100%;
+  font-size: inherit;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-scroller {
+  overflow: auto;
+  font-family: inherit;
+  line-height: 1.75;
+}
+
+.cm-content {
+  padding: 2rem;
+  caret-color: var(--color-opal-100);
+  max-width: none;
+}
+
+.cm-line {
+  padding: 0;
+}
+
+/* Placeholder */
+.cm-placeholder {
+  color: var(--color-gray-600);
+}
+
+/* Selection */
+.cm-editor .cm-selectionBackground {
+  background: rgba(100, 153, 255, 0.25) !important;
+}
+
+.cm-focused .cm-selectionBackground {
+  background: rgba(100, 153, 255, 0.35) !important;
+}
+
+/* Cursor */
+.cm-cursor {
+  border-left-color: var(--color-opal-100);
+}
+
+/* VIM normal-mode fat cursor */
+.cm-fat-cursor .cm-cursor {
+  background-color: rgba(255, 255, 255, 0.6);
+  border: none;
+  width: 0.5em !important;
+}
+
+/* Active line */
+.cm-activeLine {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Gutters (if enabled) */
+.cm-gutters {
+  background-color: var(--color-bg-darker);
+  border-right: 1px solid var(--color-gray-700);
+  color: var(--color-gray-600);
+}
+
+/* Panels (VIM command line, search, etc.) */
+.cm-panels {
+  background-color: var(--color-bg-dark);
+  color: var(--color-gray-200);
+  border-top: 1px solid var(--color-gray-700);
+}
+
+.cm-panels input {
+  background-color: var(--color-bg-darker);
+  color: var(--color-gray-200);
+  border: 1px solid var(--color-gray-700);
+  border-radius: 0.25rem;
+  padding: 0.15em 0.3em;
+}
+
+/* Font family classes */
+.font-editor-serif {
+  font-family: 'Lora', serif;
+}
+
+.font-editor-sans {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.font-editor-mono {
+  font-family: 'JetBrains Mono', monospace;
+}

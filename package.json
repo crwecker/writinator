@@ -1,36 +1,45 @@
 {
   "name": "writinator",
-  "version": "0.1.0",
   "private": true,
-  "license": "MIT",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@lexical/react": "^0.4.0",
-    "bulma": "^0.9.4",
-    "gatsby": "5.5.0",
-    "gatsby-plugin-gatsby-cloud": "5.5.0",
-    "lexical": "^0.4.0",
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.40.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@replit/codemirror-vim": "^6.3.0",
+    "@tailwindcss/vite": "^4.2.2",
+    "codemirror": "^6.0.2",
     "localforage": "^1.10.0",
-    "next": "^14.1.0",
-    "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwindcss": "^4.2.2",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@angel-studios/prettier-config": "^1.0.8",
-    "@types/node": "^18.7.14",
-    "@types/react": "^18.0.18",
-    "eslint": "8.23.0",
-    "eslint-config-next": "^14.1.0",
-    "typescript": "^4.8.2"
-  },
-  "prettier": "@angel-studios/prettier-config",
-  "eslintConfig": {
-    "extends": "next/core-web-vitals"
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "puppeteer": "^24.40.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vite": "^8.0.1"
   }
 }
