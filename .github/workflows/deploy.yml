@@ -25,13 +25,13 @@ jobs:
 
       - name: Create .nojekyll
         run: |
-          mkdir -p out
-          touch out/.nojekyll
-          cp CNAME out/
+          mkdir -p dist
+          touch dist/.nojekyll
+          cp CNAME dist/
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./out
+          publish_dir: ./dist
           force_orphan: true
