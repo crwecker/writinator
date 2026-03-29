@@ -159,6 +159,24 @@ function kjExitInsertMode(): Extension {
   })
 }
 
+// Typewriter mode: scrolls cursor line to vertical center on every update
+function typewriterScroll(): Extension {
+  return EditorView.updateListener.of((update) => {
+    if (update.selectionSet || update.docChanged) {
+      const view = update.view
+      const cursor = view.state.selection.main.head
+      const coords = view.coordsAtPos(cursor)
+      if (!coords) return
+      const editorRect = view.dom.getBoundingClientRect()
+      const centerY = editorRect.top + editorRect.height / 2
+      const offset = coords.top - centerY
+      if (Math.abs(offset) > 10) {
+        view.scrollDOM.scrollBy({ top: offset, behavior: 'instant' })
+      }
+    }
+  })
+}
+
 interface EditorProps {
   onWordCountChange?: (count: number) => void
   onVimModeChange?: (mode: VimMode) => void
@@ -171,11 +189,14 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const fontFamily = useEditorStore((s) => s.fontFamily)
   const fontSize = useEditorStore((s) => s.fontSize)
 
+  const distractionFree = useEditorStore((s) => s.distractionFree)
+
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const loadedChapterRef = useRef<string | null>(null)
   const fontCompartmentRef = useRef<Compartment | null>(null)
   const fontSizeCompartmentRef = useRef<Compartment | null>(null)
+  const typewriterCompartmentRef = useRef<Compartment | null>(null)
 
   // Stable callback refs
   const callbacksRef = useRef({ onWordCountChange, onVimModeChange, onEditorView })
@@ -213,8 +234,10 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
 
     const fontComp = new Compartment()
     const fontSizeComp = new Compartment()
+    const typewriterComp = new Compartment()
     fontCompartmentRef.current = fontComp
     fontSizeCompartmentRef.current = fontSizeComp
+    typewriterCompartmentRef.current = typewriterComp
 
     const updateContent = useDocumentStore.getState().updateChapterContent
 
@@ -232,10 +255,11 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         placeholder('Start writing...'),
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
+        typewriterComp.of(useEditorStore.getState().distractionFree ? typewriterScroll() : []),
         EditorView.theme({
           '&': { height: '100%', backgroundColor: 'transparent' },
           '.cm-scroller': { overflow: 'auto', padding: '2rem', lineHeight: '1.75' },
-          '.cm-content': { maxWidth: 'none', caretColor: 'var(--color-opal-100, #6ee7b7)' },
+          '.cm-content': { maxWidth: '800px', margin: '0 auto', caretColor: 'var(--color-opal-100, #6ee7b7)' },
           '.cm-gutters': { display: 'none' },
           '.cm-md-code': {
             backgroundColor: 'rgba(255,255,255,0.08)',
@@ -292,6 +316,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
       viewRef.current = null
       fontCompartmentRef.current = null
       fontSizeCompartmentRef.current = null
+      typewriterCompartmentRef.current = null
       callbacksRef.current.onEditorView?.(null)
       view.destroy()
     }
@@ -334,6 +359,16 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (!view || !comp) return
     view.dispatch({ effects: comp.reconfigure(makeFontSizeTheme(fontSize)) })
   }, [fontSize])
+
+  // Toggle typewriter mode
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = typewriterCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({ effects: comp.reconfigure(distractionFree ? typewriterScroll() : []) })
+    // Toggle CSS class for line fading
+    view.dom.classList.toggle('typewriter-mode', distractionFree)
+  }, [distractionFree])
 
   const hasBook = useDocumentStore((s) => !!s.book)
   const hasChapter = useDocumentStore((s) => !!s.activeChapterId)
