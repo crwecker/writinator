@@ -96,6 +96,16 @@ function markdownDecorations(view: EditorView): DecorationSet {
         deco: Decoration.mark({ class: 'cm-md-code' }),
       })
     }
+
+    // Inline <span style="...">...</span> for font overrides
+    const spanRegex = /<span\s+style="([^"]*)">(.*?)<\/span>/g
+    while ((match = spanRegex.exec(text)) !== null) {
+      decorations.push({
+        from: line.from + match.index,
+        to: line.from + match.index + match[0].length,
+        deco: Decoration.mark({ attributes: { style: match[1] } }),
+      })
+    }
   }
 
   decorations.sort((a, b) => a.from - b.from || a.to - b.to)

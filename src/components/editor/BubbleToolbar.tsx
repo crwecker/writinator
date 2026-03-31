@@ -28,6 +28,12 @@ function ToolbarButton({
   )
 }
 
+const FONT_FAMILIES: Record<string, string> = {
+  serif: "'Lora', serif",
+  sans: 'system-ui, -apple-system, sans-serif',
+  mono: "'JetBrains Mono', monospace",
+}
+
 function wrapSelection(view: EditorView, before: string, after: string) {
   const { from, to } = view.state.selection.main
   if (from === to) return
@@ -36,6 +42,47 @@ function wrapSelection(view: EditorView, before: string, after: string) {
     changes: { from, to, insert: `${before}${selected}${after}` },
     selection: { anchor: from + before.length, head: to + before.length },
   })
+  view.focus()
+}
+
+function wrapWithSpanStyle(view: EditorView, style: string) {
+  const { from, to } = view.state.selection.main
+  if (from === to) return
+  const selected = view.state.sliceDoc(from, to)
+
+  // If already wrapped in a span, merge styles
+  const spanMatch = selected.match(/^<span\s+style="([^"]*)">(.*)<\/span>$/)
+  if (spanMatch) {
+    const existingStyles = spanMatch[1]
+    // Parse existing and new styles, new wins on conflicts
+    const existing = Object.fromEntries(
+      existingStyles.split(';').filter(Boolean).map((s) => {
+        const [k, ...v] = s.split(':')
+        return [k.trim(), v.join(':').trim()]
+      })
+    )
+    const incoming = Object.fromEntries(
+      style.split(';').filter(Boolean).map((s) => {
+        const [k, ...v] = s.split(':')
+        return [k.trim(), v.join(':').trim()]
+      })
+    )
+    const merged = { ...existing, ...incoming }
+    const mergedStyle = Object.entries(merged).map(([k, v]) => `${k}: ${v}`).join('; ')
+    const inner = spanMatch[2]
+    const replacement = `<span style="${mergedStyle}">${inner}</span>`
+    view.dispatch({
+      changes: { from, to, insert: replacement },
+      selection: { anchor: from, head: from + replacement.length },
+    })
+  } else {
+    const before = `<span style="${style}">`
+    const after = '</span>'
+    view.dispatch({
+      changes: { from, to, insert: `${before}${selected}${after}` },
+      selection: { anchor: from + before.length, head: to + before.length },
+    })
+  }
   view.focus()
 }
 
@@ -91,7 +138,7 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
       return
     }
 
-    const toolbarWidth = 280 // approximate toolbar width
+    const toolbarWidth = 420 // approximate toolbar width
     const newTop = Math.max(4, start.top - 44)
     const rawLeft = (start.left + end.left) / 2
     // Clamp so toolbar stays on screen (half toolbar width as margin from edges)
@@ -188,6 +235,43 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
       >
         H3
       </ToolbarButton>
+
+      <div className="mx-1 h-5 w-px bg-gray-700" />
+
+      {/* Font family */}
+      <select
+        value=""
+        onChange={(e) => {
+          if (!e.target.value) return
+          const css = FONT_FAMILIES[e.target.value]
+          if (css) wrapWithSpanStyle(editorView, `font-family: ${css}`)
+          e.target.value = ''
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="bg-transparent text-gray-300 hover:text-gray-100 text-xs outline-none cursor-pointer px-1 py-1"
+      >
+        <option value="" disabled>Font</option>
+        <option value="serif">Serif</option>
+        <option value="sans">Sans</option>
+        <option value="mono">Mono</option>
+      </select>
+
+      {/* Font size */}
+      <select
+        value=""
+        onChange={(e) => {
+          if (!e.target.value) return
+          wrapWithSpanStyle(editorView, `font-size: ${e.target.value}px`)
+          e.target.value = ''
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="bg-transparent text-gray-300 hover:text-gray-100 text-xs outline-none cursor-pointer px-1 py-1"
+      >
+        <option value="" disabled>Size</option>
+        {[12, 14, 16, 18, 20, 24, 28, 32].map((s) => (
+          <option key={s} value={s}>{s}px</option>
+        ))}
+      </select>
     </div>
   )
 }
