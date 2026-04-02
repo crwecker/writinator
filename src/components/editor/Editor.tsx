@@ -1,12 +1,14 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, keymap, placeholder, drawSelection, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view'
-import { EditorState, Compartment, type Extension } from '@codemirror/state'
+import { EditorState, Compartment, StateField, StateEffect, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { vim, getCM as getVimCM, Vim } from '@replit/codemirror-vim'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useEditorStore } from '../../stores/editorStore'
+import { htmlToMarkdownWithStyles } from '../../lib/richPaste'
+import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
 import './editor.css'
 
@@ -16,7 +18,7 @@ const FONT_FAMILY_MAP: Record<string, string> = {
   mono: "'JetBrains Mono', monospace",
 }
 
-export function countWords(text: string): number {
+function countWords(text: string): number {
   const trimmed = text.trim()
   if (!trimmed) return 0
   return trimmed.split(/\s+/).length
@@ -35,66 +37,329 @@ function makeFontSizeTheme(fontSize: number): Extension {
   })
 }
 
+function makeDocStylesTheme(styles: DocumentStyles | undefined): Extension {
+  if (!styles) return []
+  const rules: Record<string, Record<string, string>> = {}
+  if (styles.body) {
+    const body: Record<string, string> = {}
+    if (styles.body.fontFamily) body.fontFamily = styles.body.fontFamily
+    if (styles.body.fontSize) body.fontSize = `${styles.body.fontSize}px`
+    if (styles.body.lineHeight) body.lineHeight = String(styles.body.lineHeight)
+    if (styles.body.color) body.color = styles.body.color
+    if (styles.body.letterSpacing) body.letterSpacing = styles.body.letterSpacing
+    if (Object.keys(body).length) rules['.cm-content'] = body
+  }
+  return Object.keys(rules).length ? EditorView.theme(rules) : []
+}
+
+// StateEffect and StateField for render mode so the decoration plugin can read it synchronously
+const setRenderModeEffect = StateEffect.define<'source' | 'rendered'>()
+const renderModeField = StateField.define<'source' | 'rendered'>({
+  create: () => useEditorStore.getState().renderMode,
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setRenderModeEffect)) return e.value
+    }
+    return value
+  },
+})
+
 // Markdown decoration plugin
 function markdownDecorations(view: EditorView): DecorationSet {
   const decorations: { from: number; to: number; deco: Decoration }[] = []
   const doc = view.state.doc
+  const mode = view.state.field(renderModeField)
+  const cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number
+  const isRendered = mode === 'rendered'
+
+  // Cache document styles for heading overrides
+  const docStyles = useDocumentStore.getState().book?.documentStyles
 
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i)
     const text = line.text
+    const isCursorLine = i === cursorLine
 
+    // Headings
     const headingMatch = text.match(/^(#{1,3})\s/)
     if (headingMatch) {
       const level = headingMatch[1].length
-      const sizes = ['1.8em', '1.4em', '1.15em']
-      const weights = ['700', '600', '600']
+      const defaultSizes = ['1.8em', '1.4em', '1.15em']
+      const defaultWeights = ['700', '600', '600']
+      const styleKey = `h${level}` as 'h1' | 'h2' | 'h3'
+      const hs = docStyles?.[styleKey]
+
+      const fontSize = hs?.fontSize ? `${hs.fontSize}px` : defaultSizes[level - 1]
+      const fontWeight = hs?.fontWeight ?? defaultWeights[level - 1]
+      const extras: string[] = []
+      if (hs?.fontFamily) extras.push(`font-family: ${hs.fontFamily}`)
+      if (hs?.color) extras.push(`color: ${hs.color}`)
+      if (hs?.lineHeight) extras.push(`line-height: ${hs.lineHeight}`)
+
+      const style = `font-size: ${fontSize}; font-weight: ${fontWeight}; line-height: 1.3;${extras.length ? ' ' + extras.join('; ') + ';' : ''}`
+
       decorations.push({
         from: line.from,
         to: line.from,
-        deco: Decoration.line({
-          attributes: {
-            style: `font-size: ${sizes[level - 1]}; font-weight: ${weights[level - 1]}; line-height: 1.3;`,
-          },
-        }),
+        deco: Decoration.line({ attributes: { style } }),
       })
+
+      // In rendered mode on non-cursor lines, hide the "# " prefix
+      if (isRendered && !isCursorLine) {
+        const prefixLen = headingMatch[0].length // e.g. "## " = 3
+        decorations.push({
+          from: line.from,
+          to: line.from + prefixLen,
+          deco: Decoration.replace({}),
+        })
+      }
     }
 
-    const boldRegex = /\*\*(.+?)\*\*/g
+    // Bold+Italic: ***text*** (must come before bold to avoid partial matches)
+    const boldItalicRegex = /\*\*\*(.+?)\*\*\*/g
     let match
-    while ((match = boldRegex.exec(text)) !== null) {
-      decorations.push({
-        from: line.from + match.index,
-        to: line.from + match.index + match[0].length,
-        deco: Decoration.mark({ attributes: { style: 'font-weight: 700;' } }),
-      })
+    while ((match = boldItalicRegex.exec(text)) !== null) {
+      const matchStart = line.from + match.index
+      const matchEnd = matchStart + match[0].length
+      if (isRendered && !isCursorLine) {
+        decorations.push({
+          from: matchStart,
+          to: matchStart + 3,
+          deco: Decoration.replace({}),
+        })
+        decorations.push({
+          from: matchStart + 3,
+          to: matchEnd - 3,
+          deco: Decoration.mark({ attributes: { style: 'font-weight: 700; font-style: italic;' } }),
+        })
+        decorations.push({
+          from: matchEnd - 3,
+          to: matchEnd,
+          deco: Decoration.replace({}),
+        })
+      } else {
+        decorations.push({
+          from: matchStart,
+          to: matchEnd,
+          deco: Decoration.mark({ attributes: { style: 'font-weight: 700; font-style: italic;' } }),
+        })
+      }
     }
 
+    // Bold: **text** (exactly 2 asterisks, not 3+)
+    const boldRegex = /(?<!\*)\*\*(?!\*)(.+?)(?<!\*)\*\*(?!\*)/g
+    while ((match = boldRegex.exec(text)) !== null) {
+      const matchStart = line.from + match.index
+      const matchEnd = matchStart + match[0].length
+      if (isRendered && !isCursorLine) {
+        // Replace opening **
+        decorations.push({
+          from: matchStart,
+          to: matchStart + 2,
+          deco: Decoration.replace({}),
+        })
+        // Mark inner content as bold
+        decorations.push({
+          from: matchStart + 2,
+          to: matchEnd - 2,
+          deco: Decoration.mark({ attributes: { style: 'font-weight: 700;' } }),
+        })
+        // Replace closing **
+        decorations.push({
+          from: matchEnd - 2,
+          to: matchEnd,
+          deco: Decoration.replace({}),
+        })
+      } else {
+        // Source mode: mark the whole match
+        decorations.push({
+          from: matchStart,
+          to: matchEnd,
+          deco: Decoration.mark({ attributes: { style: 'font-weight: 700;' } }),
+        })
+      }
+    }
+
+    // Italic: *text* (not **)
     const italicRegex = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g
     while ((match = italicRegex.exec(text)) !== null) {
-      decorations.push({
-        from: line.from + match.index,
-        to: line.from + match.index + match[0].length,
-        deco: Decoration.mark({ attributes: { style: 'font-style: italic;' } }),
-      })
+      const matchStart = line.from + match.index
+      const matchEnd = matchStart + match[0].length
+      if (isRendered && !isCursorLine) {
+        decorations.push({
+          from: matchStart,
+          to: matchStart + 1,
+          deco: Decoration.replace({}),
+        })
+        decorations.push({
+          from: matchStart + 1,
+          to: matchEnd - 1,
+          deco: Decoration.mark({ attributes: { style: 'font-style: italic;' } }),
+        })
+        decorations.push({
+          from: matchEnd - 1,
+          to: matchEnd,
+          deco: Decoration.replace({}),
+        })
+      } else {
+        decorations.push({
+          from: matchStart,
+          to: matchEnd,
+          deco: Decoration.mark({ attributes: { style: 'font-style: italic;' } }),
+        })
+      }
     }
 
+    // Strikethrough: ~~text~~
     const strikeRegex = /~~(.+?)~~/g
     while ((match = strikeRegex.exec(text)) !== null) {
-      decorations.push({
-        from: line.from + match.index,
-        to: line.from + match.index + match[0].length,
-        deco: Decoration.mark({ attributes: { style: 'text-decoration: line-through;' } }),
-      })
+      const matchStart = line.from + match.index
+      const matchEnd = matchStart + match[0].length
+      if (isRendered && !isCursorLine) {
+        decorations.push({
+          from: matchStart,
+          to: matchStart + 2,
+          deco: Decoration.replace({}),
+        })
+        decorations.push({
+          from: matchStart + 2,
+          to: matchEnd - 2,
+          deco: Decoration.mark({ attributes: { style: 'text-decoration: line-through;' } }),
+        })
+        decorations.push({
+          from: matchEnd - 2,
+          to: matchEnd,
+          deco: Decoration.replace({}),
+        })
+      } else {
+        decorations.push({
+          from: matchStart,
+          to: matchEnd,
+          deco: Decoration.mark({ attributes: { style: 'text-decoration: line-through;' } }),
+        })
+      }
     }
 
+    // Inline code: `text`
     const codeRegex = /`([^`]+)`/g
     while ((match = codeRegex.exec(text)) !== null) {
-      decorations.push({
-        from: line.from + match.index,
-        to: line.from + match.index + match[0].length,
-        deco: Decoration.mark({ class: 'cm-md-code' }),
-      })
+      const matchStart = line.from + match.index
+      const matchEnd = matchStart + match[0].length
+      if (isRendered && !isCursorLine) {
+        decorations.push({
+          from: matchStart,
+          to: matchStart + 1,
+          deco: Decoration.replace({}),
+        })
+        decorations.push({
+          from: matchStart + 1,
+          to: matchEnd - 1,
+          deco: Decoration.mark({ class: 'cm-md-code' }),
+        })
+        decorations.push({
+          from: matchEnd - 1,
+          to: matchEnd,
+          deco: Decoration.replace({}),
+        })
+      } else {
+        decorations.push({
+          from: matchStart,
+          to: matchEnd,
+          deco: Decoration.mark({ class: 'cm-md-code' }),
+        })
+      }
+    }
+
+    // Inline <span style="...">...</span> for font overrides
+    const spanRegex = /<span\s+style="([^"]*)">(.*?)<\/span>/g
+    while ((match = spanRegex.exec(text)) !== null) {
+      const matchStart = line.from + match.index
+      const matchEnd = matchStart + match[0].length
+      // The opening tag: <span style="...">
+      const openTag = match[0].indexOf('>') + 1 // length of opening tag
+      const openTagEnd = matchStart + openTag
+      // The closing tag: </span>
+      const closeTagLen = '</span>'.length
+      const closeTagStart = matchEnd - closeTagLen
+
+      if (isRendered && !isCursorLine) {
+        // Replace opening <span style="...">
+        decorations.push({
+          from: matchStart,
+          to: openTagEnd,
+          deco: Decoration.replace({}),
+        })
+        // Mark inner content with the inline style
+        decorations.push({
+          from: openTagEnd,
+          to: closeTagStart,
+          deco: Decoration.mark({ attributes: { style: match[1] } }),
+        })
+        // Replace closing </span>
+        decorations.push({
+          from: closeTagStart,
+          to: matchEnd,
+          deco: Decoration.replace({}),
+        })
+      } else {
+        decorations.push({
+          from: matchStart,
+          to: matchEnd,
+          deco: Decoration.mark({ attributes: { style: match[1] } }),
+        })
+      }
+    }
+
+    // Named style spans: <span class="styleName">text</span>
+    const classSpanRegex = /<span\s+class="([^"]*)">(.*?)<\/span>/g
+    while ((match = classSpanRegex.exec(text)) !== null) {
+      const className = match[1]
+      const namedStyle = docStyles?.namedStyles?.[className]
+      if (!namedStyle) continue // unknown style, skip
+
+      const matchStart = line.from + match.index
+      const matchEnd = matchStart + match[0].length
+      const openTag = match[0].indexOf('>') + 1
+      const openTagEnd = matchStart + openTag
+      const closeTagLen = '</span>'.length
+      const closeTagStart = matchEnd - closeTagLen
+
+      // Convert NamedStyle to CSS string
+      const cssProps: string[] = []
+      if (namedStyle.fontFamily) cssProps.push(`font-family: ${namedStyle.fontFamily}`)
+      if (namedStyle.fontSize) cssProps.push(`font-size: ${namedStyle.fontSize}px`)
+      if (namedStyle.lineHeight) cssProps.push(`line-height: ${namedStyle.lineHeight}`)
+      if (namedStyle.color) cssProps.push(`color: ${namedStyle.color}`)
+      if (namedStyle.letterSpacing) cssProps.push(`letter-spacing: ${namedStyle.letterSpacing}`)
+      if (namedStyle.fontWeight) cssProps.push(`font-weight: ${namedStyle.fontWeight}`)
+      if (namedStyle.fontStyle) cssProps.push(`font-style: ${namedStyle.fontStyle}`)
+      if (namedStyle.textDecoration) cssProps.push(`text-decoration: ${namedStyle.textDecoration}`)
+      if (namedStyle.backgroundColor) cssProps.push(`background-color: ${namedStyle.backgroundColor}`)
+      const cssString = cssProps.join('; ') + ';'
+
+      if (isRendered && !isCursorLine) {
+        decorations.push({
+          from: matchStart,
+          to: openTagEnd,
+          deco: Decoration.replace({}),
+        })
+        decorations.push({
+          from: openTagEnd,
+          to: closeTagStart,
+          deco: Decoration.mark({ attributes: { style: cssString } }),
+        })
+        decorations.push({
+          from: closeTagStart,
+          to: matchEnd,
+          deco: Decoration.replace({}),
+        })
+      } else {
+        decorations.push({
+          from: matchStart,
+          to: matchEnd,
+          deco: Decoration.mark({ attributes: { style: cssString } }),
+        })
+      }
     }
   }
 
@@ -111,6 +376,12 @@ const markdownDecorationPlugin = ViewPlugin.fromClass(
     update(update: ViewUpdate) {
       if (update.docChanged || update.viewportChanged) {
         this.decorations = markdownDecorations(update.view)
+      } else if (update.view.state.field(renderModeField) === 'rendered' && update.selectionSet) {
+        const oldLine = update.startState.doc.lineAt(update.startState.selection.main.head).number
+        const newLine = update.state.doc.lineAt(update.state.selection.main.head).number
+        if (oldLine !== newLine) {
+          this.decorations = markdownDecorations(update.view)
+        }
       }
     }
   },
@@ -128,8 +399,9 @@ function kjExitInsertMode(): Extension {
       const cmVim = getVimCM(view)
       if (!cmVim) return false
 
-      const vimState = (cmVim as any).state?.vim
-      if (!vimState || vimState.mode !== 'insert') {
+      const vimState = (cmVim as unknown as Record<string, unknown>).state as Record<string, unknown> | undefined
+      const vimMode = vimState?.vim as Record<string, unknown> | undefined
+      if (!vimMode || vimMode.mode !== 'insert') {
         lastKey = ''
         return false
       }
@@ -159,6 +431,24 @@ function kjExitInsertMode(): Extension {
   })
 }
 
+// Typewriter mode: scrolls cursor line to vertical center on every update
+function typewriterScroll(): Extension {
+  return EditorView.updateListener.of((update) => {
+    if (update.selectionSet || update.docChanged) {
+      const view = update.view
+      const cursor = view.state.selection.main.head
+      const coords = view.coordsAtPos(cursor)
+      if (!coords) return
+      const editorRect = view.dom.getBoundingClientRect()
+      const centerY = editorRect.top + editorRect.height / 2
+      const offset = coords.top - centerY
+      if (Math.abs(offset) > 10) {
+        view.scrollDOM.scrollBy({ top: offset, behavior: 'instant' })
+      }
+    }
+  })
+}
+
 interface EditorProps {
   onWordCountChange?: (count: number) => void
   onVimModeChange?: (mode: VimMode) => void
@@ -170,16 +460,24 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const activeChapterId = useDocumentStore((s) => s.activeChapterId)
   const fontFamily = useEditorStore((s) => s.fontFamily)
   const fontSize = useEditorStore((s) => s.fontSize)
+  const renderMode = useEditorStore((s) => s.renderMode)
+  const documentStyles = useDocumentStore((s) => s.book?.documentStyles)
+
+  const distractionFree = useEditorStore((s) => s.distractionFree)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const loadedChapterRef = useRef<string | null>(null)
   const fontCompartmentRef = useRef<Compartment | null>(null)
   const fontSizeCompartmentRef = useRef<Compartment | null>(null)
+  const typewriterCompartmentRef = useRef<Compartment | null>(null)
+  const docStylesCompartmentRef = useRef<Compartment | null>(null)
 
   // Stable callback refs
   const callbacksRef = useRef({ onWordCountChange, onVimModeChange, onEditorView })
-  callbacksRef.current = { onWordCountChange, onVimModeChange, onEditorView }
+  useEffect(() => {
+    callbacksRef.current = { onWordCountChange, onVimModeChange, onEditorView }
+  })
 
   // VIM mode polling
   useEffect(() => {
@@ -189,12 +487,13 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
       if (!view) return
       const cmVim = getVimCM(view)
       if (!cmVim) return
-      const vimState = (cmVim as any).state?.vim
-      if (!vimState) return
+      const cmState = (cmVim as unknown as Record<string, unknown>).state as Record<string, unknown> | undefined
+      const vimMode = cmState?.vim as Record<string, unknown> | undefined
+      if (!vimMode) return
 
       let currentMode: VimMode = 'NORMAL'
-      if (vimState.mode === 'insert') currentMode = 'INSERT'
-      else if (vimState.mode === 'visual') currentMode = 'VISUAL'
+      if (vimMode.mode === 'insert') currentMode = 'INSERT'
+      else if (vimMode.mode === 'visual') currentMode = 'VISUAL'
 
       if (currentMode !== lastMode) {
         lastMode = currentMode
@@ -213,8 +512,12 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
 
     const fontComp = new Compartment()
     const fontSizeComp = new Compartment()
+    const typewriterComp = new Compartment()
+    const docStylesComp = new Compartment()
     fontCompartmentRef.current = fontComp
     fontSizeCompartmentRef.current = fontSizeComp
+    typewriterCompartmentRef.current = typewriterComp
+    docStylesCompartmentRef.current = docStylesComp
 
     const updateContent = useDocumentStore.getState().updateChapterContent
 
@@ -228,14 +531,17 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         keymap.of([...defaultKeymap, ...historyKeymap]),
         markdown(),
         oneDark,
+        renderModeField,
         markdownDecorationPlugin,
         placeholder('Start writing...'),
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
+        typewriterComp.of(useEditorStore.getState().distractionFree ? typewriterScroll() : []),
+        docStylesComp.of(makeDocStylesTheme(useDocumentStore.getState().book?.documentStyles)),
         EditorView.theme({
           '&': { height: '100%', backgroundColor: 'transparent' },
           '.cm-scroller': { overflow: 'auto', padding: '2rem', lineHeight: '1.75' },
-          '.cm-content': { maxWidth: 'none', caretColor: 'var(--color-opal-100, #6ee7b7)' },
+          '.cm-content': { maxWidth: '800px', margin: '0 auto', caretColor: 'var(--color-opal-100, #6ee7b7)' },
           '.cm-gutters': { display: 'none' },
           '.cm-md-code': {
             backgroundColor: 'rgba(255,255,255,0.08)',
@@ -259,6 +565,24 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
           '.cm-panels .cm-panel': { backgroundColor: '#1e1e2e' },
         }),
         EditorView.lineWrapping,
+        // Rich paste: convert HTML from clipboard to Markdown
+        EditorView.domEventHandlers({
+          paste(event, view) {
+            const html = event.clipboardData?.getData('text/html')
+            if (!html) return false // fall through to default plain text paste
+            event.preventDefault()
+            const { markdown: md, styles } = htmlToMarkdownWithStyles(html)
+            const { from, to } = view.state.selection.main
+            view.dispatch({
+              changes: { from, to, insert: md },
+              selection: { anchor: from + md.length },
+            })
+            if (styles) {
+              useDocumentStore.getState().updateDocumentStyles(styles)
+            }
+            return true
+          },
+        }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             const text = update.state.doc.toString()
@@ -292,10 +616,11 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
       viewRef.current = null
       fontCompartmentRef.current = null
       fontSizeCompartmentRef.current = null
+      typewriterCompartmentRef.current = null
+      docStylesCompartmentRef.current = null
       callbacksRef.current.onEditorView?.(null)
       view.destroy()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load chapter content when active chapter changes
@@ -334,6 +659,31 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (!view || !comp) return
     view.dispatch({ effects: comp.reconfigure(makeFontSizeTheme(fontSize)) })
   }, [fontSize])
+
+  // Sync render mode into CM6 state
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: setRenderModeEffect.of(renderMode) })
+  }, [renderMode])
+
+  // Sync document styles compartment
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = docStylesCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({ effects: comp.reconfigure(makeDocStylesTheme(documentStyles)) })
+  }, [documentStyles])
+
+  // Toggle typewriter mode
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = typewriterCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({ effects: comp.reconfigure(distractionFree ? typewriterScroll() : []) })
+    // Toggle CSS class for line fading
+    view.dom.classList.toggle('typewriter-mode', distractionFree)
+  }, [distractionFree])
 
   const hasBook = useDocumentStore((s) => !!s.book)
   const hasChapter = useDocumentStore((s) => !!s.activeChapterId)

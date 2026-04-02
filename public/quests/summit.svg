@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="400" fill="url(#sky)"/>
+  <polygon points="200,80 50,350 350,350" fill="#64748b"/>
+  <polygon points="200,80 140,180 260,180" fill="#e2e8f0" opacity="0.6"/>
+  <polygon points="0,350 120,200 240,350" fill="#475569" opacity="0.7"/>
+  <polygon points="160,350 300,180 400,350" fill="#475569" opacity="0.6"/>
+  <rect x="0" y="350" width="400" height="50" fill="#334155"/>
+  <circle cx="200" cy="80" r="5" fill="#fbbf24"/>
+  <line x1="200" y1="65" x2="200" y2="55" stroke="#fbbf24" stroke-width="2"/>
+  <line x1="215" y1="80" x2="225" y2="80" stroke="#fbbf24" stroke-width="2"/>
+  <line x1="185" y1="80" x2="175" y2="80" stroke="#fbbf24" stroke-width="2"/>
+  <line x1="211" y1="69" x2="218" y2="62" stroke="#fbbf24" stroke-width="2"/>
+  <line x1="189" y1="69" x2="182" y2="62" stroke="#fbbf24" stroke-width="2"/>
+</svg>

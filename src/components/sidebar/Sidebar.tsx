@@ -14,10 +14,15 @@ import {
 } from '@dnd-kit/sortable'
 import { useDocumentStore } from '../../stores/documentStore'
 import { TreeNode } from './TreeNode'
+import type { Chapter } from '../../types'
 
 interface SidebarProps {
   collapsed?: boolean
   onChapterSelect?: () => void
+}
+
+function getChildren(chapters: Chapter[], parentId?: string): Chapter[] {
+  return chapters.filter((ch) => ch.parentId === parentId)
 }
 
 export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
@@ -29,10 +34,13 @@ export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
   const renameChapter = useDocumentStore((s) => s.renameChapter)
   const deleteChapter = useDocumentStore((s) => s.deleteChapter)
   const reorderChapters = useDocumentStore((s) => s.reorderChapters)
+  const indentChapter = useDocumentStore((s) => s.indentChapter)
+  const outdentChapter = useDocumentStore((s) => s.outdentChapter)
 
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
   const [expanded, setExpanded] = useState(true)
+  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set())
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -45,6 +53,12 @@ export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
     if (!over || active.id === over.id || !book) return
+
+    // Only reorder among siblings
+    const draggedChapter = book.chapters.find((ch) => ch.id === active.id)
+    const overChapter = book.chapters.find((ch) => ch.id === over.id)
+    if (!draggedChapter || !overChapter) return
+    if (draggedChapter.parentId !== overChapter.parentId) return
 
     const oldIndex = book.chapters.findIndex((ch) => ch.id === active.id)
     const newIndex = book.chapters.findIndex((ch) => ch.id === over.id)
@@ -69,6 +83,59 @@ export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
       renameBook(trimmed)
     }
     setIsEditingTitle(false)
+  }
+
+  function toggleCollapsed(id: string) {
+    setCollapsedNodes((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function renderChapters(parentId?: string, depth = 0): React.ReactNode {
+    const children = getChildren(book!.chapters, parentId)
+    if (children.length === 0) return null
+
+    return (
+      <SortableContext
+        items={children.map((ch) => ch.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        {children.map((chapter) => {
+          const hasChildren = book!.chapters.some((ch) => ch.parentId === chapter.id)
+          const isCollapsed = collapsedNodes.has(chapter.id)
+          return (
+            <div key={chapter.id}>
+              <TreeNode
+                chapter={chapter}
+                depth={depth}
+                isActive={chapter.id === activeChapterId}
+                hasChildren={hasChildren}
+                isCollapsed={isCollapsed}
+                onToggleCollapse={() => toggleCollapsed(chapter.id)}
+                onClick={() => {
+                  setActiveChapter(chapter.id)
+                  onChapterSelect?.()
+                }}
+                onRename={(name) => renameChapter(chapter.id, name)}
+                onDelete={() => deleteChapter(chapter.id)}
+                onAddSubChapter={() => addChapter(undefined, chapter.id)}
+                onIndent={() => indentChapter(chapter.id)}
+                onOutdent={() => outdentChapter(chapter.id)}
+                isDeletable={book!.chapters.length > 1}
+                canIndent={
+                  getChildren(book!.chapters, chapter.parentId).findIndex((ch) => ch.id === chapter.id) > 0
+                }
+                canOutdent={!!chapter.parentId}
+              />
+              {hasChildren && !isCollapsed && renderChapters(chapter.id, depth + 1)}
+            </div>
+          )
+        })}
+      </SortableContext>
+    )
   }
 
   const isDropdown = collapsed === undefined
@@ -116,34 +183,16 @@ export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
           )}
         </div>
 
-        {/* Chapter list */}
+        {/* Chapter tree */}
         {expanded && (
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
-            <SortableContext
-              items={book.chapters.map((ch) => ch.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className="flex-1 overflow-y-auto py-1">
-                {book.chapters.map((chapter) => (
-                  <TreeNode
-                    key={chapter.id}
-                    chapter={chapter}
-                    isActive={chapter.id === activeChapterId}
-                    onClick={() => {
-                      setActiveChapter(chapter.id)
-                      onChapterSelect?.()
-                    }}
-                    onRename={(name) => renameChapter(chapter.id, name)}
-                    onDelete={() => deleteChapter(chapter.id)}
-                    isDeletable={book.chapters.length > 1}
-                  />
-                ))}
-              </div>
-            </SortableContext>
+            <div className="flex-1 overflow-y-auto py-1">
+              {renderChapters(undefined, 0)}
+            </div>
           </DndContext>
         )}
 

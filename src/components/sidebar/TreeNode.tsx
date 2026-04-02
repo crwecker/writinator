@@ -5,20 +5,38 @@ import type { Chapter } from '../../types'
 
 interface TreeNodeProps {
   chapter: Chapter
+  depth: number
   isActive: boolean
+  hasChildren: boolean
+  isCollapsed: boolean
+  onToggleCollapse: () => void
   onClick: () => void
   onRename: (name: string) => void
   onDelete: () => void
+  onAddSubChapter: () => void
+  onIndent: () => void
+  onOutdent: () => void
   isDeletable: boolean
+  canIndent: boolean
+  canOutdent: boolean
 }
 
 export function TreeNode({
   chapter,
+  depth,
   isActive,
+  hasChildren,
+  isCollapsed,
+  onToggleCollapse,
   onClick,
   onRename,
   onDelete,
+  onAddSubChapter,
+  onIndent,
+  onOutdent,
   isDeletable,
+  canIndent,
+  canOutdent,
 }: TreeNodeProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(chapter.name)
@@ -83,7 +101,7 @@ export function TreeNode({
     <div
       ref={setNodeRef}
       style={style}
-      className={`group flex items-center gap-1.5 px-3 py-1 cursor-pointer select-none text-sm
+      className={`group flex items-center gap-1 py-1 cursor-pointer select-none text-sm
         ${isActive ? 'bg-blue-300/20 text-white' : 'text-gray-300 hover:bg-gray-700/50'}
         ${isDragging ? 'opacity-50' : ''}`}
       onClick={() => !isEditing && onClick()}
@@ -92,12 +110,26 @@ export function TreeNode({
       {...attributes}
       {...listeners}
     >
-      <span className="text-gray-500 text-xs shrink-0">&#9657;</span>
+      {/* Indentation */}
+      <span style={{ width: `${12 + depth * 16}px` }} className="shrink-0" />
+
+      {/* Collapse toggle */}
+      <span
+        className={`text-gray-500 text-xs shrink-0 w-3 text-center transition-transform ${
+          hasChildren ? 'cursor-pointer' : 'invisible'
+        } ${hasChildren && !isCollapsed ? 'rotate-90' : ''}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (hasChildren) onToggleCollapse()
+        }}
+      >
+        &#9657;
+      </span>
 
       {isEditing ? (
         <input
           ref={inputRef}
-          className="flex-1 bg-gray-800 border border-blue-300 rounded px-1 py-0 text-sm text-white outline-none"
+          className="flex-1 bg-gray-800 border border-blue-300 rounded px-1 py-0 text-sm text-white outline-none min-w-0"
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={commitRename}
@@ -114,7 +146,7 @@ export function TreeNode({
       {showContextMenu && (
         <div
           ref={contextMenuRef}
-          className="fixed z-50 bg-gray-800 border border-gray-700 rounded shadow-lg py-1 min-w-[120px]"
+          className="fixed z-50 bg-gray-800 border border-gray-700 rounded shadow-lg py-1 min-w-[140px]"
           style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
         >
           <button
@@ -126,17 +158,54 @@ export function TreeNode({
           >
             Rename
           </button>
-          {isDeletable && (
+          <button
+            className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowContextMenu(false)
+              onAddSubChapter()
+            }}
+          >
+            Add sub-chapter
+          </button>
+          {canIndent && (
             <button
-              className="w-full text-left px-3 py-1 text-sm text-coral-100 hover:bg-gray-700"
+              className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
               onClick={(e) => {
                 e.stopPropagation()
                 setShowContextMenu(false)
-                onDelete()
+                onIndent()
               }}
             >
-              Delete
+              Indent
             </button>
+          )}
+          {canOutdent && (
+            <button
+              className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowContextMenu(false)
+                onOutdent()
+              }}
+            >
+              Outdent
+            </button>
+          )}
+          {isDeletable && (
+            <>
+              <div className="border-t border-gray-700 my-1" />
+              <button
+                className="w-full text-left px-3 py-1 text-sm text-coral-100 hover:bg-gray-700"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowContextMenu(false)
+                  onDelete()
+                }}
+              >
+                Delete
+              </button>
+            </>
           )}
         </div>
       )}

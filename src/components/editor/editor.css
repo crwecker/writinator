@@ -90,3 +90,10 @@
 .font-editor-mono {
   font-family: 'JetBrains Mono', monospace;
 }
+
+/* Typewriter mode */
+.typewriter-mode .cm-scroller {
+  /* Padding to allow cursor to center when near top/bottom of document */
+  padding-top: 45vh;
+  padding-bottom: 45vh;
+}
