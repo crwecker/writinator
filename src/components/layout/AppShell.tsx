@@ -13,6 +13,7 @@ import { saveBook, openBook, clearFileHandle } from '../../lib/fileSystem'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
+import { StyleEditor } from '../editor/StyleEditor'
 import { QuestPicker } from '../quests/QuestPicker'
 import { QuestProgress } from '../quests/QuestProgress'
 import { useQuestStore } from '../../stores/questStore'
@@ -23,6 +24,7 @@ export function AppShell() {
   const [vimCurrentMode, setVimCurrentMode] = useState<VimMode>('NORMAL')
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
+  const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
   const activeQuest = useQuestStore((s) => s.activeQuest)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -34,6 +36,8 @@ export function AppShell() {
   const loadBook = useDocumentStore((s) => s.loadBook)
   const distractionFree = useEditorStore((s) => s.distractionFree)
   const toggleDistractionFree = useEditorStore((s) => s.toggleDistractionFree)
+  const renderMode = useEditorStore((s) => s.renderMode)
+  const toggleRenderMode = useEditorStore((s) => s.toggleRenderMode)
 
   const activeChapter = book?.chapters.find((ch) => ch.id === activeChapterId)
 
@@ -102,6 +106,11 @@ export function AppShell() {
         }
         return
       }
+      if (matchesEvent(km.toggleRenderMode, e)) {
+        e.preventDefault()
+        toggleRenderMode()
+        return
+      }
       if (matchesEvent(km.openFromDisk, e)) {
         e.preventDefault()
         openBook().then((opened) => {
@@ -115,7 +124,7 @@ export function AppShell() {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [loadBook, toggleDistractionFree])
+  }, [loadBook, toggleDistractionFree, toggleRenderMode])
 
   // Auto-snapshot every 5 minutes
   useEffect(() => {
@@ -188,6 +197,7 @@ export function AppShell() {
         onClose={() => setSnapshotsOpen(false)}
         onRestore={handleRestoreSnapshot}
       />
+      <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} />
 
       {/* Quest progress — above bottom bar */}
       <QuestProgress />
@@ -203,6 +213,20 @@ export function AppShell() {
           {wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}
         </span>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setStyleEditorOpen((p) => !p)}
+            className="text-gray-500 hover:text-gray-300 transition-colors"
+            title="Document styles"
+          >
+            Styles
+          </button>
+          <button
+            onClick={toggleRenderMode}
+            className="text-gray-500 hover:text-gray-300 transition-colors"
+            title="Toggle source/rendered (Ctrl+Shift+E)"
+          >
+            {renderMode === 'source' ? 'Source' : 'Rendered'}
+          </button>
           <button
             onClick={() => setQuestPickerOpen(true)}
             className={`transition-colors ${

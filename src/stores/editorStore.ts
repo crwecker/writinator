@@ -10,6 +10,8 @@ interface EditorState extends EditorPreferences {
   setFontSize: (size: number) => void
   setDistractionFree: (enabled: boolean) => void
   toggleDistractionFree: () => void
+  setRenderMode: (mode: EditorPreferences['renderMode']) => void
+  toggleRenderMode: () => void
 }
 
 const localforageStorage = createJSONStorage<EditorState>(() => ({
@@ -33,6 +35,7 @@ export const useEditorStore = create<EditorState>()(
       fontFamily: 'serif',
       fontSize: 16,
       distractionFree: false,
+      renderMode: 'source',
 
       setVimMode: (enabled: boolean) => set({ vimMode: enabled }),
       toggleVimMode: () => set({ vimMode: !get().vimMode }),
@@ -42,6 +45,9 @@ export const useEditorStore = create<EditorState>()(
       setDistractionFree: (enabled: boolean) => set({ distractionFree: enabled }),
       toggleDistractionFree: () =>
         set({ distractionFree: !get().distractionFree }),
+      setRenderMode: (mode: EditorPreferences['renderMode']) => set({ renderMode: mode }),
+      toggleRenderMode: () =>
+        set({ renderMode: get().renderMode === 'source' ? 'rendered' : 'source' }),
     }),
     {
       name: 'writinator-editor',

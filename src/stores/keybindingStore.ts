@@ -8,6 +8,7 @@ export type ActionName =
   | 'saveToDisk'
   | 'openFromDisk'
   | 'snapshotHistory'
+  | 'toggleRenderMode'
 
 export interface KeyCombo {
   key: string  // e.g. 'f', 's', 'h'
@@ -26,6 +27,7 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   saveToDisk: 'Save to disk',
   openFromDisk: 'Open from disk',
   snapshotHistory: 'Snapshot history',
+  toggleRenderMode: 'Toggle source/rendered',
 }
 
 export const DEFAULT_KEYMAP: KeyMap = {
@@ -34,6 +36,7 @@ export const DEFAULT_KEYMAP: KeyMap = {
   saveToDisk: { key: 's', ctrl: true },
   openFromDisk: { key: 'o', ctrl: true },
   snapshotHistory: { key: 'h', ctrl: true, shift: true },
+  toggleRenderMode: { key: 'e', ctrl: true, shift: true },
 }
 
 export function comboToString(combo: KeyCombo): string {

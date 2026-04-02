@@ -10,6 +10,7 @@ import {
 const actionOrder: ActionName[] = [
   'toggleTypewriter',
   'toggleFileTree',
+  'toggleRenderMode',
   'saveToDisk',
   'openFromDisk',
   'snapshotHistory',

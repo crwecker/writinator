@@ -1,15 +1,28 @@
 import { useState, useEffect, useRef } from 'react'
 import { useDocumentStore } from '../../stores/documentStore'
-import { exportAsMarkdown, exportAsPlainText, exportAsHtml } from '../../lib/export'
+import {
+  exportAsMarkdown,
+  exportAsPlainText,
+  exportAsHtml,
+  exportAsRtf,
+  exportAsDocx,
+  exportAsPdf,
+} from '../../lib/export'
 
-const formats = [
+type ExportFn = (book: any) => void | Promise<void>
+
+const formats: { label: string; action: ExportFn }[] = [
   { label: 'Markdown (.md)', action: exportAsMarkdown },
   { label: 'Plain text (.txt)', action: exportAsPlainText },
   { label: 'HTML (.html)', action: exportAsHtml },
-] as const
+  { label: 'RTF (.rtf)', action: exportAsRtf },
+  { label: 'Word (.docx)', action: exportAsDocx },
+  { label: 'PDF (.pdf)', action: exportAsPdf },
+]
 
 export function ExportMenu() {
   const [open, setOpen] = useState(false)
+  const [exporting, setExporting] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
@@ -46,17 +59,23 @@ export function ExportMenu() {
           {formats.map((fmt) => (
             <button
               key={fmt.label}
-              onClick={() => {
+              disabled={exporting !== null}
+              onClick={async () => {
                 const book = useDocumentStore.getState().book
-                if (book) {
-                  useDocumentStore.getState()._flushContentUpdate()
-                  fmt.action(useDocumentStore.getState().book!)
+                if (!book) return
+                useDocumentStore.getState()._flushContentUpdate()
+                const currentBook = useDocumentStore.getState().book!
+                setExporting(fmt.label)
+                try {
+                  await fmt.action(currentBook)
+                } finally {
+                  setExporting(null)
+                  setOpen(false)
                 }
-                setOpen(false)
               }}
-              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors"
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors disabled:opacity-50"
             >
-              {fmt.label}
+              {exporting === fmt.label ? 'Exporting...' : fmt.label}
             </button>
           ))}
         </div>

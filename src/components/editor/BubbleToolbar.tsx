@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { EditorView } from '@codemirror/view'
+import { useDocumentStore } from '../../stores/documentStore'
 
 interface BubbleToolbarProps {
   editorView: EditorView | null
@@ -116,7 +117,41 @@ function prependLineWith(view: EditorView, prefix: string) {
   view.focus()
 }
 
+function wrapWithSpanClass(view: EditorView, className: string) {
+  const { from, to } = view.state.selection.main
+  if (from === to) return
+  const selected = view.state.sliceDoc(from, to)
+
+  // If already wrapped in a class span, replace the class
+  const classSpanMatch = selected.match(/^<span\s+class="([^"]*)">(.*)<\/span>$/)
+  if (classSpanMatch) {
+    if (classSpanMatch[1] === className) {
+      // Same class — unwrap (remove the span entirely)
+      view.dispatch({
+        changes: { from, to, insert: classSpanMatch[2] },
+        selection: { anchor: from, head: from + classSpanMatch[2].length },
+      })
+    } else {
+      // Different class — replace
+      const replacement = `<span class="${className}">${classSpanMatch[2]}</span>`
+      view.dispatch({
+        changes: { from, to, insert: replacement },
+        selection: { anchor: from, head: from + replacement.length },
+      })
+    }
+  } else {
+    const before = `<span class="${className}">`
+    const after = '</span>'
+    view.dispatch({
+      changes: { from, to, insert: `${before}${selected}${after}` },
+      selection: { anchor: from + before.length, head: to + before.length },
+    })
+  }
+  view.focus()
+}
+
 export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
+  const namedStyles = useDocumentStore((s) => s.book?.documentStyles?.namedStyles)
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
 
   const updatePosition = useCallback(() => {
@@ -272,6 +307,28 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
           <option key={s} value={s}>{s}px</option>
         ))}
       </select>
+
+      {/* Named styles */}
+      {namedStyles && Object.keys(namedStyles).length > 0 && (
+        <>
+          <div className="mx-1 h-5 w-px bg-gray-700" />
+          <select
+            value=""
+            onChange={(e) => {
+              if (!e.target.value) return
+              wrapWithSpanClass(editorView, e.target.value)
+              e.target.value = ''
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="bg-transparent text-gray-300 hover:text-gray-100 text-xs outline-none cursor-pointer px-1 py-1"
+          >
+            <option value="" disabled>Style</option>
+            {Object.keys(namedStyles).map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </>
+      )}
     </div>
   )
 }

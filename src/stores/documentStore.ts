@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { Book, Chapter } from '../types'
+import type { Book, Chapter, DocumentStyles } from '../types'
 import { createSnapshot } from './snapshotStore'
 import { useQuestStore } from './questStore'
 
@@ -33,6 +33,11 @@ interface DocumentState {
   // Content
   updateChapterContent: (content: string) => void
   _flushContentUpdate: () => void
+
+  // Document styles
+  setDocumentStyles: (styles: DocumentStyles) => void
+  updateDocumentStyles: (patch: Partial<DocumentStyles>) => void
+  clearDocumentStyles: () => void
 }
 
 function generateId(): string {
@@ -284,6 +289,30 @@ export const useDocumentStore = create<DocumentState>()(
           })
         }, 1500)
         set({ _contentUpdateTimer: timer, _pendingContent: content })
+      },
+
+      setDocumentStyles: (styles: DocumentStyles) => {
+        const { book } = get()
+        if (!book) return
+        set({ book: { ...book, documentStyles: styles, updatedAt: now() } })
+      },
+
+      updateDocumentStyles: (patch: Partial<DocumentStyles>) => {
+        const { book } = get()
+        if (!book) return
+        const existing = book.documentStyles ?? {}
+        const merged: DocumentStyles = { ...existing }
+        for (const key of Object.keys(patch) as (keyof DocumentStyles)[]) {
+          merged[key] = { ...existing[key], ...patch[key] } as any
+        }
+        set({ book: { ...book, documentStyles: merged, updatedAt: now() } })
+      },
+
+      clearDocumentStyles: () => {
+        const { book } = get()
+        if (!book) return
+        const { documentStyles: _, ...rest } = book
+        set({ book: { ...rest, chapters: book.chapters, createdAt: book.createdAt, updatedAt: now() } as Book })
       },
 
       _flushContentUpdate: () => {
