@@ -4,6 +4,7 @@ import * as localforage from 'localforage'
 import type { Book, Chapter, DocumentStyles } from '../types'
 import { createSnapshot } from './snapshotStore'
 import { useQuestStore } from './questStore'
+import { useImageRevealStore } from './imageRevealStore'
 
 function countWords(text: string | null): number {
   if (!text || text.trim() === '') return 0
@@ -273,6 +274,7 @@ export const useDocumentStore = create<DocumentState>()(
           const delta = newWords - oldWords
           if (delta > 0) {
             useQuestStore.getState().addWords(delta)
+            useImageRevealStore.getState().addWords(delta)
           }
           set({
             book: {

@@ -16,7 +16,9 @@ import { SnapshotBrowser } from './SnapshotBrowser'
 import { StyleEditor } from '../editor/StyleEditor'
 import { QuestPicker } from '../quests/QuestPicker'
 import { QuestProgress } from '../quests/QuestProgress'
+import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { useQuestStore } from '../../stores/questStore'
+import { useImageRevealStore } from '../../stores/imageRevealStore'
 
 export function AppShell() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -27,6 +29,7 @@ export function AppShell() {
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
   const activeQuest = useQuestStore((s) => s.activeQuest)
+  const activeImageSession = useImageRevealStore((s) => s.activeSession)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const titleRef = useRef<HTMLButtonElement>(null)
 
@@ -201,6 +204,7 @@ export function AppShell() {
 
       {/* Quest progress — above bottom bar */}
       <QuestProgress />
+      <ImageRevealPanel />
 
       <QuestPicker
         open={questPickerOpen}
@@ -230,7 +234,7 @@ export function AppShell() {
           <button
             onClick={() => setQuestPickerOpen(true)}
             className={`transition-colors ${
-              activeQuest
+              activeQuest || activeImageSession
                 ? 'text-amber-500 hover:text-amber-400'
                 : 'text-gray-500 hover:text-gray-300'
             }`}
