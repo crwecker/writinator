@@ -47,13 +47,19 @@
 ### Phase 2 QA
 - [x] Correctness audit (eslint, tsc, vite build all pass)
 - [x] No dead code — new file only
+- [x] Added runtime validation of API response shape (guards against unexpected JSON)
+- [x] Fixed loadImage timeout to null out onload/onerror before clearing src (prevents redundant reject)
+- [x] Added `downloadLocationUrl` to `UnsplashImage` type for Unsplash API ToS compliance
+- [x] Added `links.download_location` to internal `UnsplashApiPhoto` type
+- [x] Both exports (`fetchRandomImage`, `loadImage`) are unused until Phase 3 wires them in — expected
 
 ### Notes
 - Uses official Unsplash API (`/photos/random`) with `VITE_UNSPLASH_ACCESS_KEY` env var
-- `UnsplashImage` type added to `src/types/index.ts`
+- `UnsplashImage` type added to `src/types/index.ts` (includes `downloadLocationUrl` for ToS tracking)
 - `loadImage()` sets `crossOrigin="anonymous"` before `src` to prevent canvas tainting
 - Both `fetchRandomImage()` and `loadImage()` have 10s timeouts
 - `fetchRandomImage()` uses AbortController; `loadImage()` uses setTimeout + src clearing
+- Runtime shape validation guards against unexpected API response format
 - No semicolons, named exports, pure utility — matches codebase conventions
 
 ---

@@ -25,8 +25,8 @@
 - `src/stores/documentStore.ts` — wired `imageRevealStore.addWords(delta)` into word delta pipeline
 
 ### Phase 2
-- `src/types/index.ts` — added `UnsplashImage` interface
-- `src/lib/unsplash.ts` — `fetchRandomImage()` and `loadImage()` utilities
+- `src/types/index.ts` — added `UnsplashImage` interface (with `downloadLocationUrl` for Unsplash ToS)
+- `src/lib/unsplash.ts` — `fetchRandomImage()` and `loadImage()` utilities, runtime response validation
 
 ### Phase 3
 _(pending)_

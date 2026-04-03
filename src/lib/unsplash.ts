@@ -19,6 +19,7 @@ interface UnsplashApiPhoto {
     name: string
     links: { html: string }
   }
+  links: { download_location: string }
 }
 
 /**
@@ -54,12 +55,17 @@ export async function fetchRandomImage(query = 'nature'): Promise<UnsplashImage>
 
     const data: UnsplashApiPhoto = await res.json()
 
+    if (!data.urls?.regular || !data.user?.name || !data.user?.links?.html || !data.links?.download_location) {
+      throw new Error('Unexpected Unsplash API response format')
+    }
+
     return {
       url: data.urls.regular,
       width: data.width,
       height: data.height,
       photographer: data.user.name,
       photographerUrl: data.user.links.html,
+      downloadLocationUrl: data.links.download_location,
     }
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
@@ -81,6 +87,8 @@ export function loadImage(url: string): Promise<HTMLImageElement> {
     img.crossOrigin = 'anonymous'
 
     const timeoutId = setTimeout(() => {
+      img.onload = null
+      img.onerror = null
       img.src = ''
       reject(new Error('Image load timed out'))
     }, DEFAULT_TIMEOUT_MS)

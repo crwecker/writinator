@@ -48,6 +48,7 @@ export interface UnsplashImage {
   height: number
   photographer: string
   photographerUrl: string
+  downloadLocationUrl: string
 }
 
 export interface ImageRevealSession {
