@@ -1,6 +1,6 @@
 # Image Reveal Quests — State
 
-## Current Phase: 3 (Not Started) — Phases 1–2 Complete
+## Current Phase: 4 (Pending) — Phases 1–3 + QA Complete
 
 ## Key File Paths (Existing)
 
@@ -29,7 +29,9 @@
 - `src/lib/unsplash.ts` — `fetchRandomImage()` and `loadImage()` utilities, runtime response validation
 
 ### Phase 3
-_(pending)_
+- `src/components/quests/ImageRevealPanel.tsx` — floating panel with collapsed/expanded/celebration states
+- `src/types/index.ts` — added `photographer?` and `photographerUrl?` to `ImageRevealSession`
+- `src/stores/imageRevealStore.ts` — extended `startSession()` with optional photographer params
 
 ### Phase 4
 _(pending)_

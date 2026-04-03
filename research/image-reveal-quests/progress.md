@@ -8,8 +8,8 @@
 | 1 QA | Verify Types, Store, and Canvas Renderer | Complete | 2026-04-02 | 2026-04-02 |
 | 2 | Unsplash API Integration | Complete | 2026-04-02 | 2026-04-02 |
 | 2 QA | Verify Unsplash Integration | Complete | 2026-04-02 | 2026-04-02 |
-| 3 | Image Reveal Panel Component | Not Started | — | — |
-| 3 QA | Verify Image Reveal Panel | Not Started | — | — |
+| 3 | Image Reveal Panel Component | Complete | 2026-04-02 | 2026-04-02 |
+| 3 QA | Verify Image Reveal Panel | Complete | 2026-04-02 | 2026-04-02 |
 | 4 | Quest Picker Integration and Wiring | Not Started | — | — |
 | 4 QA | Verify Integration and End-to-End | Not Started | — | — |
 
@@ -66,19 +66,35 @@
 
 ## Phase 3: Image Reveal Panel Component
 
-- [ ] `ImageRevealPanel` component in `src/components/quests/ImageRevealPanel.tsx`
-- [ ] Collapsed state: 64×64 canvas, progress %, floating bottom-right
-- [ ] Expanded state: 320px card, 280×280 canvas, progress bar, controls
-- [ ] Canvas integration with `drawPixelated()` and `animateReveal()`
-- [ ] Celebration state on completion
-- [ ] Dark theme styling
+- [x] `ImageRevealPanel` component in `src/components/quests/ImageRevealPanel.tsx`
+- [x] Collapsed state: 64×64 canvas thumbnail, progress %, floating bottom-right
+- [x] Expanded state: 320px card, 280×280 canvas, progress bar, words remaining, minimize/abandon
+- [x] Canvas integration with `drawPixelated()` and `animateReveal()` (level transitions only)
+- [x] Celebration state on completion (auto-expand, clear image, photographer attribution, 6s auto-dismiss)
+- [x] Dark theme styling (bg-gray-900 border-gray-700 shadow-2xl rounded-lg)
+- [x] Extended `ImageRevealSession` type with optional `photographer`/`photographerUrl` fields
+- [x] Extended `startSession()` to accept photographer params
+- [x] Canvas cleanup on unmount (cancelAnimationFrame)
+- [x] Image preloading via `loadImage()` on session start
+- [x] Self-hiding when no active session (same pattern as QuestProgress)
+- [x] eslint clean (changed files only), tsc clean, vite build clean
 
 ### Phase 3 QA
-- [ ] Correctness audit
-- [ ] Dead code cleanup
+- [x] Correctness audit (eslint, tsc, vite build all pass)
+- [x] Dead code cleanup
+- [x] Fixed: setTimeout in Zustand subscribe effect now cleared on cleanup (prevented post-unmount setState)
+- [x] Fixed: Canvas elements now have explicit width/height HTML attributes (prevents 300x150 flash before draw)
+- [x] Fixed: `drawCanvases` deps use `hasSession` boolean instead of `activeSession` object (prevents unnecessary redraws on every word delta)
+- [x] Fixed: Consolidated expand-redraw effect into `drawCanvases` callback (eliminated duplicate draws and animation/static draw conflicts)
+- [x] Fixed: Image load failures now log to console instead of silent swallow
+- [x] Verified: crossOrigin set before src in loadImage, animateReveal cancel on unmount + level change, celebration detection via subscribe, self-hide when no session
 
 ### Notes
-_(filled after completion)_
+- Celebration detection uses Zustand `subscribe()` to avoid sync setState in effects
+- Image loading uses ref-based session ID tracking instead of sync `setImage(null)` reset
+- `imageRef` caches loaded image for celebration canvas (avoids re-fetch on completion)
+- `animateReveal()` cancel function stored in ref, called on unmount and level transitions
+- Canvas draw logic consolidated into single `drawCanvases` callback gated on `expanded` state
 
 ---
 

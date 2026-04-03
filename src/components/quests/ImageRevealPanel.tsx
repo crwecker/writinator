@@ -23,6 +23,7 @@ export function ImageRevealPanel() {
   // Detect completion via Zustand subscribe (callback-based, not sync in effect)
   useEffect(() => {
     let prevCount = useImageRevealStore.getState().completedSessions.length
+    let dismissTimer: ReturnType<typeof setTimeout> | null = null
     const unsub = useImageRevealStore.subscribe((state) => {
       if (state.completedSessions.length > prevCount) {
         const completed = state.completedSessions[state.completedSessions.length - 1]
@@ -33,11 +34,15 @@ export function ImageRevealPanel() {
         // Cache the current loaded image for celebration canvas
         imageRef.current = image
 
-        setTimeout(() => setShowCelebration(false), 6000)
+        if (dismissTimer) clearTimeout(dismissTimer)
+        dismissTimer = setTimeout(() => setShowCelebration(false), 6000)
       }
       prevCount = state.completedSessions.length
     })
-    return unsub
+    return () => {
+      unsub()
+      if (dismissTimer) clearTimeout(dismissTimer)
+    }
   }, [image])
 
   // Load image when session starts or changes
@@ -57,15 +62,18 @@ export function ImageRevealPanel() {
         setImage(img)
         imageRef.current = img
       }
-    }).catch(() => {})
+    }).catch((err) => {
+      console.warn('[ImageRevealPanel] Failed to load image:', err)
+    })
 
     return () => { loadingSessionRef.current = null }
   }, [sessionId, sessionUrl])
 
   // Draw canvases when image loads or level changes
   const currentLevel = activeSession?.currentLevel ?? 0
+  const hasSession = !!activeSession
   const drawCanvases = useCallback(() => {
-    if (!image || !activeSession) return
+    if (!image || !hasSession) return
 
     const gridSize = PIXEL_LEVELS[currentLevel]
 
@@ -74,8 +82,8 @@ export function ImageRevealPanel() {
       drawPixelated(thumbCanvasRef.current, image, gridSize)
     }
 
-    // Main canvas (expanded view)
-    if (mainCanvasRef.current) {
+    // Main canvas (only when expanded — canvas may not be mounted in collapsed state)
+    if (expanded && mainCanvasRef.current) {
       const prevLevel = prevLevelRef.current
       if (prevLevel !== -1 && prevLevel !== currentLevel) {
         cancelAnimRef.current?.()
@@ -92,18 +100,11 @@ export function ImageRevealPanel() {
     }
 
     prevLevelRef.current = currentLevel
-  }, [image, activeSession, currentLevel])
+  }, [image, hasSession, currentLevel, expanded])
 
   useEffect(() => {
     drawCanvases()
   }, [drawCanvases])
-
-  // Redraw main canvas when expanding (canvas may not have been mounted)
-  useEffect(() => {
-    if (expanded && image && activeSession && mainCanvasRef.current) {
-      drawPixelated(mainCanvasRef.current, image, PIXEL_LEVELS[currentLevel])
-    }
-  }, [expanded, image, activeSession, currentLevel])
 
   // Draw celebration image
   useEffect(() => {
@@ -123,7 +124,9 @@ export function ImageRevealPanel() {
         if (!cancelled && mainCanvasRef.current) {
           drawPixelated(mainCanvasRef.current, img, 0)
         }
-      }).catch(() => {})
+      }).catch((err) => {
+        console.warn('[ImageRevealPanel] Failed to load celebration image:', err)
+      })
     }
 
     return () => { cancelled = true }
@@ -161,6 +164,8 @@ export function ImageRevealPanel() {
             </div>
             <canvas
               ref={mainCanvasRef}
+              width={280}
+              height={280}
               className="w-[280px] h-[280px] mx-auto rounded object-cover"
             />
             {celebrationSession.photographer && (
@@ -204,6 +209,8 @@ export function ImageRevealPanel() {
         >
           <canvas
             ref={thumbCanvasRef}
+            width={64}
+            height={64}
             className="w-16 h-16 rounded object-cover"
           />
           <span className="text-xs text-gray-400 tabular-nums pr-1.5 group-hover:text-gray-300">
@@ -234,6 +241,8 @@ export function ImageRevealPanel() {
         <div className="p-3">
           <canvas
             ref={mainCanvasRef}
+            width={280}
+            height={280}
             className="w-[280px] h-[280px] mx-auto rounded object-cover"
           />
         </div>
