@@ -7,7 +7,7 @@ import { getPixelLevelIndex } from './questStore'
 interface ImageRevealState {
   activeSession: ImageRevealSession | null
   completedSessions: ImageRevealSession[]
-  startSession: (imageUrl: string, imageWidth: number, imageHeight: number, wordGoal: number) => void
+  startSession: (imageUrl: string, imageWidth: number, imageHeight: number, wordGoal: number, photographer?: string, photographerUrl?: string) => void
   addWords: (count: number) => void
   abandonSession: () => void
 }
@@ -31,7 +31,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
       activeSession: null,
       completedSessions: [],
 
-      startSession: (imageUrl: string, imageWidth: number, imageHeight: number, wordGoal: number) => {
+      startSession: (imageUrl: string, imageWidth: number, imageHeight: number, wordGoal: number, photographer?: string, photographerUrl?: string) => {
         set({
           activeSession: {
             id: crypto.randomUUID(),
@@ -43,6 +43,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
             currentLevel: 0,
             completed: false,
             startedAt: new Date().toISOString(),
+            ...(photographer ? { photographer, photographerUrl } : {}),
           },
         })
       },

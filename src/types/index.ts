@@ -62,6 +62,8 @@ export interface ImageRevealSession {
   completed: boolean
   completedAt?: string
   startedAt: string
+  photographer?: string
+  photographerUrl?: string
 }
 
 export interface Snapshot {
