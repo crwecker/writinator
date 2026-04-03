@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
 import type { ImageRevealSession } from '../types'
-import { getPixelLevel, PIXEL_LEVELS } from './questStore'
+import { getPixelLevelIndex } from './questStore'
 
 interface ImageRevealState {
   activeSession: ImageRevealSession | null
@@ -51,11 +51,9 @@ export const useImageRevealStore = create<ImageRevealState>()(
         const { activeSession } = get()
         if (!activeSession || activeSession.completed || count <= 0) return
 
-        const newWordsWritten = activeSession.wordsWritten + count
-        const progress = Math.min(newWordsWritten / activeSession.wordGoal, 1)
-        const pixelValue = getPixelLevel(progress) as (typeof PIXEL_LEVELS)[number]
-        const levelIndex = PIXEL_LEVELS.indexOf(pixelValue)
-        const currentLevel = levelIndex >= 0 ? levelIndex : 0
+        const newWordsWritten = Math.min(activeSession.wordsWritten + count, activeSession.wordGoal)
+        const progress = newWordsWritten / activeSession.wordGoal
+        const currentLevel = getPixelLevelIndex(progress)
         const completed = newWordsWritten >= activeSession.wordGoal
 
         const updated: ImageRevealSession = {

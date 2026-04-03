@@ -1,6 +1,6 @@
 # Image Reveal Quests — State
 
-## Current Phase: 1 (Not Started)
+## Current Phase: 2 (Not Started) — Phase 1 Complete
 
 ## Key File Paths (Existing)
 
@@ -19,7 +19,10 @@
 ## New Files Created Per Phase
 
 ### Phase 1
-_(pending)_
+- `src/types/index.ts` — added `ImageRevealSession` interface
+- `src/stores/imageRevealStore.ts` — new store with persist/localforage
+- `src/lib/pixelate.ts` — `drawPixelated()` and `animateReveal()` canvas utilities
+- `src/stores/documentStore.ts` — wired `imageRevealStore.addWords(delta)` into word delta pipeline
 
 ### Phase 2
 _(pending)_

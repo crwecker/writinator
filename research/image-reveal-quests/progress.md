@@ -4,8 +4,8 @@
 
 | Phase | Description | Status | Started | Completed |
 |-------|-------------|--------|---------|-----------|
-| 1 | Types, Store, and Canvas Renderer | Not Started | — | — |
-| 1 QA | Verify Types, Store, and Canvas Renderer | Not Started | — | — |
+| 1 | Types, Store, and Canvas Renderer | Complete | 2026-04-02 | 2026-04-02 |
+| 1 QA | Verify Types, Store, and Canvas Renderer | Complete | 2026-04-02 | 2026-04-02 |
 | 2 | Unsplash API Integration | Not Started | — | — |
 | 2 QA | Verify Unsplash Integration | Not Started | — | — |
 | 3 | Image Reveal Panel Component | Not Started | — | — |
@@ -15,18 +15,20 @@
 
 ## Phase 1: Types, Store, and Canvas Renderer
 
-- [ ] `ImageRevealSession` type in `src/types/index.ts`
-- [ ] `imageRevealStore` in `src/stores/imageRevealStore.ts` with persist middleware
-- [ ] `drawPixelated()` in `src/lib/pixelate.ts`
-- [ ] `animateReveal()` in `src/lib/pixelate.ts`
-- [ ] Wire `documentStore.updateChapterContent` to feed `imageRevealStore.addWords()`
+- [x] `ImageRevealSession` type in `src/types/index.ts`
+- [x] `imageRevealStore` in `src/stores/imageRevealStore.ts` with persist middleware
+- [x] `drawPixelated()` in `src/lib/pixelate.ts`
+- [x] `animateReveal()` in `src/lib/pixelate.ts`
+- [x] Wire `documentStore.updateChapterContent` to feed `imageRevealStore.addWords()`
 
 ### Phase 1 QA
-- [ ] Correctness audit
-- [ ] Dead code cleanup
+- [x] Correctness audit (eslint, tsc, vite build all pass)
+- [x] Dead code cleanup (removed duplicate PIXEL_LEVELS from pixelate.ts)
 
 ### Notes
-_(filled after completion)_
+- `PIXEL_LEVELS` and `getPixelLevel` remain in `questStore.ts` — `imageRevealStore` imports from there
+- `pixelate.ts` is a pure canvas utility with no store/React dependencies
+- `animateReveal` uses 40ms row stagger with requestAnimationFrame, returns cancel function
 
 ---
 

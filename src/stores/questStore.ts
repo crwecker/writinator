@@ -8,13 +8,15 @@ import { questArcs } from '../data/quests'
 // CSS filter uses svg for pixelation effect
 export const PIXEL_LEVELS = [128, 64, 32, 16, 8, 4, 2, 0] as const
 
-export function getPixelLevel(progress: number): number {
-  // progress is 0..1, map to pixel level index
-  const idx = Math.min(
+export function getPixelLevelIndex(progress: number): number {
+  return Math.min(
     Math.floor(progress * PIXEL_LEVELS.length),
     PIXEL_LEVELS.length - 1
   )
-  return PIXEL_LEVELS[idx]
+}
+
+export function getPixelLevel(progress: number): number {
+  return PIXEL_LEVELS[getPixelLevelIndex(progress)]
 }
 
 interface QuestState {
