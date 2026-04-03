@@ -110,6 +110,15 @@
 ### Phase 4 QA
 - [x] Correctness audit (eslint, tsc, vite build all pass)
 - [x] No dead code — all changes are wiring existing components
+- [x] Fixed: `hover:bg-gray-750` replaced with `hover:bg-gray-700` (gray-750 not defined in Tailwind, hover had no visual effect)
+- [x] Fixed: Custom word goal now validates upper bound (max 100,000) to prevent unreasonable values
+- [x] Verified: End-to-end flow (pick goal → fetch → start session → type → reveal → celebration)
+- [x] Verified: Tab switching, word goal presets + custom input, loading/error states
+- [x] Verified: QuestProgress and ImageRevealPanel coexist in AppShell without conflicts
+- [x] Verified: Bottom bar amber indicator works for both arc and image reveal sessions
+- [x] Verified: No unused imports, no `any` types, no duplicate effects/listeners
+- [x] Verified: Store selectors properly scoped, `getState()` used correctly outside React
+- [x] Verified: `as unknown as ImageRevealState` cast in store partialize is a known Zustand limitation — acceptable
 
 ### Notes
 - Tab bar replaces center title in QuestPicker header

@@ -82,8 +82,8 @@ export function QuestPicker({ open, onClose }: Props) {
     setError(null)
     try {
       const goal = isCustom ? parseInt(customGoal, 10) : wordGoal
-      if (!goal || goal < 1) {
-        setError('Please enter a valid word goal')
+      if (!goal || goal < 1 || goal > 100000) {
+        setError('Please enter a word goal between 1 and 100,000')
         setLoading(false)
         return
       }
@@ -158,7 +158,7 @@ export function QuestPicker({ open, onClose }: Props) {
                       <button
                         key={arc.id}
                         onClick={() => setSelectedArc(arc)}
-                        className="w-full text-left p-4 rounded-lg bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-gray-600 transition-colors"
+                        className="w-full text-left p-4 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 transition-colors"
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm font-medium text-gray-200">{arc.title}</span>
@@ -187,7 +187,7 @@ export function QuestPicker({ open, onClose }: Props) {
                             ? 'bg-emerald-950/30 border-emerald-800/40 opacity-70'
                             : active
                               ? 'bg-blue-950/30 border-blue-700/50'
-                              : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-750'
+                              : 'bg-gray-800 border-gray-700 hover:border-gray-600 hover:bg-gray-700'
                         }`}
                       >
                         <div className="flex items-center justify-between mb-1">
