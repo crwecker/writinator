@@ -23,7 +23,6 @@ export function ImageRevealPanel() {
   // Detect completion via Zustand subscribe (callback-based, not sync in effect)
   useEffect(() => {
     let prevCount = useImageRevealStore.getState().completedSessions.length
-    let dismissTimer: ReturnType<typeof setTimeout> | null = null
     const unsub = useImageRevealStore.subscribe((state) => {
       if (state.completedSessions.length > prevCount) {
         const completed = state.completedSessions[state.completedSessions.length - 1]
@@ -33,15 +32,11 @@ export function ImageRevealPanel() {
 
         // Cache the current loaded image for celebration canvas
         imageRef.current = image
-
-        if (dismissTimer) clearTimeout(dismissTimer)
-        dismissTimer = setTimeout(() => setShowCelebration(false), 6000)
       }
       prevCount = state.completedSessions.length
     })
     return () => {
       unsub()
-      if (dismissTimer) clearTimeout(dismissTimer)
     }
   }, [image])
 
@@ -189,9 +184,9 @@ export function ImageRevealPanel() {
           </div>
           <button
             onClick={() => setShowCelebration(false)}
-            className="w-full py-2 text-xs text-gray-500 hover:text-gray-400 border-t border-gray-700"
+            className="w-full py-2 text-xs text-gray-400 hover:text-gray-300 border-t border-gray-700"
           >
-            Dismiss
+            Done
           </button>
         </div>
       </div>
