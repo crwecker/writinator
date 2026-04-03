@@ -33,6 +33,8 @@ export function QuestPicker({ open, onClose }: Props) {
   const activeQuest = useQuestStore((s) => s.activeQuest)
   const completedQuests = useQuestStore((s) => s.completedQuests)
   const activeImageSession = useImageRevealStore((s) => s.activeSession)
+  const completedImageSessions = useImageRevealStore((s) => s.completedSessions)
+  const [viewingImage, setViewingImage] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
@@ -90,7 +92,7 @@ export function QuestPicker({ open, onClose }: Props) {
       const img = await fetchRandomImage()
       useImageRevealStore.getState().startSession(
         img.url, img.width, img.height, goal,
-        img.photographer, img.photographerUrl
+        img.photographer, img.photographerUrl, img.id
       )
       onClose()
     } catch {
@@ -274,6 +276,81 @@ export function QuestPicker({ open, onClose }: Props) {
                     {loading ? 'Finding image...' : 'Start Writing'}
                   </button>
                 </>
+              )}
+
+              {/* Completed reveals gallery */}
+              {completedImageSessions.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Revealed ({completedImageSessions.length})
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[...completedImageSessions].reverse().map((session) => (
+                      <button
+                        key={session.id}
+                        onClick={() => setViewingImage(viewingImage === session.id ? null : session.id)}
+                        className="relative aspect-[4/3] rounded-lg overflow-hidden border border-gray-700 hover:border-gray-500 transition-colors group"
+                      >
+                        <img
+                          src={session.imageUrl}
+                          alt={session.photographer ? `Photo by ${session.photographer}` : 'Revealed image'}
+                          className="w-full h-full object-cover"
+                          crossOrigin="anonymous"
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-end">
+                          <div className="w-full px-1.5 py-1 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <p className="text-[9px] text-gray-300 truncate">
+                              {session.wordGoal.toLocaleString()} words
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Expanded image view */}
+                  {viewingImage && (() => {
+                    const session = completedImageSessions.find((s) => s.id === viewingImage)
+                    if (!session) return null
+                    return (
+                      <div className="mt-2 rounded-lg overflow-hidden border border-gray-700 bg-gray-800">
+                        <img
+                          src={session.imageUrl}
+                          alt={session.photographer ? `Photo by ${session.photographer}` : 'Revealed image'}
+                          className="w-full object-contain max-h-[300px]"
+                          crossOrigin="anonymous"
+                        />
+                        <div className="px-3 py-2 flex items-center justify-between">
+                          <div>
+                            {session.photographer && (
+                              <a
+                                href={session.photographerUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                              >
+                                {session.photographer}
+                              </a>
+                            )}
+                            <p className="text-[10px] text-gray-500">
+                              {session.wordGoal.toLocaleString()} words &middot; {new Date(session.completedAt!).toLocaleDateString()}
+                            </p>
+                          </div>
+                          {session.unsplashId && (
+                            <a
+                              href={`https://unsplash.com/photos/${session.unsplashId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
+                            >
+                              View on Unsplash
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
               )}
             </div>
           )}

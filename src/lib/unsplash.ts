@@ -12,6 +12,7 @@ const API_BASE = 'https://api.unsplash.com'
 const DEFAULT_TIMEOUT_MS = 10_000
 
 interface UnsplashApiPhoto {
+  id: string
   urls: { regular: string; full: string }
   width: number
   height: number
@@ -55,11 +56,12 @@ export async function fetchRandomImage(query = 'nature'): Promise<UnsplashImage>
 
     const data: UnsplashApiPhoto = await res.json()
 
-    if (!data.urls?.regular || !data.user?.name || !data.user?.links?.html || !data.links?.download_location) {
+    if (!data.id || !data.urls?.regular || !data.user?.name || !data.user?.links?.html || !data.links?.download_location) {
       throw new Error('Unexpected Unsplash API response format')
     }
 
     return {
+      id: data.id,
       url: data.urls.regular,
       width: data.width,
       height: data.height,

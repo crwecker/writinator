@@ -43,6 +43,7 @@ export interface QuestProgress {
 }
 
 export interface UnsplashImage {
+  id: string
   url: string
   width: number
   height: number
@@ -53,6 +54,7 @@ export interface UnsplashImage {
 
 export interface ImageRevealSession {
   id: string
+  unsplashId?: string
   imageUrl: string
   imageWidth: number
   imageHeight: number
