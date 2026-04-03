@@ -1,6 +1,6 @@
 # Image Reveal Quests — State
 
-## Current Phase: 4 (Pending) — Phases 1–3 + QA Complete
+## Current Phase: Complete — All Phases (1–4) + QA Done
 
 ## Key File Paths (Existing)
 
@@ -34,7 +34,8 @@
 - `src/stores/imageRevealStore.ts` — extended `startSession()` with optional photographer params
 
 ### Phase 4
-_(pending)_
+- `src/components/quests/QuestPicker.tsx` — added tab bar, Image Reveal tab with word goal selector and start flow
+- `src/components/layout/AppShell.tsx` — mounted `ImageRevealPanel`, wired bottom bar indicator for active sessions
 
 ## Architecture Decisions (Locked)
 

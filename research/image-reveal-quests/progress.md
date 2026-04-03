@@ -10,8 +10,8 @@
 | 2 QA | Verify Unsplash Integration | Complete | 2026-04-02 | 2026-04-02 |
 | 3 | Image Reveal Panel Component | Complete | 2026-04-02 | 2026-04-02 |
 | 3 QA | Verify Image Reveal Panel | Complete | 2026-04-02 | 2026-04-02 |
-| 4 | Quest Picker Integration and Wiring | Not Started | — | — |
-| 4 QA | Verify Integration and End-to-End | Not Started | — | — |
+| 4 | Quest Picker Integration and Wiring | Complete | 2026-04-02 | 2026-04-02 |
+| 4 QA | Verify Integration and End-to-End | Complete | 2026-04-02 | 2026-04-02 |
 
 ## Phase 1: Types, Store, and Canvas Renderer
 
@@ -100,15 +100,20 @@
 
 ## Phase 4: Quest Picker Integration and Wiring
 
-- [ ] QuestPicker tab bar ("Quest Arcs" | "Image Reveal")
-- [ ] Word goal selector (250/500/1000/2000/5000 + custom)
-- [ ] Image fetch + session creation flow
-- [ ] AppShell: render ImageRevealPanel
-- [ ] Bottom bar indicator for active image reveal
+- [x] QuestPicker tab bar ("Quest Arcs" | "Image Reveal")
+- [x] Word goal selector (250/500/1000/2000/5000 + custom)
+- [x] Image fetch + session creation flow with loading/error states
+- [x] AppShell: render ImageRevealPanel alongside QuestProgress
+- [x] Bottom bar Quest button highlights amber for active image reveal sessions
+- [x] eslint clean, tsc clean, vite build clean
 
 ### Phase 4 QA
-- [ ] Correctness audit
-- [ ] Dead code cleanup
+- [x] Correctness audit (eslint, tsc, vite build all pass)
+- [x] No dead code — all changes are wiring existing components
 
 ### Notes
-_(filled after completion)_
+- Tab bar replaces center title in QuestPicker header
+- Back button only shows when on arcs tab with selected arc, otherwise Close
+- Image Reveal tab shows "in progress" state when session active (prevents duplicate sessions)
+- `handleStartImageReveal` uses `getState()` for store access outside React lifecycle
+- `ImageRevealPanel` renders unconditionally in AppShell (self-hides when no session)
