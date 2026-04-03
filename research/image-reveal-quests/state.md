@@ -1,6 +1,6 @@
 # Image Reveal Quests — State
 
-## Current Phase: 2 (Not Started) — Phase 1 Complete
+## Current Phase: 3 (Not Started) — Phases 1–2 Complete
 
 ## Key File Paths (Existing)
 
@@ -25,7 +25,8 @@
 - `src/stores/documentStore.ts` — wired `imageRevealStore.addWords(delta)` into word delta pipeline
 
 ### Phase 2
-_(pending)_
+- `src/types/index.ts` — added `UnsplashImage` interface
+- `src/lib/unsplash.ts` — `fetchRandomImage()` and `loadImage()` utilities
 
 ### Phase 3
 _(pending)_

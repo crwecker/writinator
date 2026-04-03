@@ -42,6 +42,14 @@ export interface QuestProgress {
   completedAt?: string
 }
 
+export interface UnsplashImage {
+  url: string
+  width: number
+  height: number
+  photographer: string
+  photographerUrl: string
+}
+
 export interface ImageRevealSession {
   id: string
   imageUrl: string

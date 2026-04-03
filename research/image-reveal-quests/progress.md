@@ -6,8 +6,8 @@
 |-------|-------------|--------|---------|-----------|
 | 1 | Types, Store, and Canvas Renderer | Complete | 2026-04-02 | 2026-04-02 |
 | 1 QA | Verify Types, Store, and Canvas Renderer | Complete | 2026-04-02 | 2026-04-02 |
-| 2 | Unsplash API Integration | Not Started | — | — |
-| 2 QA | Verify Unsplash Integration | Not Started | — | — |
+| 2 | Unsplash API Integration | Complete | 2026-04-02 | 2026-04-02 |
+| 2 QA | Verify Unsplash Integration | Complete | 2026-04-02 | 2026-04-02 |
 | 3 | Image Reveal Panel Component | Not Started | — | — |
 | 3 QA | Verify Image Reveal Panel | Not Started | — | — |
 | 4 | Quest Picker Integration and Wiring | Not Started | — | — |
@@ -24,9 +24,15 @@
 ### Phase 1 QA
 - [x] Correctness audit (eslint, tsc, vite build all pass)
 - [x] Dead code cleanup (removed duplicate PIXEL_LEVELS from pixelate.ts)
+- [x] Added `getPixelLevelIndex` to questStore, simplified imageRevealStore round-trip
+- [x] Capped wordsWritten at wordGoal to prevent overshoot
+- [x] Added zero-dimension image guards in pixelate.ts
+- [x] Optimized animateReveal to only draw newly revealed rows (lastRevealedRow tracker)
+- [x] Removed semicolons from pixelate.ts for codebase consistency
+- [x] Dev server verified running (200 OK)
 
 ### Notes
-- `PIXEL_LEVELS` and `getPixelLevel` remain in `questStore.ts` — `imageRevealStore` imports from there
+- `PIXEL_LEVELS`, `getPixelLevel`, and `getPixelLevelIndex` in `questStore.ts` — imageRevealStore uses `getPixelLevelIndex` directly
 - `pixelate.ts` is a pure canvas utility with no store/React dependencies
 - `animateReveal` uses 40ms row stagger with requestAnimationFrame, returns cancel function
 
@@ -34,16 +40,21 @@
 
 ## Phase 2: Unsplash API Integration
 
-- [ ] `fetchRandomImage()` in `src/lib/unsplash.ts`
-- [ ] Image preloader with CORS handling (`loadImage()`)
-- [ ] Error handling for network failures and timeouts
+- [x] `fetchRandomImage()` in `src/lib/unsplash.ts`
+- [x] Image preloader with CORS handling (`loadImage()`)
+- [x] Error handling for network failures and timeouts
 
 ### Phase 2 QA
-- [ ] Correctness audit
-- [ ] Dead code cleanup
+- [x] Correctness audit (eslint, tsc, vite build all pass)
+- [x] No dead code — new file only
 
 ### Notes
-_(filled after completion)_
+- Uses official Unsplash API (`/photos/random`) with `VITE_UNSPLASH_ACCESS_KEY` env var
+- `UnsplashImage` type added to `src/types/index.ts`
+- `loadImage()` sets `crossOrigin="anonymous"` before `src` to prevent canvas tainting
+- Both `fetchRandomImage()` and `loadImage()` have 10s timeouts
+- `fetchRandomImage()` uses AbortController; `loadImage()` uses setTimeout + src clearing
+- No semicolons, named exports, pure utility — matches codebase conventions
 
 ---
 
