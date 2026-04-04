@@ -19,6 +19,7 @@ import { QuestProgress } from '../quests/QuestProgress'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { useQuestStore } from '../../stores/questStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
+import { SubDocumentLinks } from '../editor/SubDocumentLinks'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -176,6 +177,7 @@ export function AppShell() {
             onVimModeChange={handleVimModeChange}
             onEditorView={handleEditorView}
           />
+          <SubDocumentLinks />
           <BubbleToolbar editorView={editorView} />
           <SnapshotBrowser
             open={snapshotsOpen}
