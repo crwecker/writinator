@@ -1,7 +1,7 @@
 import * as localforage from 'localforage'
 import type { Snapshot } from '../types'
 
-const MAX_SNAPSHOTS_PER_DOCUMENT = 20
+const MAX_SNAPSHOTS_PER_DOCUMENT = 100
 const STORAGE_PREFIX = 'writinator-snapshots-'
 
 // Serialize writes per document to prevent concurrent reads from clobbering each other
@@ -70,4 +70,46 @@ export async function restoreSnapshot(
 
 export async function deleteAllSnapshots(documentId: string): Promise<void> {
   await localforage.removeItem(STORAGE_PREFIX + documentId)
+}
+
+export async function getAllSnapshots(): Promise<Record<string, Snapshot[]>> {
+  const result: Record<string, Snapshot[]> = {}
+  const keys = await localforage.keys()
+  for (const key of keys) {
+    if (key.startsWith(STORAGE_PREFIX)) {
+      const documentId = key.slice(STORAGE_PREFIX.length)
+      const snapshots = await localforage.getItem<Snapshot[]>(key)
+      if (snapshots && snapshots.length > 0) {
+        result[documentId] = snapshots
+      }
+    }
+  }
+  return result
+}
+
+export async function loadSnapshotsFromFile(
+  snapshots: Record<string, Snapshot[]>
+): Promise<void> {
+  // Clear existing snapshot keys
+  const keys = await localforage.keys()
+  for (const key of keys) {
+    if (key.startsWith(STORAGE_PREFIX)) {
+      await localforage.removeItem(key)
+    }
+  }
+  // Bulk-load from file
+  for (const [documentId, docSnapshots] of Object.entries(snapshots)) {
+    await localforage.setItem(STORAGE_PREFIX + documentId, docSnapshots)
+  }
+}
+
+export function deleteSnapshot(
+  documentId: string,
+  snapshotId: string
+): Promise<void> {
+  return enqueue(documentId, async () => {
+    const snapshots = await loadSnapshots(documentId)
+    const filtered = snapshots.filter((s) => s.id !== snapshotId)
+    await saveSnapshots(documentId, filtered)
+  })
 }

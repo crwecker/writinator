@@ -1,5 +1,6 @@
-import type { Book, WritinatorFile } from '../types'
+import type { Book, GlobalSettings, WritinatorFile } from '../types'
 import { migrateFile } from './migration'
+import { getAllSnapshots } from '../stores/snapshotStore'
 
 const FILE_EXTENSION = '.writinator'
 const MIME_TYPE = 'application/json'
@@ -18,8 +19,13 @@ export function supportsFileSystemAccess(): boolean {
 // Save
 // ---------------------------------------------------------------------------
 
-export async function saveBook(book: Book): Promise<void> {
-  const json = JSON.stringify(book, null, 2)
+export async function saveFile(
+  book: Book,
+  globalSettings: GlobalSettings
+): Promise<void> {
+  const snapshots = await getAllSnapshots()
+  const file: WritinatorFile = { version: 2, book, snapshots, globalSettings }
+  const json = JSON.stringify(file, null, 2)
 
   if (supportsFileSystemAccess()) {
     await saveWithFileSystemAccess(json, book.title)
@@ -27,6 +33,91 @@ export async function saveBook(book: Book): Promise<void> {
     saveWithDownload(json, book.title)
   }
 }
+
+export async function quickSave(
+  book: Book,
+  globalSettings: GlobalSettings
+): Promise<boolean> {
+  if (!storedFileHandle) return false
+
+  const snapshots = await getAllSnapshots()
+  const file: WritinatorFile = { version: 2, book, snapshots, globalSettings }
+  const json = JSON.stringify(file, null, 2)
+
+  const writable = await storedFileHandle.createWritable()
+  await writable.write(json)
+  await writable.close()
+  return true
+}
+
+export async function saveAsNewFile(
+  book: Book,
+  globalSettings: GlobalSettings
+): Promise<void> {
+  storedFileHandle = null
+  await saveFile(book, globalSettings)
+}
+
+// ---------------------------------------------------------------------------
+// Open
+// ---------------------------------------------------------------------------
+
+export async function openFile(): Promise<WritinatorFile | null> {
+  if (supportsFileSystemAccess()) {
+    return openWithFileSystemAccess()
+  }
+  return openWithFileInput()
+}
+
+async function openWithFileSystemAccess(): Promise<WritinatorFile | null> {
+  const [handle] = await window.showOpenFilePicker({
+    types: [
+      {
+        description: 'Writinator Book',
+        accept: { [MIME_TYPE]: [FILE_EXTENSION] },
+      },
+    ],
+    multiple: false,
+  })
+  storedFileHandle = handle
+  const file = await handle.getFile()
+  const text = await file.text()
+  return parseFileJSON(text)
+}
+
+function openWithFileInput(): Promise<WritinatorFile | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = FILE_EXTENSION
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) {
+        resolve(null)
+        return
+      }
+      const text = await file.text()
+      resolve(parseFileJSON(text))
+    }
+    input.click()
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Handle management
+// ---------------------------------------------------------------------------
+
+export function clearFileHandle(): void {
+  storedFileHandle = null
+}
+
+export function hasFileHandle(): boolean {
+  return storedFileHandle !== null
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 async function saveWithFileSystemAccess(
   json: string,
@@ -61,73 +152,10 @@ function saveWithDownload(json: string, title: string): void {
   URL.revokeObjectURL(url)
 }
 
-// ---------------------------------------------------------------------------
-// Open
-// ---------------------------------------------------------------------------
-
-export async function openBook(): Promise<Book | null> {
-  if (supportsFileSystemAccess()) {
-    return openWithFileSystemAccess()
-  }
-  return openWithFileInput()
-}
-
-async function openWithFileSystemAccess(): Promise<Book | null> {
-  const [handle] = await window.showOpenFilePicker({
-    types: [
-      {
-        description: 'Writinator Book',
-        accept: { [MIME_TYPE]: [FILE_EXTENSION] },
-      },
-    ],
-    multiple: false,
-  })
-  storedFileHandle = handle
-  const file = await handle.getFile()
-  const text = await file.text()
-  return parseBookJSON(text)
-}
-
-function openWithFileInput(): Promise<Book | null> {
-  return new Promise((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = FILE_EXTENSION
-    input.onchange = async () => {
-      const file = input.files?.[0]
-      if (!file) {
-        resolve(null)
-        return
-      }
-      const text = await file.text()
-      resolve(parseBookJSON(text))
-    }
-    input.click()
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Handle management
-// ---------------------------------------------------------------------------
-
-export function clearFileHandle(): void {
-  storedFileHandle = null
-}
-
-export function hasFileHandle(): boolean {
-  return storedFileHandle !== null
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function parseBookJSON(text: string): Book | null {
+function parseFileJSON(text: string): WritinatorFile | null {
   try {
     const data = JSON.parse(text)
-    // Use migrateFile to handle both old (chapters) and new (documents) formats
-    const file: WritinatorFile = migrateFile(data)
-    return file.book
+    return migrateFile(data)
   } catch {
     return null
   }

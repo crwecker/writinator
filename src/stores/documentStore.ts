@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { Book, Document, DocumentStyles } from '../types'
-import { createSnapshot } from './snapshotStore'
+import type { Book, Document, DocumentStyles, GlobalSettings, WritinatorFile } from '../types'
+import { createSnapshot, loadSnapshotsFromFile } from './snapshotStore'
 import { useQuestStore } from './questStore'
 import { useImageRevealStore } from './imageRevealStore'
 
@@ -14,17 +14,18 @@ function countWords(text: string | null): number {
 interface DocumentState {
   book: Book | null
   activeDocumentId: string | null
-  documentStyles: DocumentStyles | undefined
+  globalSettings: GlobalSettings
   _contentUpdateTimer: ReturnType<typeof setTimeout> | null
   _pendingContent: string | null
 
   // Book CRUD
   createBook: (title: string) => void
-  loadBook: (book: Book) => void
+  loadFile: (file: WritinatorFile) => void
   renameBook: (title: string) => void
 
   // Document CRUD
   addDocument: (name?: string, parentId?: string) => string
+  duplicateDocument: (id: string) => string
   renameDocument: (id: string, name: string) => void
   deleteDocument: (id: string) => void
   reorderDocuments: (ids: string[]) => void
@@ -36,10 +37,9 @@ interface DocumentState {
   updateDocumentContent: (content: string) => void
   _flushContentUpdate: () => void
 
-  // Document styles (stored separately from Book)
-  setDocumentStyles: (styles: DocumentStyles) => void
-  updateDocumentStyles: (patch: Partial<DocumentStyles>) => void
-  clearDocumentStyles: () => void
+  // Global settings
+  setGlobalSettings: (settings: GlobalSettings) => void
+  updateGlobalSettings: (patch: Partial<GlobalSettings>) => void
 }
 
 function generateId(): string {
@@ -68,7 +68,7 @@ export const useDocumentStore = create<DocumentState>()(
     (set, get) => ({
       book: null,
       activeDocumentId: null,
-      documentStyles: undefined,
+      globalSettings: {},
       _contentUpdateTimer: null,
       _pendingContent: null,
 
@@ -95,12 +95,14 @@ export const useDocumentStore = create<DocumentState>()(
         })
       },
 
-      loadBook: (book: Book) => {
+      loadFile: (file: WritinatorFile) => {
         get()._flushContentUpdate()
         set({
-          book,
-          activeDocumentId: book.documents[0]?.id ?? null,
+          book: file.book,
+          globalSettings: file.globalSettings,
+          activeDocumentId: file.book.documents[0]?.id ?? null,
         })
+        loadSnapshotsFromFile(file.snapshots)
       },
 
       renameBook: (title: string) => {
@@ -153,6 +155,64 @@ export const useDocumentStore = create<DocumentState>()(
           activeDocumentId: id,
         })
         return id
+      },
+
+      duplicateDocument: (id: string) => {
+        const { book } = get()
+        if (!book) return ''
+        const timestamp = now()
+
+        // Collect the target document and all its descendants (in order)
+        const target = book.documents.find((doc) => doc.id === id)
+        if (!target) return ''
+
+        const isDescendant = (docId: string, ancestorId: string): boolean => {
+          const doc = book.documents.find((d) => d.id === docId)
+          if (!doc?.parentId) return false
+          if (doc.parentId === ancestorId) return true
+          return isDescendant(doc.parentId, ancestorId)
+        }
+
+        // Gather original docs to copy: target + descendants in order
+        const toCopy = [target, ...book.documents.filter((doc) => isDescendant(doc.id, id))]
+
+        // Build old→new ID map
+        const idMap = new Map<string, string>()
+        for (const doc of toCopy) {
+          idMap.set(doc.id, generateId())
+        }
+
+        // Create copies with remapped IDs
+        const copies: Document[] = toCopy.map((doc, i) => ({
+          ...doc,
+          id: idMap.get(doc.id)!,
+          name: i === 0 ? `${doc.name} (copy)` : doc.name,
+          parentId: doc.parentId && idMap.has(doc.parentId)
+            ? idMap.get(doc.parentId)!
+            : doc.parentId,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }))
+
+        // Find insertion point: after the last descendant of the original
+        let lastDescIdx = book.documents.findIndex((doc) => doc.id === id)
+        for (let i = lastDescIdx + 1; i < book.documents.length; i++) {
+          if (isDescendant(book.documents[i].id, id)) {
+            lastDescIdx = i
+          } else {
+            break
+          }
+        }
+
+        const documents = [...book.documents]
+        documents.splice(lastDescIdx + 1, 0, ...copies)
+
+        const newRootId = idMap.get(id)!
+        set({
+          book: { ...book, documents, updatedAt: timestamp },
+          activeDocumentId: newRootId,
+        })
+        return newRootId
       },
 
       renameDocument: (id: string, name: string) => {
@@ -295,17 +355,13 @@ export const useDocumentStore = create<DocumentState>()(
         set({ _contentUpdateTimer: timer, _pendingContent: content })
       },
 
-      setDocumentStyles: (styles: DocumentStyles) => {
-        set({ documentStyles: styles })
+      setGlobalSettings: (settings: GlobalSettings) => {
+        set({ globalSettings: settings })
       },
 
-      updateDocumentStyles: (patch: Partial<DocumentStyles>) => {
-        const existing = get().documentStyles ?? {}
-        set({ documentStyles: { ...existing, ...patch } })
-      },
-
-      clearDocumentStyles: () => {
-        set({ documentStyles: undefined })
+      updateGlobalSettings: (patch: Partial<GlobalSettings>) => {
+        const existing = get().globalSettings
+        set({ globalSettings: { ...existing, ...patch } })
       },
 
       _flushContentUpdate: () => {
@@ -334,13 +390,24 @@ export const useDocumentStore = create<DocumentState>()(
     }),
     {
       name: 'writinator-document',
+      version: 1,
       storage: localforageStorage,
       partialize: (state) =>
         ({
           book: state.book,
           activeDocumentId: state.activeDocumentId,
-          documentStyles: state.documentStyles,
+          globalSettings: state.globalSettings,
         }) as unknown as DocumentState,
+      migrate: (persisted, version) => {
+        if (version === 0) {
+          // v0→v1: documentStyles moved into globalSettings
+          const state = persisted as Record<string, unknown>
+          const documentStyles = state.documentStyles as DocumentStyles | undefined
+          delete state.documentStyles
+          state.globalSettings = { documentStyles } as GlobalSettings
+        }
+        return persisted as DocumentState
+      },
     }
   )
 )

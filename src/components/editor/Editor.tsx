@@ -73,7 +73,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
   const isRendered = mode === 'rendered'
 
   // Cache document styles for heading overrides
-  const docStyles = useDocumentStore.getState().documentStyles
+  const docStyles = useDocumentStore.getState().globalSettings.documentStyles
 
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i)
@@ -577,7 +577,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
               selection: { anchor: from + md.length },
             })
             if (styles) {
-              useDocumentStore.getState().updateDocumentStyles(styles)
+              const existing = useDocumentStore.getState().globalSettings.documentStyles ?? {}
+              useDocumentStore.getState().updateGlobalSettings({ documentStyles: { ...existing, ...styles } })
             }
             return true
           },
