@@ -29,9 +29,8 @@ interface DocumentState {
   renameDocument: (id: string, name: string) => void
   deleteDocument: (id: string) => void
   reorderDocuments: (ids: string[]) => void
+  moveDocument: (id: string, newParentId: string | undefined, insertIndex: number) => void
   setActiveDocument: (id: string | null) => void
-  indentDocument: (id: string) => void
-  outdentDocument: (id: string) => void
 
   // Content
   updateDocumentContent: (content: string) => void
@@ -44,6 +43,54 @@ interface DocumentState {
 
 function generateId(): string {
   return crypto.randomUUID()
+}
+
+/** Walk up the parentId chain to check if docId is a descendant of ancestorId */
+function isDescendant(documents: Document[], docId: string, ancestorId: string): boolean {
+  let currentId: string | undefined = docId
+  while (currentId) {
+    const doc = documents.find((d) => d.id === currentId)
+    if (!doc?.parentId) return false
+    if (doc.parentId === ancestorId) return true
+    currentId = doc.parentId
+  }
+  return false
+}
+
+/** Returns the depth of a document (0 for top-level / undefined id) */
+function getDocumentDepth(documents: Document[], id: string | undefined): number {
+  let depth = 0
+  let currentId = id
+  while (currentId) {
+    const doc = documents.find((d) => d.id === currentId)
+    if (!doc?.parentId) break
+    depth++
+    currentId = doc.parentId
+  }
+  return depth
+}
+
+/** Returns the max depth below this document (0 if leaf) */
+function getSubtreeDepth(documents: Document[], id: string): number {
+  const children = documents.filter((d) => d.parentId === id)
+  if (children.length === 0) return 0
+  return 1 + Math.max(...children.map((c) => getSubtreeDepth(documents, c.id)))
+}
+
+/** Collect a document and all its descendants in flat-array order */
+function collectSubtree(documents: Document[], id: string): Document[] {
+  const ids = new Set<string>([id])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const doc of documents) {
+      if (doc.parentId && ids.has(doc.parentId) && !ids.has(doc.id)) {
+        ids.add(doc.id)
+        changed = true
+      }
+    }
+  }
+  return documents.filter((doc) => ids.has(doc.id))
 }
 
 function now(): string {
@@ -133,14 +180,8 @@ export const useDocumentStore = create<DocumentState>()(
           if (parentIdx !== -1) {
             // Find the last descendant of this parent
             insertIdx = parentIdx + 1
-            const isDescendant = (docId: string, ancestorId: string): boolean => {
-              const doc = book.documents.find((d) => d.id === docId)
-              if (!doc?.parentId) return false
-              if (doc.parentId === ancestorId) return true
-              return isDescendant(doc.parentId, ancestorId)
-            }
             for (let i = parentIdx + 1; i < book.documents.length; i++) {
-              if (isDescendant(book.documents[i].id, parentId)) {
+              if (isDescendant(book.documents, book.documents[i].id, parentId)) {
                 insertIdx = i + 1
               } else {
                 break
@@ -166,15 +207,8 @@ export const useDocumentStore = create<DocumentState>()(
         const target = book.documents.find((doc) => doc.id === id)
         if (!target) return ''
 
-        const isDescendant = (docId: string, ancestorId: string): boolean => {
-          const doc = book.documents.find((d) => d.id === docId)
-          if (!doc?.parentId) return false
-          if (doc.parentId === ancestorId) return true
-          return isDescendant(doc.parentId, ancestorId)
-        }
-
         // Gather original docs to copy: target + descendants in order
-        const toCopy = [target, ...book.documents.filter((doc) => isDescendant(doc.id, id))]
+        const toCopy = collectSubtree(book.documents, id)
 
         // Build old→new ID map
         const idMap = new Map<string, string>()
@@ -195,9 +229,10 @@ export const useDocumentStore = create<DocumentState>()(
         }))
 
         // Find insertion point: after the last descendant of the original
+        const subtreeIds = new Set(toCopy.map((d) => d.id))
         let lastDescIdx = book.documents.findIndex((doc) => doc.id === id)
         for (let i = lastDescIdx + 1; i < book.documents.length; i++) {
-          if (isDescendant(book.documents[i].id, id)) {
+          if (subtreeIds.has(book.documents[i].id)) {
             lastDescIdx = i
           } else {
             break
@@ -281,43 +316,63 @@ export const useDocumentStore = create<DocumentState>()(
         set({ activeDocumentId: id })
       },
 
-      indentDocument: (id: string) => {
+      moveDocument: (id: string, newParentId: string | undefined, insertIndex: number) => {
         const { book } = get()
         if (!book) return
-        // Find the previous sibling at the same level — that becomes the new parent
-        const document = book.documents.find((doc) => doc.id === id)
-        if (!document) return
-        const siblings = book.documents.filter((doc) => doc.parentId === document.parentId)
-        const idx = siblings.findIndex((doc) => doc.id === id)
-        if (idx <= 0) return // no previous sibling to nest under
-        const newParentId = siblings[idx - 1].id
-        set({
-          book: {
-            ...book,
-            documents: book.documents.map((doc) =>
-              doc.id === id ? { ...doc, parentId: newParentId, updatedAt: now() } : doc
-            ),
-            updatedAt: now(),
-          },
-        })
-      },
 
-      outdentDocument: (id: string) => {
-        const { book } = get()
-        if (!book) return
-        const document = book.documents.find((doc) => doc.id === id)
-        if (!document?.parentId) return // already top-level
-        const parent = book.documents.find((doc) => doc.id === document.parentId)
-        if (!parent) return
-        // Move to parent's level, right after parent
+        const doc = book.documents.find((d) => d.id === id)
+        if (!doc) return
+
+        // Cannot move into own descendants (circular)
+        if (newParentId && isDescendant(book.documents, newParentId, id)) return
+
+        // Depth check: new depth + subtree depth must not exceed MAX_DEPTH (4)
+        const newDepth = newParentId ? getDocumentDepth(book.documents, newParentId) + 1 : 0
+        const subtreeDepth = getSubtreeDepth(book.documents, id)
+        if (newDepth + subtreeDepth > 4) return
+
+        // Collect the block to move (document + descendants in order)
+        const block = collectSubtree(book.documents, id)
+        const blockIds = new Set(block.map((d) => d.id))
+
+        // Remove block from array
+        const remaining = book.documents.filter((d) => !blockIds.has(d.id))
+
+        // Update parentId on the moved document
+        block[0] = { ...block[0], parentId: newParentId, updatedAt: now() }
+
+        // Find new siblings and determine insertion point in flat array
+        const newSiblings = remaining.filter((d) => d.parentId === newParentId)
+
+        let flatInsertIdx: number
+        if (insertIndex >= newSiblings.length) {
+          // Insert after last sibling's subtree
+          if (newSiblings.length === 0) {
+            if (newParentId) {
+              // Insert right after the parent
+              const parentIdx = remaining.findIndex((d) => d.id === newParentId)
+              flatInsertIdx = parentIdx + 1
+            } else {
+              flatInsertIdx = remaining.length
+            }
+          } else {
+            const lastSibling = newSiblings[newSiblings.length - 1]
+            const lastSiblingSubtree = collectSubtree(remaining, lastSibling.id)
+            const lastDocInSubtree = lastSiblingSubtree[lastSiblingSubtree.length - 1]
+            flatInsertIdx = remaining.indexOf(lastDocInSubtree) + 1
+          }
+        } else {
+          // Insert before the sibling at insertIndex
+          const targetSibling = newSiblings[insertIndex]
+          flatInsertIdx = remaining.indexOf(targetSibling)
+        }
+
+        // Splice block back in
+        const result = [...remaining]
+        result.splice(flatInsertIdx, 0, ...block)
+
         set({
-          book: {
-            ...book,
-            documents: book.documents.map((doc) =>
-              doc.id === id ? { ...doc, parentId: parent.parentId, updatedAt: now() } : doc
-            ),
-            updatedAt: now(),
-          },
+          book: { ...book, documents: result, updatedAt: now() },
         })
       },
 
