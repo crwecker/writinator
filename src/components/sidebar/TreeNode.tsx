@@ -43,6 +43,7 @@ export function TreeNode({
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState(doc.name)
   const [showContextMenu, setShowContextMenu] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   const [showIconPicker, setShowIconPicker] = useState(false)
   const [iconPickerRect, setIconPickerRect] = useState({ top: 0, left: 0 })
@@ -70,6 +71,7 @@ export function TreeNode({
     function handleClickOutside(e: MouseEvent) {
       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
         setShowContextMenu(false)
+        setShowDeleteConfirm(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -93,6 +95,7 @@ export function TreeNode({
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault()
     setContextMenuPos({ x: e.clientX, y: e.clientY })
+    setShowDeleteConfirm(false)
     setShowContextMenu(true)
   }
 
@@ -100,7 +103,30 @@ export function TreeNode({
     e.stopPropagation()
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setContextMenuPos({ x: rect.left, y: rect.bottom + 2 })
+    setShowDeleteConfirm(false)
     setShowContextMenu(true)
+  }
+
+  function handleDuplicate() {
+    useDocumentStore.getState().duplicateDocument(doc.id)
+    setShowContextMenu(false)
+  }
+
+  function getDescendantCount(): number {
+    const book = useDocumentStore.getState().book
+    if (!book) return 0
+    const ids = new Set<string>([doc.id])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const d of book.documents) {
+        if (d.parentId && ids.has(d.parentId) && !ids.has(d.id)) {
+          ids.add(d.id)
+          changed = true
+        }
+      }
+    }
+    return ids.size - 1
   }
 
   function openIconPicker() {
@@ -225,56 +251,104 @@ export function TreeNode({
             className="fixed z-50 bg-gray-800 border border-gray-700 rounded shadow-lg py-1 min-w-[140px]"
             style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
           >
-            <button
-              className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
-              onClick={(e) => {
-                e.stopPropagation()
-                startEditing()
-              }}
-            >
-              Rename
-            </button>
-            <button
-              className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
-              onClick={(e) => {
-                e.stopPropagation()
-                openIconPicker()
-              }}
-            >
-              Change Icon
-            </button>
-            <button
-              className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
-              onClick={(e) => {
-                e.stopPropagation()
-                openColorPicker()
-              }}
-            >
-              Change Color
-            </button>
-            <button
-              className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowContextMenu(false)
-                onAddSubDocument()
-              }}
-            >
-              Add sub-document
-            </button>
-            {isDeletable && (
+            {showDeleteConfirm ? (
+              <div className="px-3 py-2">
+                <p className="text-sm text-gray-200 mb-2">
+                  {(() => {
+                    const count = getDescendantCount()
+                    return count > 0
+                      ? `Delete '${doc.name}' and ${count} sub-document${count > 1 ? 's' : ''}?`
+                      : `Delete '${doc.name}'?`
+                  })()}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="text-sm text-gray-400 hover:text-white"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setShowContextMenu(false)
+                      setShowDeleteConfirm(false)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded text-sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setShowContextMenu(false)
+                      setShowDeleteConfirm(false)
+                      onDelete()
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : (
               <>
+                <button
+                  className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    startEditing()
+                  }}
+                >
+                  Rename
+                </button>
+                <button
+                  className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDuplicate()
+                  }}
+                >
+                  Duplicate
+                </button>
                 <div className="border-t border-gray-700 my-1" />
                 <button
-                  className="w-full text-left px-3 py-1 text-sm text-coral-100 hover:bg-gray-700"
+                  className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openIconPicker()
+                  }}
+                >
+                  Change Icon
+                </button>
+                <button
+                  className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openColorPicker()
+                  }}
+                >
+                  Change Color
+                </button>
+                <div className="border-t border-gray-700 my-1" />
+                <button
+                  className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
                   onClick={(e) => {
                     e.stopPropagation()
                     setShowContextMenu(false)
-                    onDelete()
+                    onAddSubDocument()
                   }}
                 >
-                  Delete
+                  Add sub-document
                 </button>
+                {isDeletable && (
+                  <>
+                    <div className="border-t border-gray-700 my-1" />
+                    <button
+                      className="w-full text-left px-3 py-1 text-sm text-coral-100 hover:bg-gray-700"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setShowDeleteConfirm(true)
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>
