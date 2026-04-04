@@ -3,6 +3,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
 import { getIconComponent } from '../../lib/icons'
 import { IconPicker } from './IconPicker'
+import { ColorPicker } from './ColorPicker'
 import { useDocumentStore } from '../../stores/documentStore'
 import type { Document } from '../../types'
 
@@ -45,6 +46,8 @@ export function TreeNode({
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   const [showIconPicker, setShowIconPicker] = useState(false)
   const [iconPickerRect, setIconPickerRect] = useState({ top: 0, left: 0 })
+  const [showColorPicker, setShowColorPicker] = useState(false)
+  const [colorPickerRect, setColorPickerRect] = useState({ top: 0, left: 0 })
   const inputRef = useRef<HTMLInputElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
 
@@ -111,6 +114,17 @@ export function TreeNode({
     setShowIconPicker(false)
   }
 
+  function openColorPicker() {
+    setColorPickerRect({ top: contextMenuPos.y, left: contextMenuPos.x + 10 })
+    setShowColorPicker(true)
+    setShowContextMenu(false)
+  }
+
+  function handleColorSelect(color: string | undefined) {
+    useDocumentStore.getState().setDocumentColor(doc.id, color)
+    setShowColorPicker(false)
+  }
+
   const indicatorColor = dropIndicator === 'invalid' ? 'bg-red-500' : 'bg-blue-400'
 
   return (
@@ -125,7 +139,10 @@ export function TreeNode({
 
       {/* Main row */}
       <div
-        style={{ paddingLeft: `${depth * 20}px` }}
+        style={{
+          paddingLeft: `${depth * 20 + (doc.color ? 6 : 0)}px`,
+          borderLeft: doc.color ? `2px solid ${doc.color}` : '2px solid transparent',
+        }}
         className={`group flex items-center gap-1 py-1 px-2 cursor-pointer select-none text-sm rounded-sm mx-1
           ${isActive ? 'bg-blue-300/20 text-white' : 'text-gray-300 hover:bg-gray-700/50'}
           ${isDragging || isDragSource ? 'opacity-20' : ''}
@@ -177,7 +194,7 @@ export function TreeNode({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="truncate flex-1">{doc.name}</span>
+          <span className="truncate flex-1" style={doc.color ? { color: doc.color } : undefined}>{doc.name}</span>
         )}
 
         {/* Right zone: action buttons (visible on hover) */}
@@ -230,6 +247,15 @@ export function TreeNode({
               className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
               onClick={(e) => {
                 e.stopPropagation()
+                openColorPicker()
+              }}
+            >
+              Change Color
+            </button>
+            <button
+              className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
+              onClick={(e) => {
+                e.stopPropagation()
                 setShowContextMenu(false)
                 onAddSubDocument()
               }}
@@ -261,6 +287,15 @@ export function TreeNode({
         onClose={() => setShowIconPicker(false)}
         onSelect={handleIconSelect}
         anchorRect={iconPickerRect}
+      />
+
+      {/* Color picker */}
+      <ColorPicker
+        open={showColorPicker}
+        onClose={() => setShowColorPicker(false)}
+        onSelect={handleColorSelect}
+        anchorRect={colorPickerRect}
+        currentColor={doc.color}
       />
 
       {/* Insert-after indicator line */}

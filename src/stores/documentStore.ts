@@ -28,6 +28,7 @@ interface DocumentState {
   duplicateDocument: (id: string) => string
   renameDocument: (id: string, name: string) => void
   setDocumentIcon: (id: string, icon: string | undefined) => void
+  setDocumentColor: (id: string, color: string | undefined) => void
   deleteDocument: (id: string) => void
   reorderDocuments: (ids: string[]) => void
   moveDocument: (id: string, newParentId: string | undefined, insertIndex: number) => void
@@ -273,6 +274,20 @@ export const useDocumentStore = create<DocumentState>()(
             ...book,
             documents: book.documents.map((doc) =>
               doc.id === id ? { ...doc, icon, updatedAt: now() } : doc
+            ),
+            updatedAt: now(),
+          },
+        })
+      },
+
+      setDocumentColor: (id: string, color: string | undefined) => {
+        const { book } = get()
+        if (!book) return
+        set({
+          book: {
+            ...book,
+            documents: book.documents.map((doc) =>
+              doc.id === id ? { ...doc, color, updatedAt: now() } : doc
             ),
             updatedAt: now(),
           },
