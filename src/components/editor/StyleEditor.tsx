@@ -365,7 +365,7 @@ function NamedStyleFields({
 
 export function StyleEditor({ open, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const documentStyles = useDocumentStore((s) => s.book?.documentStyles)
+  const documentStyles = useDocumentStore((s) => s.documentStyles)
   const updateDocumentStyles = useDocumentStore((s) => s.updateDocumentStyles)
   const clearDocumentStyles = useDocumentStore((s) => s.clearDocumentStyles)
 
@@ -496,11 +496,8 @@ export function StyleEditor({ open, onClose }: Props) {
                 onDelete={() => {
                   const existing = documentStyles?.namedStyles ?? {}
                   const { [name]: removed, ...rest } = existing
-                  // Replace namedStyles entirely by setting on the book
-                  const { book } = useDocumentStore.getState()
-                  if (!book) return
                   useDocumentStore.getState().setDocumentStyles({
-                    ...book.documentStyles,
+                    ...documentStyles,
                     namedStyles: rest,
                   })
                 }}

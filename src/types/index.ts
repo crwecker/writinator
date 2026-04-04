@@ -1,8 +1,10 @@
-export interface Chapter {
+export interface Document {
   id: string
   name: string
   content: string | null
   parentId?: string
+  icon?: string       // Lucide icon name
+  color?: string      // hex color
   createdAt: string
   updatedAt: string
 }
@@ -10,8 +12,7 @@ export interface Chapter {
 export interface Book {
   id: string
   title: string
-  chapters: Chapter[]
-  documentStyles?: DocumentStyles
+  documents: Document[]
   createdAt: string
   updatedAt: string
 }
@@ -70,7 +71,7 @@ export interface ImageRevealSession {
 
 export interface Snapshot {
   id: string
-  chapterId: string
+  documentId: string
   content: string
   wordCount: number
   timestamp: string
@@ -112,4 +113,15 @@ export interface EditorPreferences {
   fontSize: number
   distractionFree: boolean
   renderMode: 'source' | 'rendered'
+}
+
+export interface GlobalSettings {
+  documentStyles?: DocumentStyles
+}
+
+export interface WritinatorFile {
+  version: 2
+  book: Book
+  snapshots: Record<string, Snapshot[]>  // keyed by document ID
+  globalSettings: GlobalSettings
 }

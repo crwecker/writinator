@@ -14,28 +14,28 @@ import {
 } from '@dnd-kit/sortable'
 import { useDocumentStore } from '../../stores/documentStore'
 import { TreeNode } from './TreeNode'
-import type { Chapter } from '../../types'
+import type { Document } from '../../types'
 
 interface SidebarProps {
   collapsed?: boolean
-  onChapterSelect?: () => void
+  onDocumentSelect?: () => void
 }
 
-function getChildren(chapters: Chapter[], parentId?: string): Chapter[] {
-  return chapters.filter((ch) => ch.parentId === parentId)
+function getChildren(documents: Document[], parentId?: string): Document[] {
+  return documents.filter((doc) => doc.parentId === parentId)
 }
 
-export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
+export function Sidebar({ collapsed, onDocumentSelect }: SidebarProps) {
   const book = useDocumentStore((s) => s.book)
-  const activeChapterId = useDocumentStore((s) => s.activeChapterId)
-  const setActiveChapter = useDocumentStore((s) => s.setActiveChapter)
-  const addChapter = useDocumentStore((s) => s.addChapter)
+  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
+  const setActiveDocument = useDocumentStore((s) => s.setActiveDocument)
+  const addDocument = useDocumentStore((s) => s.addDocument)
   const renameBook = useDocumentStore((s) => s.renameBook)
-  const renameChapter = useDocumentStore((s) => s.renameChapter)
-  const deleteChapter = useDocumentStore((s) => s.deleteChapter)
-  const reorderChapters = useDocumentStore((s) => s.reorderChapters)
-  const indentChapter = useDocumentStore((s) => s.indentChapter)
-  const outdentChapter = useDocumentStore((s) => s.outdentChapter)
+  const renameDocument = useDocumentStore((s) => s.renameDocument)
+  const deleteDocument = useDocumentStore((s) => s.deleteDocument)
+  const reorderDocuments = useDocumentStore((s) => s.reorderDocuments)
+  const indentDocument = useDocumentStore((s) => s.indentDocument)
+  const outdentDocument = useDocumentStore((s) => s.outdentDocument)
 
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
@@ -55,21 +55,21 @@ export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
     if (!over || active.id === over.id || !book) return
 
     // Only reorder among siblings
-    const draggedChapter = book.chapters.find((ch) => ch.id === active.id)
-    const overChapter = book.chapters.find((ch) => ch.id === over.id)
-    if (!draggedChapter || !overChapter) return
-    if (draggedChapter.parentId !== overChapter.parentId) return
+    const draggedDocument = book.documents.find((doc) => doc.id === active.id)
+    const overDocument = book.documents.find((doc) => doc.id === over.id)
+    if (!draggedDocument || !overDocument) return
+    if (draggedDocument.parentId !== overDocument.parentId) return
 
-    const oldIndex = book.chapters.findIndex((ch) => ch.id === active.id)
-    const newIndex = book.chapters.findIndex((ch) => ch.id === over.id)
+    const oldIndex = book.documents.findIndex((doc) => doc.id === active.id)
+    const newIndex = book.documents.findIndex((doc) => doc.id === over.id)
     if (oldIndex === -1 || newIndex === -1) return
 
     const newOrder = arrayMove(
-      book.chapters.map((ch) => ch.id),
+      book.documents.map((doc) => doc.id),
       oldIndex,
       newIndex
     )
-    reorderChapters(newOrder)
+    reorderDocuments(newOrder)
   }
 
   function startEditingTitle() {
@@ -94,43 +94,43 @@ export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
     })
   }
 
-  function renderChapters(parentId?: string, depth = 0): React.ReactNode {
-    const children = getChildren(book!.chapters, parentId)
+  function renderDocuments(parentId?: string, depth = 0): React.ReactNode {
+    const children = getChildren(book!.documents, parentId)
     if (children.length === 0) return null
 
     return (
       <SortableContext
-        items={children.map((ch) => ch.id)}
+        items={children.map((doc) => doc.id)}
         strategy={verticalListSortingStrategy}
       >
-        {children.map((chapter) => {
-          const hasChildren = book!.chapters.some((ch) => ch.parentId === chapter.id)
-          const isCollapsed = collapsedNodes.has(chapter.id)
+        {children.map((document) => {
+          const hasChildren = book!.documents.some((doc) => doc.parentId === document.id)
+          const isCollapsed = collapsedNodes.has(document.id)
           return (
-            <div key={chapter.id}>
+            <div key={document.id}>
               <TreeNode
-                chapter={chapter}
+                doc={document}
                 depth={depth}
-                isActive={chapter.id === activeChapterId}
+                isActive={document.id === activeDocumentId}
                 hasChildren={hasChildren}
                 isCollapsed={isCollapsed}
-                onToggleCollapse={() => toggleCollapsed(chapter.id)}
+                onToggleCollapse={() => toggleCollapsed(document.id)}
                 onClick={() => {
-                  setActiveChapter(chapter.id)
-                  onChapterSelect?.()
+                  setActiveDocument(document.id)
+                  onDocumentSelect?.()
                 }}
-                onRename={(name) => renameChapter(chapter.id, name)}
-                onDelete={() => deleteChapter(chapter.id)}
-                onAddSubChapter={() => addChapter(undefined, chapter.id)}
-                onIndent={() => indentChapter(chapter.id)}
-                onOutdent={() => outdentChapter(chapter.id)}
-                isDeletable={book!.chapters.length > 1}
+                onRename={(name) => renameDocument(document.id, name)}
+                onDelete={() => deleteDocument(document.id)}
+                onAddSubDocument={() => addDocument(undefined, document.id)}
+                onIndent={() => indentDocument(document.id)}
+                onOutdent={() => outdentDocument(document.id)}
+                isDeletable={book!.documents.length > 1}
                 canIndent={
-                  getChildren(book!.chapters, chapter.parentId).findIndex((ch) => ch.id === chapter.id) > 0
+                  getChildren(book!.documents, document.parentId).findIndex((doc) => doc.id === document.id) > 0
                 }
-                canOutdent={!!chapter.parentId}
+                canOutdent={!!document.parentId}
               />
-              {hasChildren && !isCollapsed && renderChapters(chapter.id, depth + 1)}
+              {hasChildren && !isCollapsed && renderDocuments(document.id, depth + 1)}
             </div>
           )
         })}
@@ -183,7 +183,7 @@ export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
           )}
         </div>
 
-        {/* Chapter tree */}
+        {/* Document tree */}
         {expanded && (
           <DndContext
             sensors={sensors}
@@ -191,17 +191,17 @@ export function Sidebar({ collapsed, onChapterSelect }: SidebarProps) {
             onDragEnd={handleDragEnd}
           >
             <div className="flex-1 overflow-y-auto py-1">
-              {renderChapters(undefined, 0)}
+              {renderDocuments(undefined, 0)}
             </div>
           </DndContext>
         )}
 
-        {/* Add chapter button */}
+        {/* Add document button */}
         <button
           className="mx-2 my-2 px-2 py-1 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded border border-dashed border-gray-700 hover:border-gray-500 transition-colors"
-          onClick={() => addChapter()}
+          onClick={() => addDocument()}
         >
-          + Add Chapter
+          + Add Document
         </button>
       </div>
     </div>

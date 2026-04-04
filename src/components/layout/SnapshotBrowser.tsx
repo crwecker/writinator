@@ -34,13 +34,13 @@ export function SnapshotBrowser({ open, onClose, onRestore }: Props) {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [previewId, setPreviewId] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const activeChapterId = useDocumentStore((s) => s.activeChapterId)
+  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
 
   const load = useCallback(async () => {
-    if (!activeChapterId) return
-    setSnapshots(await getSnapshots(activeChapterId))
+    if (!activeDocumentId) return
+    setSnapshots(await getSnapshots(activeDocumentId))
     setPreviewId(null)
-  }, [activeChapterId])
+  }, [activeDocumentId])
 
   useEffect(() => {
     if (open) load()
@@ -113,7 +113,7 @@ export function SnapshotBrowser({ open, onClose, onRestore }: Props) {
         <div className="flex-1 overflow-y-auto">
           {snapshots.length === 0 ? (
             <div className="px-4 py-8 text-center text-gray-500 text-sm">
-              No snapshots yet. Snapshots are created on save, chapter switch, and every 5 minutes.
+              No snapshots yet. Snapshots are created on save, document switch, and every 5 minutes.
             </div>
           ) : (
             snapshots.map((s) => (

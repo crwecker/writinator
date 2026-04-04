@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Chapter } from '../../types'
+import type { Document } from '../../types'
 
 interface TreeNodeProps {
-  chapter: Chapter
+  doc: Document
   depth: number
   isActive: boolean
   hasChildren: boolean
@@ -13,7 +13,7 @@ interface TreeNodeProps {
   onClick: () => void
   onRename: (name: string) => void
   onDelete: () => void
-  onAddSubChapter: () => void
+  onAddSubDocument: () => void
   onIndent: () => void
   onOutdent: () => void
   isDeletable: boolean
@@ -22,7 +22,7 @@ interface TreeNodeProps {
 }
 
 export function TreeNode({
-  chapter,
+  doc,
   depth,
   isActive,
   hasChildren,
@@ -31,7 +31,7 @@ export function TreeNode({
   onClick,
   onRename,
   onDelete,
-  onAddSubChapter,
+  onAddSubDocument,
   onIndent,
   onOutdent,
   isDeletable,
@@ -39,7 +39,7 @@ export function TreeNode({
   canOutdent,
 }: TreeNodeProps) {
   const [isEditing, setIsEditing] = useState(false)
-  const [editValue, setEditValue] = useState(chapter.name)
+  const [editValue, setEditValue] = useState(doc.name)
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   const inputRef = useRef<HTMLInputElement>(null)
@@ -52,7 +52,7 @@ export function TreeNode({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: chapter.id })
+  } = useSortable({ id: doc.id })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -78,14 +78,14 @@ export function TreeNode({
   }, [showContextMenu])
 
   function startEditing() {
-    setEditValue(chapter.name)
+    setEditValue(doc.name)
     setIsEditing(true)
     setShowContextMenu(false)
   }
 
   function commitRename() {
     const trimmed = editValue.trim()
-    if (trimmed && trimmed !== chapter.name) {
+    if (trimmed && trimmed !== doc.name) {
       onRename(trimmed)
     }
     setIsEditing(false)
@@ -140,7 +140,7 @@ export function TreeNode({
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
-        <span className="truncate flex-1">{chapter.name}</span>
+        <span className="truncate flex-1">{doc.name}</span>
       )}
 
       {showContextMenu && (
@@ -163,10 +163,10 @@ export function TreeNode({
             onClick={(e) => {
               e.stopPropagation()
               setShowContextMenu(false)
-              onAddSubChapter()
+              onAddSubDocument()
             }}
           >
-            Add sub-chapter
+            Add sub-document
           </button>
           {canIndent && (
             <button

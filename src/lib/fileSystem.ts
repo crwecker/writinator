@@ -1,4 +1,5 @@
-import type { Book } from '../types'
+import type { Book, WritinatorFile } from '../types'
+import { migrateFile } from './migration'
 
 const FILE_EXTENSION = '.writinator'
 const MIME_TYPE = 'application/json'
@@ -124,10 +125,9 @@ export function hasFileHandle(): boolean {
 function parseBookJSON(text: string): Book | null {
   try {
     const data = JSON.parse(text)
-    if (!data.id || !data.title || !Array.isArray(data.chapters)) {
-      return null
-    }
-    return data as Book
+    // Use migrateFile to handle both old (chapters) and new (documents) formats
+    const file: WritinatorFile = migrateFile(data)
+    return file.book
   } catch {
     return null
   }

@@ -34,7 +34,7 @@ export function AppShell() {
   const titleRef = useRef<HTMLButtonElement>(null)
 
   const book = useDocumentStore((s) => s.book)
-  const activeChapterId = useDocumentStore((s) => s.activeChapterId)
+  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
   const createBook = useDocumentStore((s) => s.createBook)
   const loadBook = useDocumentStore((s) => s.loadBook)
   const distractionFree = useEditorStore((s) => s.distractionFree)
@@ -42,7 +42,7 @@ export function AppShell() {
   const renderMode = useEditorStore((s) => s.renderMode)
   const toggleRenderMode = useEditorStore((s) => s.toggleRenderMode)
 
-  const activeChapter = book?.chapters.find((ch) => ch.id === activeChapterId)
+  const activeDocument = book?.documents.find((doc) => doc.id === activeDocumentId)
 
   const handleWordCountChange = useCallback((c: number) => setWordCount(c), [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
@@ -54,7 +54,7 @@ export function AppShell() {
       changes: { from: 0, to: editorView.state.doc.length, insert: content },
     })
     // Persist the restored content
-    useDocumentStore.getState().updateChapterContent(content)
+    useDocumentStore.getState().updateDocumentContent(content)
   }, [editorView])
 
   // Close dropdown when clicking outside
@@ -100,10 +100,10 @@ export function AppShell() {
         state._flushContentUpdate()
         const currentBook = useDocumentStore.getState().book
         if (currentBook) {
-          const chId = useDocumentStore.getState().activeChapterId
-          const ch = chId ? currentBook.chapters.find((c) => c.id === chId) : null
-          if (ch?.content) {
-            createSnapshot(chId!, ch.content, 'manual')
+          const docId = useDocumentStore.getState().activeDocumentId
+          const doc = docId ? currentBook.documents.find((d) => d.id === docId) : null
+          if (doc?.content) {
+            createSnapshot(docId!, doc.content, 'manual')
           }
           saveBook(currentBook)
         }
@@ -132,14 +132,14 @@ export function AppShell() {
   // Auto-snapshot every 5 minutes
   useEffect(() => {
     const interval = setInterval(() => {
-      const { book, activeChapterId } = useDocumentStore.getState()
-      if (!book || !activeChapterId) return
+      const { book, activeDocumentId } = useDocumentStore.getState()
+      if (!book || !activeDocumentId) return
       useDocumentStore.getState()._flushContentUpdate()
-      const chapter = useDocumentStore.getState().book?.chapters.find(
-        (ch) => ch.id === activeChapterId
+      const document = useDocumentStore.getState().book?.documents.find(
+        (doc) => doc.id === activeDocumentId
       )
-      if (chapter?.content) {
-        createSnapshot(activeChapterId, chapter.content, 'auto')
+      if (document?.content) {
+        createSnapshot(activeDocumentId, document.content, 'auto')
       }
     }, 5 * 60 * 1000)
     return () => clearInterval(interval)
@@ -153,7 +153,7 @@ export function AppShell() {
   }, [book, createBook])
 
   const titleText = book
-    ? `${book.title}${activeChapter ? ` - ${activeChapter.name}` : ''}`
+    ? `${book.title}${activeDocument ? ` - ${activeDocument.name}` : ''}`
     : 'Writinator'
 
   return (
@@ -182,7 +182,7 @@ export function AppShell() {
               ref={dropdownRef}
               className="absolute top-full left-0 mt-0 z-50 w-[280px] max-h-[70vh] overflow-y-auto bg-gray-900 border border-gray-700 rounded-b-lg shadow-xl"
             >
-              <Sidebar onChapterSelect={() => setDropdownOpen(false)} />
+              <Sidebar onDocumentSelect={() => setDropdownOpen(false)} />
             </div>
           )}
         </div>

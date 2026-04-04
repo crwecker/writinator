@@ -151,7 +151,7 @@ function wrapWithSpanClass(view: EditorView, className: string) {
 }
 
 export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
-  const namedStyles = useDocumentStore((s) => s.book?.documentStyles?.namedStyles)
+  const namedStyles = useDocumentStore((s) => s.documentStyles?.namedStyles)
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
 
   const updatePosition = useCallback(() => {
