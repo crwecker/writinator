@@ -1,5 +1,6 @@
 import type { Book, Document } from '../types'
 import type { Root, Content, PhrasingContent } from 'mdast'
+import JSZip from 'jszip'
 import { parseMarkdown } from './ast'
 
 // ─── Helpers ────────────────────────────────────────────
@@ -671,4 +672,47 @@ export async function exportAsPdf(book: Book): Promise<void> {
   }
 
   pdfMake.createPdf(docDefinition).download(`${sanitizeFilename(book.title)}.pdf`)
+}
+
+// ─── ZIP Export ────────────────────────────────────────
+
+function formatDocumentContent(doc: Document, format: 'md' | 'txt' | 'html'): string {
+  const content = doc.content || ''
+  if (format === 'html') {
+    return `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${escapeHtml(doc.name)}</title></head><body><h1>${escapeHtml(doc.name)}</h1><pre>${escapeHtml(content)}</pre></body></html>`
+  }
+  return content
+}
+
+export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Promise<void> {
+  const zip = new JSZip()
+  const rootFolder = zip.folder(sanitizeFilename(book.title))!
+
+  const ext = format === 'md' ? '.md' : format === 'txt' ? '.txt' : '.html'
+
+  function addDocuments(parentId: string | undefined, folder: JSZip) {
+    const children = book.documents.filter(d => d.parentId === parentId)
+    const usedNames = new Map<string, number>()
+
+    for (const doc of children) {
+      let name = sanitizeFilename(doc.name)
+      const count = usedNames.get(name) || 0
+      usedNames.set(name, count + 1)
+      if (count > 0) name = `${name} (${count + 1})`
+
+      const content = formatDocumentContent(doc, format)
+      folder.file(name + ext, content)
+
+      const hasChildren = book.documents.some(d => d.parentId === doc.id)
+      if (hasChildren) {
+        const subFolder = folder.folder(name)!
+        addDocuments(doc.id, subFolder)
+      }
+    }
+  }
+
+  addDocuments(undefined, rootFolder)
+
+  const blob = await zip.generateAsync({ type: 'blob' })
+  download(blob, `${sanitizeFilename(book.title)}-${format}-export.zip`, 'application/zip')
 }
