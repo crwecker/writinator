@@ -1,6 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { createElement, useState, useRef, useEffect } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
-import { FileText, ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
+import { ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
+import { getIconComponent } from '../../lib/icons'
+import { IconPicker } from './IconPicker'
+import { useDocumentStore } from '../../stores/documentStore'
 import type { Document } from '../../types'
 
 export type DropIndicator = 'insert-before' | 'insert-after' | 'reparent' | 'invalid' | null
@@ -40,6 +43,8 @@ export function TreeNode({
   const [editValue, setEditValue] = useState(doc.name)
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
+  const [showIconPicker, setShowIconPicker] = useState(false)
+  const [iconPickerRect, setIconPickerRect] = useState({ top: 0, left: 0 })
   const inputRef = useRef<HTMLInputElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
 
@@ -95,6 +100,17 @@ export function TreeNode({
     setShowContextMenu(true)
   }
 
+  function openIconPicker() {
+    setIconPickerRect({ top: contextMenuPos.y, left: contextMenuPos.x + 10 })
+    setShowIconPicker(true)
+    setShowContextMenu(false)
+  }
+
+  function handleIconSelect(iconName: string | undefined) {
+    useDocumentStore.getState().setDocumentIcon(doc.id, iconName)
+    setShowIconPicker(false)
+  }
+
   const indicatorColor = dropIndicator === 'invalid' ? 'bg-red-500' : 'bg-blue-400'
 
   return (
@@ -133,7 +149,7 @@ export function TreeNode({
         >
           {hasChildren ? (
             <>
-              <FileText size={16} className="text-gray-400 group-hover:hidden" />
+              {createElement(getIconComponent(doc.icon ?? ''), { size: 16, className: 'text-gray-400 group-hover:hidden' })}
               <ChevronRight
                 size={16}
                 className={`text-gray-400 hidden group-hover:block transition-transform duration-150 ${
@@ -142,7 +158,7 @@ export function TreeNode({
               />
             </>
           ) : (
-            <FileText size={16} className="text-gray-400" />
+            createElement(getIconComponent(doc.icon ?? ''), { size: 16, className: 'text-gray-400' })
           )}
         </span>
 
@@ -205,6 +221,15 @@ export function TreeNode({
               className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
               onClick={(e) => {
                 e.stopPropagation()
+                openIconPicker()
+              }}
+            >
+              Change Icon
+            </button>
+            <button
+              className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
+              onClick={(e) => {
+                e.stopPropagation()
                 setShowContextMenu(false)
                 onAddSubDocument()
               }}
@@ -229,6 +254,14 @@ export function TreeNode({
           </div>
         )}
       </div>
+
+      {/* Icon picker */}
+      <IconPicker
+        open={showIconPicker}
+        onClose={() => setShowIconPicker(false)}
+        onSelect={handleIconSelect}
+        anchorRect={iconPickerRect}
+      />
 
       {/* Insert-after indicator line */}
       {dropIndicator === 'insert-after' && (

@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useCallback } from 'react'
+import { createElement, useState, useRef, useMemo, useCallback } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -18,7 +18,7 @@ import {
 import { useDocumentStore } from '../../stores/documentStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { TreeNode, type DropIndicator } from './TreeNode'
-import { FileText } from 'lucide-react'
+import { getIconComponent } from '../../lib/icons'
 import type { Document } from '../../types'
 
 const MAX_DEPTH = 4
@@ -363,7 +363,7 @@ export function Sidebar() {
                 className="flex items-center gap-1 py-1 px-2 text-sm text-gray-200 bg-gray-800 border border-gray-600 rounded shadow-lg shadow-black/30 scale-[1.02] opacity-90"
                 style={{ paddingLeft: `${activeItemDepth * 20}px` }}
               >
-                <FileText size={16} className="text-gray-400 shrink-0" />
+                {createElement(getIconComponent(activeDocument.icon ?? ''), { size: 16, className: 'text-gray-400 shrink-0' })}
                 <span className="truncate">{activeDocument.name}</span>
               </div>
             ) : null}
