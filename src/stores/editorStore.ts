@@ -12,6 +12,9 @@ interface EditorState extends EditorPreferences {
   toggleDistractionFree: () => void
   setRenderMode: (mode: EditorPreferences['renderMode']) => void
   toggleRenderMode: () => void
+  toggleSidebar: () => void
+  toggleDocumentCollapsed: (id: string) => void
+  setCollapsedDocumentIds: (ids: string[]) => void
 }
 
 const localforageStorage = createJSONStorage<EditorState>(() => ({
@@ -36,6 +39,8 @@ export const useEditorStore = create<EditorState>()(
       fontSize: 16,
       distractionFree: false,
       renderMode: 'source',
+      sidebarOpen: true,
+      collapsedDocumentIds: [],
 
       setVimMode: (enabled: boolean) => set({ vimMode: enabled }),
       toggleVimMode: () => set({ vimMode: !get().vimMode }),
@@ -48,6 +53,16 @@ export const useEditorStore = create<EditorState>()(
       setRenderMode: (mode: EditorPreferences['renderMode']) => set({ renderMode: mode }),
       toggleRenderMode: () =>
         set({ renderMode: get().renderMode === 'source' ? 'rendered' : 'source' }),
+      toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
+      toggleDocumentCollapsed: (id: string) => {
+        const current = get().collapsedDocumentIds
+        set({
+          collapsedDocumentIds: current.includes(id)
+            ? current.filter((i) => i !== id)
+            : [...current, id],
+        })
+      },
+      setCollapsedDocumentIds: (ids: string[]) => set({ collapsedDocumentIds: ids }),
     }),
     {
       name: 'writinator-editor',

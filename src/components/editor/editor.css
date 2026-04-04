@@ -18,7 +18,6 @@
 .cm-content {
   padding: 2rem;
   caret-color: var(--color-opal-100);
-  max-width: none;
 }
 
 .cm-line {

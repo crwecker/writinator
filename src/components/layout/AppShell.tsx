@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
@@ -9,7 +9,7 @@ import { ShortcutsMenu } from './ShortcutsMenu'
 import { ExportMenu } from './ExportMenu'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { saveBook, openBook, clearFileHandle } from '../../lib/fileSystem'
+import { quickSave, saveAsNewFile, openFile } from '../../lib/fileSystem'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
@@ -21,7 +21,6 @@ import { useQuestStore } from '../../stores/questStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 
 export function AppShell() {
-  const [dropdownOpen, setDropdownOpen] = useState(false)
   const [wordCount, setWordCount] = useState(0)
   const [vimCurrentMode, setVimCurrentMode] = useState<VimMode>('NORMAL')
   const [editorView, setEditorView] = useState<EditorView | null>(null)
@@ -30,17 +29,17 @@ export function AppShell() {
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
   const activeQuest = useQuestStore((s) => s.activeQuest)
   const activeImageSession = useImageRevealStore((s) => s.activeSession)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-  const titleRef = useRef<HTMLButtonElement>(null)
 
   const book = useDocumentStore((s) => s.book)
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
   const createBook = useDocumentStore((s) => s.createBook)
-  const loadBook = useDocumentStore((s) => s.loadBook)
+  const loadFile = useDocumentStore((s) => s.loadFile)
   const distractionFree = useEditorStore((s) => s.distractionFree)
   const toggleDistractionFree = useEditorStore((s) => s.toggleDistractionFree)
   const renderMode = useEditorStore((s) => s.renderMode)
   const toggleRenderMode = useEditorStore((s) => s.toggleRenderMode)
+  const sidebarOpen = useEditorStore((s) => s.sidebarOpen)
+  const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
 
   const activeDocument = book?.documents.find((doc) => doc.id === activeDocumentId)
 
@@ -53,26 +52,8 @@ export function AppShell() {
     editorView.dispatch({
       changes: { from: 0, to: editorView.state.doc.length, insert: content },
     })
-    // Persist the restored content
     useDocumentStore.getState().updateDocumentContent(content)
   }, [editorView])
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    if (!dropdownOpen) return
-    function handleClickOutside(e: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node) &&
-        titleRef.current &&
-        !titleRef.current.contains(e.target as Node)
-      ) {
-        setDropdownOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [dropdownOpen])
 
   // Global keyboard shortcuts (driven by keybinding store)
   useEffect(() => {
@@ -91,21 +72,24 @@ export function AppShell() {
       }
       if (matchesEvent(km.toggleFileTree, e)) {
         e.preventDefault()
-        setDropdownOpen((prev) => !prev)
+        useEditorStore.getState().toggleSidebar()
         return
       }
       if (matchesEvent(km.saveToDisk, e)) {
         e.preventDefault()
         const state = useDocumentStore.getState()
         state._flushContentUpdate()
-        const currentBook = useDocumentStore.getState().book
+        const { book: currentBook, activeDocumentId: docId, globalSettings } = useDocumentStore.getState()
         if (currentBook) {
-          const docId = useDocumentStore.getState().activeDocumentId
           const doc = docId ? currentBook.documents.find((d) => d.id === docId) : null
-          if (doc?.content) {
-            createSnapshot(docId!, doc.content, 'manual')
-          }
-          saveBook(currentBook)
+          const snapshotPromise = doc?.content
+            ? createSnapshot(docId!, doc.content, 'manual')
+            : Promise.resolve(null)
+          snapshotPromise.then(() =>
+            quickSave(currentBook, globalSettings).then((saved) => {
+              if (!saved) saveAsNewFile(currentBook, globalSettings)
+            })
+          )
         }
         return
       }
@@ -116,10 +100,9 @@ export function AppShell() {
       }
       if (matchesEvent(km.openFromDisk, e)) {
         e.preventDefault()
-        openBook().then((opened) => {
+        openFile().then((opened) => {
           if (opened) {
-            clearFileHandle()
-            loadBook(opened)
+            loadFile(opened)
           }
         })
         return
@@ -127,7 +110,7 @@ export function AppShell() {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [loadBook, toggleDistractionFree, toggleRenderMode])
+  }, [loadFile, toggleDistractionFree, toggleRenderMode])
 
   // Auto-snapshot every 5 minutes
   useEffect(() => {
@@ -156,60 +139,61 @@ export function AppShell() {
     ? `${book.title}${activeDocument ? ` - ${activeDocument.name}` : ''}`
     : 'Writinator'
 
+  const showSidebar = sidebarOpen && !distractionFree
+
   return (
     <div className="flex flex-col h-screen w-screen bg-bg-darker text-gray-200 overflow-hidden">
       {/* Top bar — hidden in distraction-free mode */}
       {!distractionFree && (
-        <div className="flex items-center justify-between border-b border-gray-700 bg-bg-dark px-4 py-1.5 text-sm shrink-0 relative">
+        <div className="flex items-center justify-between border-b border-gray-700 bg-bg-dark px-4 py-1.5 text-sm shrink-0">
           <button
-            ref={titleRef}
-            onClick={() => setDropdownOpen((prev) => !prev)}
+            onClick={toggleSidebar}
             className="text-gray-200 hover:text-white font-medium truncate max-w-md text-left"
-            title="Click to open file tree (Ctrl+B)"
+            title="Toggle sidebar (Ctrl+B)"
           >
             {titleText}
-            <span className="ml-1.5 text-gray-500 text-xs">{dropdownOpen ? '\u25B4' : '\u25BE'}</span>
+            <span className="ml-1.5 text-gray-500 text-xs">{sidebarOpen ? '\u25C0' : '\u25B6'}</span>
           </button>
 
           <div className="flex items-center gap-1">
             <ExportMenu />
             <ShortcutsMenu />
           </div>
-
-          {/* File tree dropdown */}
-          {dropdownOpen && (
-            <div
-              ref={dropdownRef}
-              className="absolute top-full left-0 mt-0 z-50 w-[280px] max-h-[70vh] overflow-y-auto bg-gray-900 border border-gray-700 rounded-b-lg shadow-xl"
-            >
-              <Sidebar onDocumentSelect={() => setDropdownOpen(false)} />
-            </div>
-          )}
         </div>
       )}
 
-      {/* Editor area - full width, full height */}
-      <Editor
-        onWordCountChange={handleWordCountChange}
-        onVimModeChange={handleVimModeChange}
-        onEditorView={handleEditorView}
-      />
-      <BubbleToolbar editorView={editorView} />
-      <SnapshotBrowser
-        open={snapshotsOpen}
-        onClose={() => setSnapshotsOpen(false)}
-        onRestore={handleRestoreSnapshot}
-      />
-      <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} />
+      {/* Main content: Sidebar + Editor */}
+      <div className="flex flex-1 min-h-0">
+        {/* Persistent sidebar */}
+        {showSidebar && (
+          <Sidebar />
+        )}
 
-      {/* Quest progress — above bottom bar */}
-      <QuestProgress />
-      <ImageRevealPanel />
+        {/* Editor area */}
+        <div className="flex flex-col flex-1 min-w-0">
+          <Editor
+            onWordCountChange={handleWordCountChange}
+            onVimModeChange={handleVimModeChange}
+            onEditorView={handleEditorView}
+          />
+          <BubbleToolbar editorView={editorView} />
+          <SnapshotBrowser
+            open={snapshotsOpen}
+            onClose={() => setSnapshotsOpen(false)}
+            onRestore={handleRestoreSnapshot}
+          />
+          <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} />
 
-      <QuestPicker
-        open={questPickerOpen}
-        onClose={() => setQuestPickerOpen(false)}
-      />
+          {/* Quest progress — above bottom bar */}
+          <QuestProgress />
+          <ImageRevealPanel />
+
+          <QuestPicker
+            open={questPickerOpen}
+            onClose={() => setQuestPickerOpen(false)}
+          />
+        </div>
+      </div>
 
       {/* Bottom bar — minimal in distraction-free mode */}
       <div className={`flex items-center justify-between border-t border-gray-700 bg-bg-dark px-4 py-1 text-xs shrink-0 ${distractionFree ? 'opacity-20 hover:opacity-60 transition-opacity' : ''}`}>

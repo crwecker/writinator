@@ -113,6 +113,8 @@ export interface EditorPreferences {
   fontSize: number
   distractionFree: boolean
   renderMode: 'source' | 'rendered'
+  sidebarOpen: boolean
+  collapsedDocumentIds: string[]
 }
 
 export interface GlobalSettings {
