@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { FileText, ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
 import type { Document } from '../../types'
 
 interface TreeNodeProps {
@@ -57,6 +58,7 @@ export function TreeNode({
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
+    paddingLeft: `${depth * 20}px`,
   }
 
   useEffect(() => {
@@ -97,11 +99,18 @@ export function TreeNode({
     setShowContextMenu(true)
   }
 
+  function openContextMenuFromButton(e: React.MouseEvent) {
+    e.stopPropagation()
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setContextMenuPos({ x: rect.left, y: rect.bottom + 2 })
+    setShowContextMenu(true)
+  }
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`group flex items-center gap-1 py-1 cursor-pointer select-none text-sm
+      className={`group flex items-center gap-1 py-1 px-2 cursor-pointer select-none text-sm rounded-sm mx-1
         ${isActive ? 'bg-blue-300/20 text-white' : 'text-gray-300 hover:bg-gray-700/50'}
         ${isDragging ? 'opacity-50' : ''}`}
       onClick={() => !isEditing && onClick()}
@@ -110,22 +119,32 @@ export function TreeNode({
       {...attributes}
       {...listeners}
     >
-      {/* Indentation */}
-      <span style={{ width: `${12 + depth * 16}px` }} className="shrink-0" />
-
-      {/* Collapse toggle */}
+      {/* Left zone: icon / chevron */}
       <span
-        className={`text-gray-500 text-xs shrink-0 w-3 text-center transition-transform ${
-          hasChildren ? 'cursor-pointer' : 'invisible'
-        } ${hasChildren && !isCollapsed ? 'rotate-90' : ''}`}
+        className="shrink-0 w-4 h-4 flex items-center justify-center"
         onClick={(e) => {
-          e.stopPropagation()
-          if (hasChildren) onToggleCollapse()
+          if (hasChildren) {
+            e.stopPropagation()
+            onToggleCollapse()
+          }
         }}
       >
-        &#9657;
+        {hasChildren ? (
+          <>
+            <FileText size={16} className="text-gray-400 group-hover:hidden" />
+            <ChevronRight
+              size={16}
+              className={`text-gray-400 hidden group-hover:block transition-transform duration-150 ${
+                !isCollapsed ? 'rotate-90' : ''
+              }`}
+            />
+          </>
+        ) : (
+          <FileText size={16} className="text-gray-400" />
+        )}
       </span>
 
+      {/* Middle zone: name / rename input */}
       {isEditing ? (
         <input
           ref={inputRef}
@@ -143,6 +162,28 @@ export function TreeNode({
         <span className="truncate flex-1">{doc.name}</span>
       )}
 
+      {/* Right zone: action buttons (visible on hover) */}
+      {!isEditing && (
+        <span className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+          <button
+            className="p-0.5 rounded text-gray-400 hover:text-white"
+            onClick={openContextMenuFromButton}
+          >
+            <MoreHorizontal size={16} />
+          </button>
+          <button
+            className="p-0.5 rounded text-gray-400 hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation()
+              onAddSubDocument()
+            }}
+          >
+            <Plus size={16} />
+          </button>
+        </span>
+      )}
+
+      {/* Context menu */}
       {showContextMenu && (
         <div
           ref={contextMenuRef}
