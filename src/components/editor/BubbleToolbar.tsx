@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useDocumentStore } from '../../stores/documentStore'
+import type { TextStyle, HeadingStyle } from '../../types'
 
 interface BubbleToolbarProps {
   editorView: EditorView | null
@@ -39,25 +40,30 @@ function wrapSelection(view: EditorView, before: string, after: string) {
   const { from, to } = view.state.selection.main
   if (from === to) return
   const selected = view.state.sliceDoc(from, to)
-  view.dispatch({
-    changes: { from, to, insert: `${before}${selected}${after}` },
-    selection: { anchor: from + before.length, head: to + before.length },
-  })
+  const lines = selected.split('\n')
+  if (lines.length <= 1) {
+    view.dispatch({
+      changes: { from, to, insert: `${before}${selected}${after}` },
+      selection: { anchor: from + before.length, head: to + before.length },
+    })
+  } else {
+    const wrapped = lines.map((line) =>
+      line.trim() ? `${before}${line}${after}` : line
+    ).join('\n')
+    view.dispatch({
+      changes: { from, to, insert: wrapped },
+      selection: { anchor: from, head: from + wrapped.length },
+    })
+  }
   view.focus()
 }
 
-function wrapWithSpanStyle(view: EditorView, style: string) {
-  const { from, to } = view.state.selection.main
-  if (from === to) return
-  const selected = view.state.sliceDoc(from, to)
-
+function wrapLineWithSpanStyle(line: string, style: string): string {
   // If already wrapped in a span, merge styles
-  const spanMatch = selected.match(/^<span\s+style="([^"]*)">(.*)<\/span>$/)
+  const spanMatch = line.match(/^<span\s+style="([^"]*)">(.*)<\/span>$/)
   if (spanMatch) {
-    const existingStyles = spanMatch[1]
-    // Parse existing and new styles, new wins on conflicts
     const existing = Object.fromEntries(
-      existingStyles.split(';').filter(Boolean).map((s) => {
+      spanMatch[1].split(';').filter(Boolean).map((s) => {
         const [k, ...v] = s.split(':')
         return [k.trim(), v.join(':').trim()]
       })
@@ -70,19 +76,43 @@ function wrapWithSpanStyle(view: EditorView, style: string) {
     )
     const merged = { ...existing, ...incoming }
     const mergedStyle = Object.entries(merged).map(([k, v]) => `${k}: ${v}`).join('; ')
-    const inner = spanMatch[2]
-    const replacement = `<span style="${mergedStyle}">${inner}</span>`
-    view.dispatch({
-      changes: { from, to, insert: replacement },
-      selection: { anchor: from, head: from + replacement.length },
-    })
-  } else {
-    const before = `<span style="${style}">`
-    const after = '</span>'
-    view.dispatch({
-      changes: { from, to, insert: `${before}${selected}${after}` },
-      selection: { anchor: from + before.length, head: to + before.length },
-    })
+    return `<span style="${mergedStyle}">${spanMatch[2]}</span>`
+  }
+  return `<span style="${style}">${line}</span>`
+}
+
+function wrapWithSpanStyle(view: EditorView, style: string) {
+  const { from, to } = view.state.selection.main
+  if (from === to) return
+  const selected = view.state.sliceDoc(from, to)
+  const lines = selected.split('\n')
+  const wrapped = lines.map((line) =>
+    line.trim() ? wrapLineWithSpanStyle(line, style) : line
+  ).join('\n')
+  view.dispatch({
+    changes: { from, to, insert: wrapped },
+    selection: { anchor: from, head: from + wrapped.length },
+  })
+  view.focus()
+}
+
+function setAlignment(view: EditorView, alignment: 'left' | 'center' | 'right') {
+  const { from, to } = view.state.selection.main
+  const startLine = view.state.doc.lineAt(from)
+  const endLine = view.state.doc.lineAt(to)
+  const changes: { from: number; to: number; insert: string }[] = []
+
+  for (let i = startLine.number; i <= endLine.number; i++) {
+    const line = view.state.doc.line(i)
+    if (!line.text.trim()) continue
+    const existingAlign = line.text.match(/^\{align:(center|right|left)\}\s?/)
+    const removeEnd = existingAlign ? line.from + existingAlign[0].length : line.from
+    const prefix = alignment === 'left' ? '' : `{align:${alignment}} `
+    changes.push({ from: line.from, to: removeEnd, insert: prefix })
+  }
+
+  if (changes.length > 0) {
+    view.dispatch({ changes })
   }
   view.focus()
 }
@@ -117,41 +147,48 @@ function prependLineWith(view: EditorView, prefix: string) {
   view.focus()
 }
 
+function styleToCSS(style: TextStyle | HeadingStyle): string {
+  const parts: string[] = []
+  if (style.fontFamily) parts.push(`font-family: ${style.fontFamily}`)
+  if (style.fontSize) parts.push(`font-size: ${style.fontSize}px`)
+  if (style.lineHeight) parts.push(`line-height: ${style.lineHeight}`)
+  if (style.color) parts.push(`color: ${style.color}`)
+  if (style.letterSpacing) parts.push(`letter-spacing: ${style.letterSpacing}`)
+  if ('fontWeight' in style && style.fontWeight) parts.push(`font-weight: ${style.fontWeight}`)
+  return parts.join('; ')
+}
+
+function wrapLineWithSpanClass(line: string, className: string): string | null {
+  const classSpanMatch = line.match(/^<span\s+class="([^"]*)">(.*)<\/span>$/)
+  if (classSpanMatch) {
+    if (classSpanMatch[1] === className) {
+      // Same class — unwrap
+      return classSpanMatch[2]
+    }
+    // Different class — replace
+    return `<span class="${className}">${classSpanMatch[2]}</span>`
+  }
+  return `<span class="${className}">${line}</span>`
+}
+
 function wrapWithSpanClass(view: EditorView, className: string) {
   const { from, to } = view.state.selection.main
   if (from === to) return
   const selected = view.state.sliceDoc(from, to)
-
-  // If already wrapped in a class span, replace the class
-  const classSpanMatch = selected.match(/^<span\s+class="([^"]*)">(.*)<\/span>$/)
-  if (classSpanMatch) {
-    if (classSpanMatch[1] === className) {
-      // Same class — unwrap (remove the span entirely)
-      view.dispatch({
-        changes: { from, to, insert: classSpanMatch[2] },
-        selection: { anchor: from, head: from + classSpanMatch[2].length },
-      })
-    } else {
-      // Different class — replace
-      const replacement = `<span class="${className}">${classSpanMatch[2]}</span>`
-      view.dispatch({
-        changes: { from, to, insert: replacement },
-        selection: { anchor: from, head: from + replacement.length },
-      })
-    }
-  } else {
-    const before = `<span class="${className}">`
-    const after = '</span>'
-    view.dispatch({
-      changes: { from, to, insert: `${before}${selected}${after}` },
-      selection: { anchor: from + before.length, head: to + before.length },
-    })
-  }
+  const lines = selected.split('\n')
+  const wrapped = lines.map((line) =>
+    line.trim() ? (wrapLineWithSpanClass(line, className) ?? line) : line
+  ).join('\n')
+  view.dispatch({
+    changes: { from, to, insert: wrapped },
+    selection: { anchor: from, head: from + wrapped.length },
+  })
   view.focus()
 }
 
 export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
-  const namedStyles = useDocumentStore((s) => s.book?.documentStyles?.namedStyles)
+  const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
+  const namedStyles = documentStyles?.namedStyles
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
 
   const updatePosition = useCallback(() => {
@@ -273,6 +310,28 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
 
       <div className="mx-1 h-5 w-px bg-gray-700" />
 
+      {/* Alignment */}
+      <ToolbarButton
+        onClick={() => setAlignment(editorView, 'left')}
+        title="Align left"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M3 12h12M3 18h18"/></svg>
+      </ToolbarButton>
+      <ToolbarButton
+        onClick={() => setAlignment(editorView, 'center')}
+        title="Align center"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M6 12h12M3 18h18"/></svg>
+      </ToolbarButton>
+      <ToolbarButton
+        onClick={() => setAlignment(editorView, 'right')}
+        title="Align right"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M9 12h12M3 18h18"/></svg>
+      </ToolbarButton>
+
+      <div className="mx-1 h-5 w-px bg-gray-700" />
+
       {/* Font family */}
       <select
         value=""
@@ -308,27 +367,58 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
         ))}
       </select>
 
-      {/* Named styles */}
-      {namedStyles && Object.keys(namedStyles).length > 0 && (
-        <>
-          <div className="mx-1 h-5 w-px bg-gray-700" />
-          <select
-            value=""
-            onChange={(e) => {
-              if (!e.target.value) return
-              wrapWithSpanClass(editorView, e.target.value)
-              e.target.value = ''
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="bg-transparent text-gray-300 hover:text-gray-100 text-xs outline-none cursor-pointer px-1 py-1"
-          >
-            <option value="" disabled>Style</option>
-            {Object.keys(namedStyles).map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        </>
-      )}
+      {/* Styles dropdown — default document styles + named styles */}
+      {(() => {
+        const defaultStyles: { key: string; label: string; style: TextStyle | HeadingStyle | undefined }[] = [
+          { key: 'body', label: 'Body', style: documentStyles?.body },
+          { key: 'h1', label: 'Heading 1', style: documentStyles?.h1 },
+          { key: 'h2', label: 'Heading 2', style: documentStyles?.h2 },
+          { key: 'h3', label: 'Heading 3', style: documentStyles?.h3 },
+          { key: 'blockquote', label: 'Blockquote', style: documentStyles?.blockquote },
+          { key: 'code', label: 'Code', style: documentStyles?.code },
+        ]
+        const hasDefaults = defaultStyles.some((d) => d.style && styleToCSS(d.style))
+        const hasNamed = namedStyles && Object.keys(namedStyles).length > 0
+        if (!hasDefaults && !hasNamed) return null
+        return (
+          <>
+            <div className="mx-1 h-5 w-px bg-gray-700" />
+            <select
+              value=""
+              onChange={(e) => {
+                if (!e.target.value) return
+                const val = e.target.value
+                if (val.startsWith('named:')) {
+                  wrapWithSpanClass(editorView, val.slice(6))
+                } else {
+                  const found = defaultStyles.find((d) => d.key === val)
+                  if (found?.style) {
+                    const css = styleToCSS(found.style)
+                    if (css) wrapWithSpanStyle(editorView, css)
+                  }
+                }
+                e.target.value = ''
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="bg-transparent text-gray-300 hover:text-gray-100 text-xs outline-none cursor-pointer px-1 py-1"
+            >
+              <option value="" disabled>Style</option>
+              {hasDefaults && defaultStyles
+                .filter((d) => d.style && styleToCSS(d.style))
+                .map((d) => (
+                  <option key={d.key} value={d.key}>{d.label}</option>
+                ))
+              }
+              {hasDefaults && hasNamed && (
+                <option disabled>───</option>
+              )}
+              {hasNamed && Object.keys(namedStyles!).map((name) => (
+                <option key={name} value={`named:${name}`}>{name}</option>
+              ))}
+            </select>
+          </>
+        )
+      })()}
     </div>
   )
 }

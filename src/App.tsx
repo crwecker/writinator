@@ -15,7 +15,9 @@ export default function App() {
           // Check if data is from old format (TipTap JSONContent)
           const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
           const book = parsed?.state?.book
-          if (book?.chapters?.some((ch: any) => ch.content && typeof ch.content !== 'string')) {
+          // Support both old `chapters` and new `documents` field names
+          const docs = book?.documents ?? book?.chapters
+          if (docs?.some((d: Record<string, unknown>) => d.content && typeof d.content !== 'string')) {
             console.warn('Clearing incompatible data from previous app version')
             await localforage.removeItem('writinator-document')
             await localforage.removeItem('writinator-editor')

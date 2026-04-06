@@ -9,9 +9,9 @@ import type { Quest, QuestArc } from '../../types'
 function getTotalWordCount(): number {
   const book = useDocumentStore.getState().book
   if (!book) return 0
-  return book.chapters.reduce((sum, ch) => {
-    if (!ch.content) return sum
-    return sum + ch.content.trim().split(/\s+/).filter(Boolean).length
+  return book.documents.reduce((sum, doc) => {
+    if (!doc.content) return sum
+    return sum + doc.content.trim().split(/\s+/).filter(Boolean).length
   }, 0)
 }
 

@@ -365,9 +365,13 @@ function NamedStyleFields({
 
 export function StyleEditor({ open, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const documentStyles = useDocumentStore((s) => s.book?.documentStyles)
-  const updateDocumentStyles = useDocumentStore((s) => s.updateDocumentStyles)
-  const clearDocumentStyles = useDocumentStore((s) => s.clearDocumentStyles)
+  const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
+  const updateGlobalSettings = useDocumentStore((s) => s.updateGlobalSettings)
+  const updateDocumentStyles = (patch: Partial<import('../../types').DocumentStyles>) => {
+    const existing = useDocumentStore.getState().globalSettings.documentStyles ?? {}
+    updateGlobalSettings({ documentStyles: { ...existing, ...patch } })
+  }
+  const clearDocumentStyles = () => updateGlobalSettings({ documentStyles: undefined })
 
   // Close on Escape
   useEffect(() => {
@@ -488,20 +492,16 @@ export function StyleEditor({ open, onClose }: Props) {
                 onRename={(newName) => {
                   const existing = documentStyles?.namedStyles ?? {}
                   if (newName === name || existing[newName]) return
-                  const { [name]: removed, ...rest } = existing
+                  const { [name]: _, ...rest } = existing; void _
                   updateDocumentStyles({
                     namedStyles: { ...rest, [newName]: style },
                   })
                 }}
                 onDelete={() => {
                   const existing = documentStyles?.namedStyles ?? {}
-                  const { [name]: removed, ...rest } = existing
-                  // Replace namedStyles entirely by setting on the book
-                  const { book } = useDocumentStore.getState()
-                  if (!book) return
-                  useDocumentStore.getState().setDocumentStyles({
-                    ...book.documentStyles,
-                    namedStyles: rest,
+                  const { [name]: _, ...rest } = existing; void _
+                  useDocumentStore.getState().updateGlobalSettings({
+                    documentStyles: { ...documentStyles, namedStyles: rest },
                   })
                 }}
               />

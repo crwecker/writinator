@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { Book, Chapter, DocumentStyles } from '../types'
-import { createSnapshot } from './snapshotStore'
+import type { Book, Document, DocumentStyles, GlobalSettings, WritinatorFile } from '../types'
+import { createSnapshot, loadSnapshotsFromFile } from './snapshotStore'
 import { useQuestStore } from './questStore'
 import { useImageRevealStore } from './imageRevealStore'
 
@@ -13,36 +13,86 @@ function countWords(text: string | null): number {
 
 interface DocumentState {
   book: Book | null
-  activeChapterId: string | null
+  activeDocumentId: string | null
+  globalSettings: GlobalSettings
   _contentUpdateTimer: ReturnType<typeof setTimeout> | null
   _pendingContent: string | null
 
   // Book CRUD
   createBook: (title: string) => void
-  loadBook: (book: Book) => void
+  loadFile: (file: WritinatorFile) => void
   renameBook: (title: string) => void
 
-  // Chapter CRUD
-  addChapter: (name?: string, parentId?: string) => string
-  renameChapter: (id: string, name: string) => void
-  deleteChapter: (id: string) => void
-  reorderChapters: (ids: string[]) => void
-  setActiveChapter: (id: string | null) => void
-  indentChapter: (id: string) => void
-  outdentChapter: (id: string) => void
+  // Document CRUD
+  addDocument: (name?: string, parentId?: string) => string
+  duplicateDocument: (id: string) => string
+  renameDocument: (id: string, name: string) => void
+  setDocumentIcon: (id: string, icon: string | undefined) => void
+  setDocumentColor: (id: string, color: string | undefined) => void
+  deleteDocument: (id: string) => void
+  reorderDocuments: (ids: string[]) => void
+  moveDocument: (id: string, newParentId: string | undefined, insertIndex: number) => void
+  setActiveDocument: (id: string | null) => void
 
   // Content
-  updateChapterContent: (content: string) => void
+  updateDocumentContent: (content: string) => void
   _flushContentUpdate: () => void
 
-  // Document styles
-  setDocumentStyles: (styles: DocumentStyles) => void
-  updateDocumentStyles: (patch: Partial<DocumentStyles>) => void
-  clearDocumentStyles: () => void
+  // Global settings
+  setGlobalSettings: (settings: GlobalSettings) => void
+  updateGlobalSettings: (patch: Partial<GlobalSettings>) => void
 }
 
 function generateId(): string {
   return crypto.randomUUID()
+}
+
+/** Walk up the parentId chain to check if docId is a descendant of ancestorId */
+function isDescendant(documents: Document[], docId: string, ancestorId: string): boolean {
+  let currentId: string | undefined = docId
+  while (currentId) {
+    const doc = documents.find((d) => d.id === currentId)
+    if (!doc?.parentId) return false
+    if (doc.parentId === ancestorId) return true
+    currentId = doc.parentId
+  }
+  return false
+}
+
+/** Returns the depth of a document (0 for top-level / undefined id) */
+function getDocumentDepth(documents: Document[], id: string | undefined): number {
+  let depth = 0
+  let currentId = id
+  while (currentId) {
+    const doc = documents.find((d) => d.id === currentId)
+    if (!doc?.parentId) break
+    depth++
+    currentId = doc.parentId
+  }
+  return depth
+}
+
+/** Returns the max depth below this document (0 if leaf) */
+function getSubtreeDepth(documents: Document[], id: string): number {
+  const children = documents.filter((d) => d.parentId === id)
+  if (children.length === 0) return 0
+  return 1 + Math.max(...children.map((c) => getSubtreeDepth(documents, c.id)))
+}
+
+/** Collect a document and all its descendants in flat-array order */
+function collectSubtree(documents: Document[], id: string): Document[] {
+  const ids = new Set<string>([id])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const doc of documents) {
+      if (doc.parentId && ids.has(doc.parentId) && !ids.has(doc.id)) {
+        ids.add(doc.id)
+        changed = true
+      }
+    }
+  }
+  return documents.filter((doc) => ids.has(doc.id))
 }
 
 function now(): string {
@@ -66,21 +116,22 @@ export const useDocumentStore = create<DocumentState>()(
   persist(
     (set, get) => ({
       book: null,
-      activeChapterId: null,
+      activeDocumentId: null,
+      globalSettings: {},
       _contentUpdateTimer: null,
       _pendingContent: null,
 
       createBook: (title: string) => {
         const timestamp = now()
-        const chapterId = generateId()
+        const documentId = generateId()
         set({
           book: {
             id: generateId(),
             title,
-            chapters: [
+            documents: [
               {
-                id: chapterId,
-                name: 'Chapter 1',
+                id: documentId,
+                name: 'Document 1',
                 content: null,
                 createdAt: timestamp,
                 updatedAt: timestamp,
@@ -89,16 +140,18 @@ export const useDocumentStore = create<DocumentState>()(
             createdAt: timestamp,
             updatedAt: timestamp,
           },
-          activeChapterId: chapterId,
+          activeDocumentId: documentId,
         })
       },
 
-      loadBook: (book: Book) => {
+      loadFile: (file: WritinatorFile) => {
         get()._flushContentUpdate()
         set({
-          book,
-          activeChapterId: book.chapters[0]?.id ?? null,
+          book: file.book,
+          globalSettings: file.globalSettings,
+          activeDocumentId: file.book.documents[0]?.id ?? null,
         })
+        loadSnapshotsFromFile(file.snapshots)
       },
 
       renameBook: (title: string) => {
@@ -107,36 +160,30 @@ export const useDocumentStore = create<DocumentState>()(
         set({ book: { ...book, title, updatedAt: now() } })
       },
 
-      addChapter: (name?: string, parentId?: string) => {
+      addDocument: (name?: string, parentId?: string) => {
         const { book } = get()
         if (!book) return ''
         const id = generateId()
         const timestamp = now()
-        const siblings = book.chapters.filter((ch) => ch.parentId === parentId)
-        const chapterName = name ?? `Chapter ${siblings.length + 1}`
-        const chapter: Chapter = {
+        const siblings = book.documents.filter((doc) => doc.parentId === parentId)
+        const documentName = name ?? `Document ${siblings.length + 1}`
+        const document: Document = {
           id,
-          name: chapterName,
+          name: documentName,
           content: null,
           ...(parentId ? { parentId } : {}),
           createdAt: timestamp,
           updatedAt: timestamp,
         }
         // Insert after last sibling of the same parent (or its descendants)
-        let insertIdx = book.chapters.length
+        let insertIdx = book.documents.length
         if (parentId) {
-          const parentIdx = book.chapters.findIndex((ch) => ch.id === parentId)
+          const parentIdx = book.documents.findIndex((doc) => doc.id === parentId)
           if (parentIdx !== -1) {
             // Find the last descendant of this parent
             insertIdx = parentIdx + 1
-            const isDescendant = (chId: string, ancestorId: string): boolean => {
-              const ch = book.chapters.find((c) => c.id === chId)
-              if (!ch?.parentId) return false
-              if (ch.parentId === ancestorId) return true
-              return isDescendant(ch.parentId, ancestorId)
-            }
-            for (let i = parentIdx + 1; i < book.chapters.length; i++) {
-              if (isDescendant(book.chapters[i].id, parentId)) {
+            for (let i = parentIdx + 1; i < book.documents.length; i++) {
+              if (isDescendant(book.documents, book.documents[i].id, parentId)) {
                 insertIdx = i + 1
               } else {
                 break
@@ -144,131 +191,231 @@ export const useDocumentStore = create<DocumentState>()(
             }
           }
         }
-        const chapters = [...book.chapters]
-        chapters.splice(insertIdx, 0, chapter)
+        const documents = [...book.documents]
+        documents.splice(insertIdx, 0, document)
         set({
-          book: { ...book, chapters, updatedAt: timestamp },
-          activeChapterId: id,
+          book: { ...book, documents, updatedAt: timestamp },
+          activeDocumentId: id,
         })
         return id
       },
 
-      renameChapter: (id: string, name: string) => {
+      duplicateDocument: (id: string) => {
+        const { book } = get()
+        if (!book) return ''
+        const timestamp = now()
+
+        // Collect the target document and all its descendants (in order)
+        const target = book.documents.find((doc) => doc.id === id)
+        if (!target) return ''
+
+        // Gather original docs to copy: target + descendants in order
+        const toCopy = collectSubtree(book.documents, id)
+
+        // Build old→new ID map
+        const idMap = new Map<string, string>()
+        for (const doc of toCopy) {
+          idMap.set(doc.id, generateId())
+        }
+
+        // Create copies with remapped IDs
+        const copies: Document[] = toCopy.map((doc, i) => ({
+          ...doc,
+          id: idMap.get(doc.id)!,
+          name: i === 0 ? `${doc.name} (copy)` : doc.name,
+          parentId: doc.parentId && idMap.has(doc.parentId)
+            ? idMap.get(doc.parentId)!
+            : doc.parentId,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }))
+
+        // Find insertion point: after the last descendant of the original
+        const subtreeIds = new Set(toCopy.map((d) => d.id))
+        let lastDescIdx = book.documents.findIndex((doc) => doc.id === id)
+        for (let i = lastDescIdx + 1; i < book.documents.length; i++) {
+          if (subtreeIds.has(book.documents[i].id)) {
+            lastDescIdx = i
+          } else {
+            break
+          }
+        }
+
+        const documents = [...book.documents]
+        documents.splice(lastDescIdx + 1, 0, ...copies)
+
+        const newRootId = idMap.get(id)!
+        set({
+          book: { ...book, documents, updatedAt: timestamp },
+          activeDocumentId: newRootId,
+        })
+        return newRootId
+      },
+
+      renameDocument: (id: string, name: string) => {
         const { book } = get()
         if (!book) return
         set({
           book: {
             ...book,
-            chapters: book.chapters.map((ch) =>
-              ch.id === id ? { ...ch, name, updatedAt: now() } : ch
+            documents: book.documents.map((doc) =>
+              doc.id === id ? { ...doc, name, updatedAt: now() } : doc
             ),
             updatedAt: now(),
           },
         })
       },
 
-      deleteChapter: (id: string) => {
-        const { book, activeChapterId } = get()
+      setDocumentIcon: (id: string, icon: string | undefined) => {
+        const { book } = get()
+        if (!book) return
+        set({
+          book: {
+            ...book,
+            documents: book.documents.map((doc) =>
+              doc.id === id ? { ...doc, icon, updatedAt: now() } : doc
+            ),
+            updatedAt: now(),
+          },
+        })
+      },
+
+      setDocumentColor: (id: string, color: string | undefined) => {
+        const { book } = get()
+        if (!book) return
+        set({
+          book: {
+            ...book,
+            documents: book.documents.map((doc) =>
+              doc.id === id ? { ...doc, color, updatedAt: now() } : doc
+            ),
+            updatedAt: now(),
+          },
+        })
+      },
+
+      deleteDocument: (id: string) => {
+        const { book, activeDocumentId } = get()
         if (!book) return
         // Collect all descendant ids
         const toDelete = new Set<string>([id])
         let changed = true
         while (changed) {
           changed = false
-          for (const ch of book.chapters) {
-            if (ch.parentId && toDelete.has(ch.parentId) && !toDelete.has(ch.id)) {
-              toDelete.add(ch.id)
+          for (const doc of book.documents) {
+            if (doc.parentId && toDelete.has(doc.parentId) && !toDelete.has(doc.id)) {
+              toDelete.add(doc.id)
               changed = true
             }
           }
         }
-        const remaining = book.chapters.filter((ch) => !toDelete.has(ch.id))
+        const remaining = book.documents.filter((doc) => !toDelete.has(doc.id))
         if (remaining.length === 0) return
-        const newActiveId = toDelete.has(activeChapterId ?? '')
+        const newActiveId = toDelete.has(activeDocumentId ?? '')
           ? remaining[0].id
-          : activeChapterId
+          : activeDocumentId
         set({
-          book: { ...book, chapters: remaining, updatedAt: now() },
-          activeChapterId: newActiveId,
+          book: { ...book, documents: remaining, updatedAt: now() },
+          activeDocumentId: newActiveId,
         })
       },
 
-      reorderChapters: (ids: string[]) => {
+      reorderDocuments: (ids: string[]) => {
         const { book } = get()
         if (!book) return
-        const chapterMap = new Map(book.chapters.map((ch) => [ch.id, ch]))
+        const documentMap = new Map(book.documents.map((doc) => [doc.id, doc]))
         const reordered = ids
-          .map((id) => chapterMap.get(id))
-          .filter((ch): ch is Chapter => ch !== undefined)
+          .map((id) => documentMap.get(id))
+          .filter((doc): doc is Document => doc !== undefined)
         set({
-          book: { ...book, chapters: reordered, updatedAt: now() },
+          book: { ...book, documents: reordered, updatedAt: now() },
         })
       },
 
-      setActiveChapter: (id: string | null) => {
+      setActiveDocument: (id: string | null) => {
         // Flush any pending content update before switching
         get()._flushContentUpdate()
-        // Snapshot the chapter we're leaving
-        const { book, activeChapterId } = get()
-        if (book && activeChapterId && activeChapterId !== id) {
-          const chapter = book.chapters.find((ch) => ch.id === activeChapterId)
-          if (chapter?.content) {
-            createSnapshot(activeChapterId, chapter.content, 'switch')
+        // Snapshot the document we're leaving
+        const { book, activeDocumentId } = get()
+        if (book && activeDocumentId && activeDocumentId !== id) {
+          const document = book.documents.find((doc) => doc.id === activeDocumentId)
+          if (document?.content) {
+            createSnapshot(activeDocumentId, document.content, 'switch')
           }
         }
-        set({ activeChapterId: id })
+        set({ activeDocumentId: id })
       },
 
-      indentChapter: (id: string) => {
+      moveDocument: (id: string, newParentId: string | undefined, insertIndex: number) => {
         const { book } = get()
         if (!book) return
-        // Find the previous sibling at the same level — that becomes the new parent
-        const chapter = book.chapters.find((ch) => ch.id === id)
-        if (!chapter) return
-        const siblings = book.chapters.filter((ch) => ch.parentId === chapter.parentId)
-        const idx = siblings.findIndex((ch) => ch.id === id)
-        if (idx <= 0) return // no previous sibling to nest under
-        const newParentId = siblings[idx - 1].id
+
+        const doc = book.documents.find((d) => d.id === id)
+        if (!doc) return
+
+        // Cannot move into own descendants (circular)
+        if (newParentId && isDescendant(book.documents, newParentId, id)) return
+
+        // Depth check: new depth + subtree depth must not exceed MAX_DEPTH (4)
+        const newDepth = newParentId ? getDocumentDepth(book.documents, newParentId) + 1 : 0
+        const subtreeDepth = getSubtreeDepth(book.documents, id)
+        if (newDepth + subtreeDepth > 4) return
+
+        // Collect the block to move (document + descendants in order)
+        const block = collectSubtree(book.documents, id)
+        const blockIds = new Set(block.map((d) => d.id))
+
+        // Remove block from array
+        const remaining = book.documents.filter((d) => !blockIds.has(d.id))
+
+        // Update parentId on the moved document
+        block[0] = { ...block[0], parentId: newParentId, updatedAt: now() }
+
+        // Find new siblings and determine insertion point in flat array
+        const newSiblings = remaining.filter((d) => d.parentId === newParentId)
+
+        let flatInsertIdx: number
+        if (insertIndex >= newSiblings.length) {
+          // Insert after last sibling's subtree
+          if (newSiblings.length === 0) {
+            if (newParentId) {
+              // Insert right after the parent
+              const parentIdx = remaining.findIndex((d) => d.id === newParentId)
+              flatInsertIdx = parentIdx + 1
+            } else {
+              flatInsertIdx = remaining.length
+            }
+          } else {
+            const lastSibling = newSiblings[newSiblings.length - 1]
+            const lastSiblingSubtree = collectSubtree(remaining, lastSibling.id)
+            const lastDocInSubtree = lastSiblingSubtree[lastSiblingSubtree.length - 1]
+            flatInsertIdx = remaining.indexOf(lastDocInSubtree) + 1
+          }
+        } else {
+          // Insert before the sibling at insertIndex
+          const targetSibling = newSiblings[insertIndex]
+          flatInsertIdx = remaining.indexOf(targetSibling)
+        }
+
+        // Splice block back in
+        const result = [...remaining]
+        result.splice(flatInsertIdx, 0, ...block)
+
         set({
-          book: {
-            ...book,
-            chapters: book.chapters.map((ch) =>
-              ch.id === id ? { ...ch, parentId: newParentId, updatedAt: now() } : ch
-            ),
-            updatedAt: now(),
-          },
+          book: { ...book, documents: result, updatedAt: now() },
         })
       },
 
-      outdentChapter: (id: string) => {
-        const { book } = get()
-        if (!book) return
-        const chapter = book.chapters.find((ch) => ch.id === id)
-        if (!chapter?.parentId) return // already top-level
-        const parent = book.chapters.find((ch) => ch.id === chapter.parentId)
-        if (!parent) return
-        // Move to parent's level, right after parent
-        set({
-          book: {
-            ...book,
-            chapters: book.chapters.map((ch) =>
-              ch.id === id ? { ...ch, parentId: parent.parentId, updatedAt: now() } : ch
-            ),
-            updatedAt: now(),
-          },
-        })
-      },
-
-      updateChapterContent: (content: string) => {
+      updateDocumentContent: (content: string) => {
         const { _contentUpdateTimer } = get()
         if (_contentUpdateTimer) {
           clearTimeout(_contentUpdateTimer)
         }
         const timer = setTimeout(() => {
-          const { book, activeChapterId, _pendingContent } = get()
-          if (!book || !activeChapterId || !_pendingContent) return
+          const { book, activeDocumentId, _pendingContent } = get()
+          if (!book || !activeDocumentId || !_pendingContent) return
           // Track word delta for quest progress
-          const oldContent = book.chapters.find((ch) => ch.id === activeChapterId)?.content ?? null
+          const oldContent = book.documents.find((doc) => doc.id === activeDocumentId)?.content ?? null
           const oldWords = countWords(oldContent)
           const newWords = countWords(_pendingContent)
           const delta = newWords - oldWords
@@ -279,10 +426,10 @@ export const useDocumentStore = create<DocumentState>()(
           set({
             book: {
               ...book,
-              chapters: book.chapters.map((ch) =>
-                ch.id === activeChapterId
-                  ? { ...ch, content: _pendingContent, updatedAt: now() }
-                  : ch
+              documents: book.documents.map((doc) =>
+                doc.id === activeDocumentId
+                  ? { ...doc, content: _pendingContent, updatedAt: now() }
+                  : doc
               ),
               updatedAt: now(),
             },
@@ -293,43 +440,28 @@ export const useDocumentStore = create<DocumentState>()(
         set({ _contentUpdateTimer: timer, _pendingContent: content })
       },
 
-      setDocumentStyles: (styles: DocumentStyles) => {
-        const { book } = get()
-        if (!book) return
-        set({ book: { ...book, documentStyles: styles, updatedAt: now() } })
+      setGlobalSettings: (settings: GlobalSettings) => {
+        set({ globalSettings: settings })
       },
 
-      updateDocumentStyles: (patch: Partial<DocumentStyles>) => {
-        const { book } = get()
-        if (!book) return
-        const existing = book.documentStyles ?? {}
-        const merged: DocumentStyles = { ...existing }
-        for (const key of Object.keys(patch) as (keyof DocumentStyles)[]) {
-          merged[key] = { ...existing[key], ...patch[key] } as any
-        }
-        set({ book: { ...book, documentStyles: merged, updatedAt: now() } })
-      },
-
-      clearDocumentStyles: () => {
-        const { book } = get()
-        if (!book) return
-        const { documentStyles: _, ...rest } = book
-        set({ book: { ...rest, chapters: book.chapters, createdAt: book.createdAt, updatedAt: now() } as Book })
+      updateGlobalSettings: (patch: Partial<GlobalSettings>) => {
+        const existing = get().globalSettings
+        set({ globalSettings: { ...existing, ...patch } })
       },
 
       _flushContentUpdate: () => {
-        const { _contentUpdateTimer, _pendingContent, book, activeChapterId } = get()
+        const { _contentUpdateTimer, _pendingContent, book, activeDocumentId } = get()
         if (_contentUpdateTimer) {
           clearTimeout(_contentUpdateTimer)
         }
-        if (_pendingContent && book && activeChapterId) {
+        if (_pendingContent && book && activeDocumentId) {
           set({
             book: {
               ...book,
-              chapters: book.chapters.map((ch) =>
-                ch.id === activeChapterId
-                  ? { ...ch, content: _pendingContent, updatedAt: now() }
-                  : ch
+              documents: book.documents.map((doc) =>
+                doc.id === activeDocumentId
+                  ? { ...doc, content: _pendingContent, updatedAt: now() }
+                  : doc
               ),
               updatedAt: now(),
             },
@@ -343,12 +475,24 @@ export const useDocumentStore = create<DocumentState>()(
     }),
     {
       name: 'writinator-document',
+      version: 1,
       storage: localforageStorage,
       partialize: (state) =>
         ({
           book: state.book,
-          activeChapterId: state.activeChapterId,
+          activeDocumentId: state.activeDocumentId,
+          globalSettings: state.globalSettings,
         }) as unknown as DocumentState,
+      migrate: (persisted, version) => {
+        if (version === 0) {
+          // v0→v1: documentStyles moved into globalSettings
+          const state = persisted as Record<string, unknown>
+          const documentStyles = state.documentStyles as DocumentStyles | undefined
+          delete state.documentStyles
+          state.globalSettings = { documentStyles } as GlobalSettings
+        }
+        return persisted as DocumentState
+      },
     }
   )
 )

@@ -208,12 +208,9 @@ Cross-phase cheat sheet. Contains ONLY what the next session needs:
 - Architecture decisions (locked once made)
 - Known issues / gotchas
 
-## Step 5: Commit
+## Step 5: Present Summary
 
-Stage and commit all planning docs:
-```
-docs: add {feature-name} phased implementation plan
-```
+Do NOT commit or stage the planning docs — the `research/` folder is gitignored and should stay out of version control.
 
 Present a summary to the user:
 - Number of phases (implementation + QA)

@@ -1,5 +1,6 @@
-import type { Book, Chapter } from '../types'
+import type { Book, Document } from '../types'
 import type { Root, Content, PhrasingContent } from 'mdast'
+import JSZip from 'jszip'
 import { parseMarkdown } from './ast'
 
 // ─── Helpers ────────────────────────────────────────────
@@ -22,27 +23,27 @@ function download(content: string | Blob, filename: string, mimeType: string): v
   URL.revokeObjectURL(url)
 }
 
-function getDepth(chapter: Chapter, chapters: Chapter[]): number {
+function getDepth(document: Document, documents: Document[]): number {
   let depth = 0
-  let current = chapter
+  let current = document
   while (current.parentId) {
     depth++
-    const parent = chapters.find((ch) => ch.id === current.parentId)
+    const parent = documents.find((doc) => doc.id === current.parentId)
     if (!parent) break
     current = parent
   }
   return depth
 }
 
-/** Get the full book as a single markdown string with chapter headings */
+/** Get the full book as a single markdown string with document headings */
 function bookToMarkdown(book: Book): string {
   const parts: string[] = [`# ${book.title}\n`]
-  for (const ch of book.chapters) {
-    const depth = getDepth(ch, book.chapters)
+  for (const doc of book.documents) {
+    const depth = getDepth(doc, book.documents)
     const hashes = '#'.repeat(Math.min(depth + 2, 6))
-    parts.push(`${hashes} ${ch.name}\n`)
-    if (ch.content) {
-      parts.push(ch.content)
+    parts.push(`${hashes} ${doc.name}\n`)
+    if (doc.content) {
+      parts.push(doc.content)
     }
     parts.push('')
   }
@@ -119,13 +120,13 @@ function astToPlainText(tree: Root): string {
 
 export function exportAsPlainText(book: Book): void {
   const parts: string[] = [book.title, '']
-  for (const ch of book.chapters) {
-    const depth = getDepth(ch, book.chapters)
+  for (const doc of book.documents) {
+    const depth = getDepth(doc, book.documents)
     const indent = '  '.repeat(depth)
-    parts.push(`${indent}${ch.name}`)
+    parts.push(`${indent}${doc.name}`)
     parts.push('')
-    if (ch.content) {
-      parts.push(astToPlainText(parseMarkdown(ch.content)))
+    if (doc.content) {
+      parts.push(astToPlainText(parseMarkdown(doc.content)))
     }
   }
   download(parts.join('\n'), `${sanitizeFilename(book.title)}.txt`, 'text/plain')
@@ -183,12 +184,12 @@ function blockToHtml(node: Content): string {
 }
 
 export function exportAsHtml(book: Book): void {
-  const body = book.chapters
-    .map((ch) => {
-      const depth = getDepth(ch, book.chapters)
+  const body = book.documents
+    .map((doc) => {
+      const depth = getDepth(doc, book.documents)
       const level = Math.min(depth + 2, 6)
-      const heading = `<h${level}>${escapeHtml(ch.name)}</h${level}>`
-      const content = ch.content ? astToHtml(parseMarkdown(ch.content)) : ''
+      const heading = `<h${level}>${escapeHtml(doc.name)}</h${level}>`
+      const content = doc.content ? astToHtml(parseMarkdown(doc.content)) : ''
       return `${heading}\n${content}`
     })
     .join('\n\n')
@@ -291,17 +292,17 @@ export function exportAsRtf(book: Book): void {
   // Title
   let body = `{\\pard\\qc\\fs48\\b ${rtfEscape(book.title)}\\b0\\par}\n\\par\n`
 
-  for (const ch of book.chapters) {
-    const depth = getDepth(ch, book.chapters)
+  for (const doc of book.documents) {
+    const depth = getDepth(doc, book.documents)
     const sizes = [40, 32, 28, 26, 24]
     const size = sizes[Math.min(depth, 4)]
-    // Page break before each chapter (except first top-level)
-    if (book.chapters.indexOf(ch) > 0 && depth === 0) {
+    // Page break before each top-level document (except first)
+    if (book.documents.indexOf(doc) > 0 && depth === 0) {
       body += '\\page\n'
     }
-    body += `{\\pard\\fs${size}\\b ${rtfEscape(ch.name)}\\b0\\par}\n\\par\n`
-    if (ch.content) {
-      body += astToRtf(parseMarkdown(ch.content)) + '\n\\par\n'
+    body += `{\\pard\\fs${size}\\b ${rtfEscape(doc.name)}\\b0\\par}\n\\par\n`
+    if (doc.content) {
+      body += astToRtf(parseMarkdown(doc.content)) + '\n\\par\n'
     }
   }
 
@@ -312,7 +313,7 @@ export function exportAsRtf(book: Book): void {
 // ─── DOCX Export (AST → docx package) ───────────────────
 
 export async function exportAsDocx(book: Book): Promise<void> {
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, LevelFormat } =
+  const { Document: DocxDocument, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, LevelFormat } =
     await import('docx')
 
   function phrasingToRuns(nodes: PhrasingContent[], opts: { bold?: boolean; italics?: boolean; strike?: boolean } = {}): InstanceType<typeof TextRun>[] {
@@ -408,7 +409,7 @@ export async function exportAsDocx(book: Book): Promise<void> {
     }
   }
 
-  // Build chapter sections with page breaks
+  // Build document sections with page breaks
   const sectionChildren: InstanceType<typeof Paragraph>[] = []
 
   // Title page
@@ -422,11 +423,11 @@ export async function exportAsDocx(book: Book): Promise<void> {
     pageBreakBefore: true,
   }))
 
-  for (let i = 0; i < book.chapters.length; i++) {
-    const ch = book.chapters[i]
-    const depth = getDepth(ch, book.chapters)
+  for (let i = 0; i < book.documents.length; i++) {
+    const doc = book.documents[i]
+    const depth = getDepth(doc, book.documents)
 
-    // Page break before top-level chapters (not first)
+    // Page break before top-level documents (not first)
     if (depth === 0 && i > 0) {
       sectionChildren.push(new Paragraph({
         children: [],
@@ -434,21 +435,21 @@ export async function exportAsDocx(book: Book): Promise<void> {
       }))
     }
 
-    // Chapter heading
+    // Document heading
     const level = Math.min(depth, 5)
     sectionChildren.push(new Paragraph({
-      children: phrasingToRuns([{ type: 'text', value: ch.name }]),
+      children: phrasingToRuns([{ type: 'text', value: doc.name }]),
       heading: headingLevels[level],
       spacing: { before: depth === 0 ? 600 : 400, after: 200 },
     }))
 
-    // Chapter content
-    if (ch.content) {
-      sectionChildren.push(...astToDocxChildren(parseMarkdown(ch.content)))
+    // Document content
+    if (doc.content) {
+      sectionChildren.push(...astToDocxChildren(parseMarkdown(doc.content)))
     }
   }
 
-  const doc = new Document({
+  const docxDoc = new DocxDocument({
     numbering: {
       config: [
         {
@@ -481,7 +482,7 @@ export async function exportAsDocx(book: Book): Promise<void> {
     }],
   })
 
-  const blob = await Packer.toBlob(doc)
+  const blob = await Packer.toBlob(docxDoc)
   download(blob, `${sanitizeFilename(book.title)}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 }
 
@@ -602,10 +603,10 @@ export async function exportAsPdf(book: Book): Promise<void> {
     bold: true,
     margin: [0, 0, 0, 20] as [number, number, number, number],
   })
-  for (const ch of book.chapters) {
-    const depth = getDepth(ch, book.chapters)
+  for (const doc of book.documents) {
+    const depth = getDepth(doc, book.documents)
     content.push({
-      text: ch.name,
+      text: doc.name,
       margin: [depth * 20, 2, 0, 2] as [number, number, number, number],
       fontSize: depth === 0 ? 12 : 11,
       bold: depth === 0,
@@ -614,28 +615,28 @@ export async function exportAsPdf(book: Book): Promise<void> {
   }
   content.push({ text: '', pageBreak: 'after' })
 
-  // Chapters
-  for (let i = 0; i < book.chapters.length; i++) {
-    const ch = book.chapters[i]
-    const depth = getDepth(ch, book.chapters)
+  // Documents
+  for (let i = 0; i < book.documents.length; i++) {
+    const doc = book.documents[i]
+    const depth = getDepth(doc, book.documents)
 
-    // Page break before top-level chapters
+    // Page break before top-level documents
     if (depth === 0 && i > 0) {
       content.push({ text: '', pageBreak: 'before' })
     }
 
-    // Chapter heading
+    // Document heading
     const sizes = [24, 20, 16, 14]
     content.push({
-      text: ch.name,
+      text: doc.name,
       fontSize: sizes[Math.min(depth, 3)],
       bold: true,
       margin: [0, depth === 0 ? 40 : 20, 0, 12] as [number, number, number, number],
     })
 
-    // Chapter content
-    if (ch.content) {
-      content.push(...astToPdfContent(parseMarkdown(ch.content)))
+    // Document content
+    if (doc.content) {
+      content.push(...astToPdfContent(parseMarkdown(doc.content)))
     }
   }
 
@@ -671,4 +672,47 @@ export async function exportAsPdf(book: Book): Promise<void> {
   }
 
   pdfMake.createPdf(docDefinition).download(`${sanitizeFilename(book.title)}.pdf`)
+}
+
+// ─── ZIP Export ────────────────────────────────────────
+
+function formatDocumentContent(doc: Document, format: 'md' | 'txt' | 'html'): string {
+  const content = doc.content || ''
+  if (format === 'html') {
+    return `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${escapeHtml(doc.name)}</title></head><body><h1>${escapeHtml(doc.name)}</h1><pre>${escapeHtml(content)}</pre></body></html>`
+  }
+  return content
+}
+
+export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Promise<void> {
+  const zip = new JSZip()
+  const rootFolder = zip.folder(sanitizeFilename(book.title))!
+
+  const ext = format === 'md' ? '.md' : format === 'txt' ? '.txt' : '.html'
+
+  function addDocuments(parentId: string | undefined, folder: JSZip) {
+    const children = book.documents.filter(d => d.parentId === parentId)
+    const usedNames = new Map<string, number>()
+
+    for (const doc of children) {
+      let name = sanitizeFilename(doc.name)
+      const count = usedNames.get(name) || 0
+      usedNames.set(name, count + 1)
+      if (count > 0) name = `${name} (${count + 1})`
+
+      const content = formatDocumentContent(doc, format)
+      folder.file(name + ext, content)
+
+      const hasChildren = book.documents.some(d => d.parentId === doc.id)
+      if (hasChildren) {
+        const subFolder = folder.folder(name)!
+        addDocuments(doc.id, subFolder)
+      }
+    }
+  }
+
+  addDocuments(undefined, rootFolder)
+
+  const blob = await zip.generateAsync({ type: 'blob' })
+  download(blob, `${sanitizeFilename(book.title)}-${format}-export.zip`, 'application/zip')
 }

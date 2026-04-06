@@ -73,7 +73,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
   const isRendered = mode === 'rendered'
 
   // Cache document styles for heading overrides
-  const docStyles = useDocumentStore.getState().book?.documentStyles
+  const docStyles = useDocumentStore.getState().globalSettings.documentStyles
 
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i)
@@ -270,6 +270,26 @@ function markdownDecorations(view: EditorView): DecorationSet {
       }
     }
 
+    // Alignment: {align:center} or {align:right} prefix
+    const alignMatch = text.match(/^\{align:(center|right|left)\}\s?/)
+    if (alignMatch) {
+      const alignment = alignMatch[1]
+      if (alignment !== 'left') {
+        decorations.push({
+          from: line.from,
+          to: line.from,
+          deco: Decoration.line({ attributes: { style: `text-align: ${alignment};` } }),
+        })
+      }
+      if (isRendered && !isCursorLine) {
+        decorations.push({
+          from: line.from,
+          to: line.from + alignMatch[0].length,
+          deco: Decoration.replace({}),
+        })
+      }
+    }
+
     // Inline <span style="...">...</span> for font overrides
     const spanRegex = /<span\s+style="([^"]*)">(.*?)<\/span>/g
     while ((match = spanRegex.exec(text)) !== null) {
@@ -457,17 +477,16 @@ interface EditorProps {
 
 export default function Editor({ onWordCountChange, onVimModeChange, onEditorView }: EditorProps) {
   // Use selectors to avoid re-renders on unrelated store changes
-  const activeChapterId = useDocumentStore((s) => s.activeChapterId)
+  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
   const fontFamily = useEditorStore((s) => s.fontFamily)
   const fontSize = useEditorStore((s) => s.fontSize)
   const renderMode = useEditorStore((s) => s.renderMode)
-  const documentStyles = useDocumentStore((s) => s.book?.documentStyles)
 
   const distractionFree = useEditorStore((s) => s.distractionFree)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const loadedChapterRef = useRef<string | null>(null)
+  const loadedDocumentRef = useRef<string | null>(null)
   const fontCompartmentRef = useRef<Compartment | null>(null)
   const fontSizeCompartmentRef = useRef<Compartment | null>(null)
   const typewriterCompartmentRef = useRef<Compartment | null>(null)
@@ -519,7 +538,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     typewriterCompartmentRef.current = typewriterComp
     docStylesCompartmentRef.current = docStylesComp
 
-    const updateContent = useDocumentStore.getState().updateChapterContent
+    const updateContent = useDocumentStore.getState().updateDocumentContent
 
     const state = EditorState.create({
       doc: '',
@@ -537,7 +556,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
         typewriterComp.of(useEditorStore.getState().distractionFree ? typewriterScroll() : []),
-        docStylesComp.of(makeDocStylesTheme(useDocumentStore.getState().book?.documentStyles)),
+        docStylesComp.of(makeDocStylesTheme(undefined)),
         EditorView.theme({
           '&': { height: '100%', backgroundColor: 'transparent' },
           '.cm-scroller': { overflow: 'auto', padding: '2rem', lineHeight: '1.75' },
@@ -571,14 +590,61 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             const html = event.clipboardData?.getData('text/html')
             if (!html) return false // fall through to default plain text paste
             event.preventDefault()
-            const { markdown: md, styles } = htmlToMarkdownWithStyles(html)
+            const { markdown: md, styles, pastedBodyFont } = htmlToMarkdownWithStyles(html)
             const { from, to } = view.state.selection.main
+
+            // Check for font conflict between pasted content and existing document styles
+            const existingFont = useDocumentStore.getState().globalSettings.documentStyles?.body?.fontFamily
+            if (pastedBodyFont && existingFont) {
+              const existingNorm = existingFont.replace(/['"]/g, '').toLowerCase()
+              const pastedNorm = pastedBodyFont.toLowerCase()
+              if (existingNorm !== pastedNorm) {
+                const update = window.confirm(
+                  `The pasted text uses "${pastedBodyFont}" but the document font is "${existingFont}".\n\n` +
+                  `OK = Update document font to "${pastedBodyFont}"\n` +
+                  `Cancel = Keep current font (pasted text will be wrapped in font spans)`
+                )
+                if (update) {
+                  // Update document body font, paste as-is
+                  view.dispatch({
+                    changes: { from, to, insert: md },
+                    selection: { anchor: from + md.length },
+                  })
+                  if (styles) {
+                    const existing = useDocumentStore.getState().globalSettings.documentStyles ?? {}
+                    useDocumentStore.getState().updateGlobalSettings({ documentStyles: { ...existing, ...styles } })
+                  }
+                } else {
+                  // Wrap each line in a font span for the pasted body font
+                  const fontCss = `font-family: '${pastedBodyFont.replace(/'/g, '')}'`
+                  const wrapped = md.split('\n').map((line) => {
+                    if (!line.trim()) return line
+                    // Don't double-wrap lines that already have font spans
+                    if (/<span\s+style="font-family:/.test(line)) return line
+                    // Keep alignment markers outside the span
+                    const alignMatch = line.match(/^(\{align:(center|right|left)\}\s)(.*)$/)
+                    if (alignMatch) {
+                      return `${alignMatch[1]}<span style="${fontCss}">${alignMatch[3]}</span>`
+                    }
+                    return `<span style="${fontCss}">${line}</span>`
+                  }).join('\n')
+                  view.dispatch({
+                    changes: { from, to, insert: wrapped },
+                    selection: { anchor: from + wrapped.length },
+                  })
+                }
+                return true
+              }
+            }
+
+            // No conflict — paste normally
             view.dispatch({
               changes: { from, to, insert: md },
               selection: { anchor: from + md.length },
             })
             if (styles) {
-              useDocumentStore.getState().updateDocumentStyles(styles)
+              const existing = useDocumentStore.getState().globalSettings.documentStyles ?? {}
+              useDocumentStore.getState().updateGlobalSettings({ documentStyles: { ...existing, ...styles } })
             }
             return true
           },
@@ -601,15 +667,15 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     viewRef.current = view
     callbacksRef.current.onEditorView?.(view)
 
-    // Load initial chapter content
+    // Load initial document content
     const store = useDocumentStore.getState()
-    const chapter = store.book?.chapters.find((ch) => ch.id === store.activeChapterId)
-    if (chapter?.content) {
-      view.dispatch({ changes: { from: 0, to: 0, insert: chapter.content } })
-      callbacksRef.current.onWordCountChange?.(countWords(chapter.content))
-      loadedChapterRef.current = chapter.id
-    } else if (chapter) {
-      loadedChapterRef.current = chapter.id
+    const activeDocument = store.book?.documents.find((doc) => doc.id === store.activeDocumentId)
+    if (activeDocument?.content) {
+      view.dispatch({ changes: { from: 0, to: 0, insert: activeDocument.content } })
+      callbacksRef.current.onWordCountChange?.(countWords(activeDocument.content))
+      loadedDocumentRef.current = activeDocument.id
+    } else if (activeDocument) {
+      loadedDocumentRef.current = activeDocument.id
     }
 
     return () => {
@@ -623,17 +689,17 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     }
   }, [])
 
-  // Load chapter content when active chapter changes
-  const loadChapter = useCallback(() => {
+  // Load document content when active document changes
+  const loadDocument = useCallback(() => {
     const view = viewRef.current
     if (!view) return
     const store = useDocumentStore.getState()
-    const chapter = store.book?.chapters.find((ch) => ch.id === store.activeChapterId)
-    if (!chapter) return
-    if (loadedChapterRef.current === chapter.id) return
+    const activeDocument = store.book?.documents.find((doc) => doc.id === store.activeDocumentId)
+    if (!activeDocument) return
+    if (loadedDocumentRef.current === activeDocument.id) return
 
-    loadedChapterRef.current = chapter.id
-    const content = chapter.content ?? ''
+    loadedDocumentRef.current = activeDocument.id
+    const content = activeDocument.content ?? ''
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: content },
     })
@@ -641,8 +707,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   }, [])
 
   useEffect(() => {
-    loadChapter()
-  }, [activeChapterId, loadChapter])
+    loadDocument()
+  }, [activeDocumentId, loadDocument])
 
   // Update font family
   useEffect(() => {
@@ -667,14 +733,6 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     view.dispatch({ effects: setRenderModeEffect.of(renderMode) })
   }, [renderMode])
 
-  // Sync document styles compartment
-  useEffect(() => {
-    const view = viewRef.current
-    const comp = docStylesCompartmentRef.current
-    if (!view || !comp) return
-    view.dispatch({ effects: comp.reconfigure(makeDocStylesTheme(documentStyles)) })
-  }, [documentStyles])
-
   // Toggle typewriter mode
   useEffect(() => {
     const view = viewRef.current
@@ -686,14 +744,14 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   }, [distractionFree])
 
   const hasBook = useDocumentStore((s) => !!s.book)
-  const hasChapter = useDocumentStore((s) => !!s.activeChapterId)
+  const hasDocument = useDocumentStore((s) => !!s.activeDocumentId)
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden bg-bg-default relative">
       <div ref={containerRef} className="h-full w-full" />
-      {(!hasBook || !hasChapter) && (
+      {(!hasBook || !hasDocument) && (
         <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-          <p>Create a book or select a chapter to start writing.</p>
+          <p>Create a book or select a document to start writing.</p>
         </div>
       )}
     </div>

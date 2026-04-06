@@ -26,4 +26,4 @@ Book-writing app. React + TypeScript + CodeMirror 6 + Zustand + Tailwind CSS v4 
 - **Modals/panels**: use `open`/`onClose` prop pattern.
 - **Store access outside React**: use `getState()` (e.g., in keyboard handlers, intervals).
 - **CodeMirror extensions**: use `Compartment` for reconfigurable, `StateField`/`StateEffect` for custom state.
-- **Document model**: Book → Chapters (with nesting).
+- **Document model**: Book → Documents (with nesting).

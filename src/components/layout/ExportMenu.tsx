@@ -7,9 +7,11 @@ import {
   exportAsRtf,
   exportAsDocx,
   exportAsPdf,
+  exportAsZip,
 } from '../../lib/export'
+import type { Book } from '../../types'
 
-type ExportFn = (book: any) => void | Promise<void>
+type ExportFn = (book: Book) => void | Promise<void>
 
 const formats: { label: string; action: ExportFn }[] = [
   { label: 'Markdown (.md)', action: exportAsMarkdown },
@@ -18,6 +20,12 @@ const formats: { label: string; action: ExportFn }[] = [
   { label: 'RTF (.rtf)', action: exportAsRtf },
   { label: 'Word (.docx)', action: exportAsDocx },
   { label: 'PDF (.pdf)', action: exportAsPdf },
+]
+
+const zipFormats: { label: string; format: 'md' | 'txt' | 'html' }[] = [
+  { label: 'Zip (Markdown)', format: 'md' },
+  { label: 'Zip (Plain Text)', format: 'txt' },
+  { label: 'Zip (HTML)', format: 'html' },
 ]
 
 export function ExportMenu() {
@@ -68,6 +76,30 @@ export function ExportMenu() {
                 setExporting(fmt.label)
                 try {
                   await fmt.action(currentBook)
+                } finally {
+                  setExporting(null)
+                  setOpen(false)
+                }
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-gray-100 transition-colors disabled:opacity-50"
+            >
+              {exporting === fmt.label ? 'Exporting...' : fmt.label}
+            </button>
+          ))}
+          <div className="border-t border-gray-700 my-1" />
+          <div className="px-3 py-1 text-xs text-gray-500 uppercase tracking-wider">Zip Archive</div>
+          {zipFormats.map((fmt) => (
+            <button
+              key={fmt.label}
+              disabled={exporting !== null}
+              onClick={async () => {
+                const book = useDocumentStore.getState().book
+                if (!book) return
+                useDocumentStore.getState()._flushContentUpdate()
+                const currentBook = useDocumentStore.getState().book!
+                setExporting(fmt.label)
+                try {
+                  await exportAsZip(currentBook, fmt.format)
                 } finally {
                   setExporting(null)
                   setOpen(false)
