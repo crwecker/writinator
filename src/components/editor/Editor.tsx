@@ -270,6 +270,26 @@ function markdownDecorations(view: EditorView): DecorationSet {
       }
     }
 
+    // Alignment: {align:center} or {align:right} prefix
+    const alignMatch = text.match(/^\{align:(center|right|left)\}\s?/)
+    if (alignMatch) {
+      const alignment = alignMatch[1]
+      if (alignment !== 'left') {
+        decorations.push({
+          from: line.from,
+          to: line.from,
+          deco: Decoration.line({ attributes: { style: `text-align: ${alignment};` } }),
+        })
+      }
+      if (isRendered && !isCursorLine) {
+        decorations.push({
+          from: line.from,
+          to: line.from + alignMatch[0].length,
+          deco: Decoration.replace({}),
+        })
+      }
+    }
+
     // Inline <span style="...">...</span> for font overrides
     const spanRegex = /<span\s+style="([^"]*)">(.*?)<\/span>/g
     while ((match = spanRegex.exec(text)) !== null) {
@@ -570,8 +590,54 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             const html = event.clipboardData?.getData('text/html')
             if (!html) return false // fall through to default plain text paste
             event.preventDefault()
-            const { markdown: md, styles } = htmlToMarkdownWithStyles(html)
+            const { markdown: md, styles, pastedBodyFont } = htmlToMarkdownWithStyles(html)
             const { from, to } = view.state.selection.main
+
+            // Check for font conflict between pasted content and existing document styles
+            const existingFont = useDocumentStore.getState().globalSettings.documentStyles?.body?.fontFamily
+            if (pastedBodyFont && existingFont) {
+              const existingNorm = existingFont.replace(/['"]/g, '').toLowerCase()
+              const pastedNorm = pastedBodyFont.toLowerCase()
+              if (existingNorm !== pastedNorm) {
+                const update = window.confirm(
+                  `The pasted text uses "${pastedBodyFont}" but the document font is "${existingFont}".\n\n` +
+                  `OK = Update document font to "${pastedBodyFont}"\n` +
+                  `Cancel = Keep current font (pasted text will be wrapped in font spans)`
+                )
+                if (update) {
+                  // Update document body font, paste as-is
+                  view.dispatch({
+                    changes: { from, to, insert: md },
+                    selection: { anchor: from + md.length },
+                  })
+                  if (styles) {
+                    const existing = useDocumentStore.getState().globalSettings.documentStyles ?? {}
+                    useDocumentStore.getState().updateGlobalSettings({ documentStyles: { ...existing, ...styles } })
+                  }
+                } else {
+                  // Wrap each line in a font span for the pasted body font
+                  const fontCss = `font-family: '${pastedBodyFont.replace(/'/g, '')}'`
+                  const wrapped = md.split('\n').map((line) => {
+                    if (!line.trim()) return line
+                    // Don't double-wrap lines that already have font spans
+                    if (/<span\s+style="font-family:/.test(line)) return line
+                    // Keep alignment markers outside the span
+                    const alignMatch = line.match(/^(\{align:(center|right|left)\}\s)(.*)$/)
+                    if (alignMatch) {
+                      return `${alignMatch[1]}<span style="${fontCss}">${alignMatch[3]}</span>`
+                    }
+                    return `<span style="${fontCss}">${line}</span>`
+                  }).join('\n')
+                  view.dispatch({
+                    changes: { from, to, insert: wrapped },
+                    selection: { anchor: from + wrapped.length },
+                  })
+                }
+                return true
+              }
+            }
+
+            // No conflict — paste normally
             view.dispatch({
               changes: { from, to, insert: md },
               selection: { anchor: from + md.length },
