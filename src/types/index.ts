@@ -75,7 +75,7 @@ export interface Snapshot {
   content: string
   wordCount: number
   timestamp: string
-  trigger: 'manual' | 'switch' | 'auto'
+  trigger: 'manual' | 'switch' | 'auto' | 'closeBook'
 }
 
 export interface TextStyle {

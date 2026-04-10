@@ -22,6 +22,7 @@ const triggerLabel: Record<Snapshot['trigger'], string> = {
   manual: 'save',
   switch: 'switch',
   auto: 'auto',
+  closeBook: 'close',
 }
 
 interface Props {

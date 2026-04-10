@@ -2,7 +2,8 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
 import type { Book, Document, DocumentStyles, GlobalSettings, WritinatorFile } from '../types'
-import { createSnapshot, loadSnapshotsFromFile } from './snapshotStore'
+import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
+import { clearFileHandle } from '../lib/fileSystem'
 import { useQuestStore } from './questStore'
 import { useImageRevealStore } from './imageRevealStore'
 
@@ -15,11 +16,13 @@ interface DocumentState {
   book: Book | null
   activeDocumentId: string | null
   globalSettings: GlobalSettings
+  hasHydrated: boolean
   _contentUpdateTimer: ReturnType<typeof setTimeout> | null
   _pendingContent: string | null
 
   // Book CRUD
   createBook: (title: string) => void
+  closeBook: () => Promise<void>
   loadFile: (file: WritinatorFile) => void
   renameBook: (title: string) => void
 
@@ -118,6 +121,7 @@ export const useDocumentStore = create<DocumentState>()(
       book: null,
       activeDocumentId: null,
       globalSettings: {},
+      hasHydrated: false,
       _contentUpdateTimer: null,
       _pendingContent: null,
 
@@ -158,6 +162,16 @@ export const useDocumentStore = create<DocumentState>()(
         const { book } = get()
         if (!book) return
         set({ book: { ...book, title, updatedAt: now() } })
+      },
+
+      closeBook: async () => {
+        const { book } = get()
+        if (book) {
+          await snapshotBook(book, 'closeBook')
+        }
+        get()._flushContentUpdate()
+        clearFileHandle()
+        set({ book: null, activeDocumentId: null })
       },
 
       addDocument: (name?: string, parentId?: string) => {
@@ -492,6 +506,13 @@ export const useDocumentStore = create<DocumentState>()(
           state.globalSettings = { documentStyles } as GlobalSettings
         }
         return persisted as DocumentState
+      },
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) {
+          console.error('[documentStore] rehydration error:', error)
+        }
+        // useDocumentStore is defined by the time this callback fires (zustand defers it)
+        useDocumentStore.setState({ hasHydrated: true })
       },
     }
   )

@@ -1,5 +1,5 @@
 import * as localforage from 'localforage'
-import type { Snapshot } from '../types'
+import type { Book, Snapshot } from '../types'
 
 const MAX_SNAPSHOTS_PER_DOCUMENT = 100
 const STORAGE_PREFIX = 'writinator-snapshots-'
@@ -101,6 +101,18 @@ export async function loadSnapshotsFromFile(
   for (const [documentId, docSnapshots] of Object.entries(snapshots)) {
     await localforage.setItem(STORAGE_PREFIX + documentId, docSnapshots)
   }
+}
+
+/**
+ * Snapshot all documents in a book that have non-empty content.
+ * Uses 'closeBook' trigger so history UI can distinguish these from manual saves.
+ */
+export async function snapshotBook(book: Book, trigger: Snapshot['trigger']): Promise<void> {
+  await Promise.all(
+    book.documents
+      .filter((doc) => doc.content && doc.content.trim() !== '')
+      .map((doc) => createSnapshot(doc.id, doc.content!, trigger))
+  )
 }
 
 export function deleteSnapshot(
