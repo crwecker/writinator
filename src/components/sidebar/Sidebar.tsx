@@ -106,6 +106,19 @@ export function Sidebar() {
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
   const [expanded, setExpanded] = useState(true)
+  const [newlyCreatedId, setNewlyCreatedId] = useState<string | null>(null)
+
+  const handleAddDocument = useCallback(
+    (parentId?: string) => {
+      const id = addDocument(undefined, parentId)
+      if (id) setNewlyCreatedId(id)
+    },
+    [addDocument]
+  )
+
+  const clearNewlyCreatedId = useCallback(() => {
+    setNewlyCreatedId(null)
+  }, [])
 
   // DnD state
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -348,8 +361,10 @@ export function Sidebar() {
                     onClick={() => setActiveDocument(item.doc.id)}
                     onRename={(name) => renameDocument(item.doc.id, name)}
                     onDelete={() => deleteDocument(item.doc.id)}
-                    onAddSubDocument={() => addDocument(undefined, item.doc.id)}
+                    onAddSubDocument={() => handleAddDocument(item.doc.id)}
                     isDeletable={book.documents.length > 1}
+                    autoEdit={item.doc.id === newlyCreatedId}
+                    onAutoEditConsumed={clearNewlyCreatedId}
                   />
                 )
               })}
@@ -374,7 +389,7 @@ export function Sidebar() {
       {/* Add document button */}
       <button
         className="mx-2 my-2 px-2 py-1 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded border border-dashed border-gray-700 hover:border-gray-500 transition-colors"
-        onClick={() => addDocument()}
+        onClick={() => handleAddDocument()}
       >
         + New Document
       </button>

@@ -23,6 +23,8 @@ interface TreeNodeProps {
   onDelete: () => void
   onAddSubDocument: () => void
   isDeletable: boolean
+  autoEdit?: boolean
+  onAutoEditConsumed?: () => void
 }
 
 export function TreeNode({
@@ -39,8 +41,10 @@ export function TreeNode({
   onDelete,
   onAddSubDocument,
   isDeletable,
+  autoEdit,
+  onAutoEditConsumed,
 }: TreeNodeProps) {
-  const [isEditing, setIsEditing] = useState(false)
+  const [isEditing, setIsEditing] = useState(autoEdit ?? false)
   const [editValue, setEditValue] = useState(doc.name)
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -65,6 +69,12 @@ export function TreeNode({
       inputRef.current.select()
     }
   }, [isEditing])
+
+  useEffect(() => {
+    if (autoEdit) {
+      onAutoEditConsumed?.()
+    }
+  }, [autoEdit, onAutoEditConsumed])
 
   useEffect(() => {
     if (!showContextMenu) return
