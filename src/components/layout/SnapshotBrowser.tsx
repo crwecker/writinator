@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Snapshot } from '../../types'
 import { getSnapshots } from '../../stores/snapshotStore'
 import { useDocumentStore } from '../../stores/documentStore'
@@ -37,15 +37,16 @@ export function SnapshotBrowser({ open, onClose, onRestore }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
 
-  const load = useCallback(async () => {
-    if (!activeDocumentId) return
-    setSnapshots(await getSnapshots(activeDocumentId))
-    setPreviewId(null)
-  }, [activeDocumentId])
-
   useEffect(() => {
-    if (open) load()
-  }, [open, load])
+    if (!open || !activeDocumentId) return
+    let cancelled = false
+    getSnapshots(activeDocumentId).then((snaps) => {
+      if (cancelled) return
+      setSnapshots(snaps)
+      setPreviewId(null)
+    }).catch(() => { /* ignore */ })
+    return () => { cancelled = true }
+  }, [open, activeDocumentId])
 
   // Close on Escape
   useEffect(() => {

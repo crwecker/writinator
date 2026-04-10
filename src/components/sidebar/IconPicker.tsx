@@ -27,11 +27,12 @@ export function IconPicker({ open, onClose, onSelect, anchorRect }: IconPickerPr
 
   // Focus search on open
   useEffect(() => {
-    if (open) {
+    if (!open) return
+    // Defer state update and focus to next frame so the DOM is ready
+    requestAnimationFrame(() => {
       setSearch('')
-      // Small delay to ensure DOM is rendered
-      requestAnimationFrame(() => inputRef.current?.focus())
-    }
+      inputRef.current?.focus()
+    })
   }, [open])
 
   // Filter and group icons by category

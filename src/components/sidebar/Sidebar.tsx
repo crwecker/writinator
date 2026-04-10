@@ -9,7 +9,6 @@ import {
   type DragStartEvent,
   type DragMoveEvent,
   type DragEndEvent,
-  type DragCancelEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext,
@@ -263,7 +262,7 @@ export function Sidebar() {
     resetDragState()
   }
 
-  function handleDragCancel(_event: DragCancelEvent) {
+  function handleDragCancel() {
     resetDragState()
   }
 
