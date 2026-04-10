@@ -9,6 +9,37 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_\- ]/g, '').trim() || 'untitled'
 }
 
+/** Clean paste artifacts from content. Converts {align:X} markers to HTML
+ *  comments that survive markdown parsing, then post-processing converts
+ *  them to styled elements. */
+function stripPasteArtifacts(content: string): string {
+  return content.replace(/\{align:(\w+)\}\s*/g, '<!--align:$1-->')
+}
+
+/** Preprocess content for EPUB: convert styled HTML spans to semantic markup,
+ *  strip remaining known HTML tags (keeping text content), convert {align:X}
+ *  to markers. Preserves <<text>> and bare < since those aren't matched. */
+function preprocessForEpub(content: string): string {
+  return content
+    .replace(/\{align:(\w+)\}\s*/g, '%%ALIGN:$1%%\n')
+    // Convert monospace spans to backtick-wrapped inline code
+    .replace(/<span\s+style="[^"]*(?:monospace|Courier|JetBrains Mono)[^"]*">([\s\S]*?)<\/span>/gi,
+      (_m, text: string) => '`' + text + '`')
+    // Strip all remaining known HTML tags
+    .replace(/<\/?(span|div|font|center|a|b|i|u|em|strong|sup|sub|s|br|hr|img|table|tr|td|th|thead|tbody|tfoot|col|colgroup|caption|ul|ol|li|dl|dt|dd|p|pre|code|blockquote|section|article|header|footer|nav|main|aside|details|summary|figure|figcaption|mark|abbr|cite|small|big|ruby|rt|wbr|iframe|object|embed|source|audio|video|picture|svg|path|rect|circle|g)\b[^>]*\/?>/gi, '\n')
+}
+
+/** Convert <!--align:X--> comments into styled wrappers on the next element */
+function applyAlignmentMarkers(html: string): string {
+  return html.replace(/<!--align:(\w+)-->\s*(<[a-zA-Z][^>]*>)/g, (_m, align: string, tag: string) => {
+    if (tag.includes('style="')) {
+      return tag.replace('style="', `style="text-align: ${align}; `)
+    }
+    return tag.replace(/>$/, ` style="text-align: ${align};">`)
+  })
+}
+
+
 function download(content: string | Blob, filename: string, mimeType: string): void {
   const blob = content instanceof Blob
     ? content
@@ -60,6 +91,17 @@ function phrasingToText(nodes: PhrasingContent[]): string {
     if ('children' in n) return phrasingToText(n.children as PhrasingContent[])
     return ''
   }).join('')
+}
+
+function hasPhrasingChildren(node: unknown): node is { children: PhrasingContent[] } {
+  if (typeof node !== 'object' || node === null || !('children' in node)) return false
+  const candidate = (node as { children?: unknown }).children
+  return Array.isArray(candidate)
+}
+
+function hasStringValue(node: unknown): node is { value: string } {
+  if (typeof node !== 'object' || node === null || !('value' in node)) return false
+  return typeof (node as { value?: unknown }).value === 'string'
 }
 
 // ─── Markdown Export ────────────────────────────────────
@@ -126,7 +168,7 @@ export function exportAsPlainText(book: Book): void {
     parts.push(`${indent}${doc.name}`)
     parts.push('')
     if (doc.content) {
-      parts.push(astToPlainText(parseMarkdown(doc.content)))
+      parts.push(astToPlainText(parseMarkdown(stripPasteArtifacts(doc.content))))
     }
   }
   download(parts.join('\n'), `${sanitizeFilename(book.title)}.txt`, 'text/plain')
@@ -146,10 +188,11 @@ function phrasingToHtml(nodes: PhrasingContent[]): string {
       case 'emphasis': return `<em>${phrasingToHtml(n.children)}</em>`
       case 'delete': return `<del>${phrasingToHtml(n.children)}</del>`
       case 'inlineCode': return `<code>${escapeHtml(n.value)}</code>`
+      case 'html': return (n as unknown as { value: string }).value
       case 'break': return '<br>'
       default:
-        if ('children' in n) return phrasingToHtml((n as any).children)
-        if ('value' in n) return escapeHtml((n as any).value)
+        if (hasPhrasingChildren(n)) return phrasingToHtml(n.children)
+        if (hasStringValue(n)) return escapeHtml(n.value)
         return ''
     }
   }).join('')
@@ -176,6 +219,8 @@ function blockToHtml(node: Content): string {
       ).join('\n')
       return `<${tag}>\n${items}\n</${tag}>`
     }
+    case 'html':
+      return (node as unknown as { value: string }).value
     case 'thematicBreak':
       return '<hr>'
     default:
@@ -189,7 +234,7 @@ export function exportAsHtml(book: Book): void {
       const depth = getDepth(doc, book.documents)
       const level = Math.min(depth + 2, 6)
       const heading = `<h${level}>${escapeHtml(doc.name)}</h${level}>`
-      const content = doc.content ? astToHtml(parseMarkdown(doc.content)) : ''
+      const content = doc.content ? applyAlignmentMarkers(astToHtml(parseMarkdown(stripPasteArtifacts(doc.content)))) : ''
       return `${heading}\n${content}`
     })
     .join('\n\n')
@@ -231,8 +276,8 @@ function phrasingToRtf(nodes: PhrasingContent[]): string {
       case 'inlineCode': return `{\\f1\\fs20 ${rtfEscape(n.value)}}`
       case 'break': return '\\line '
       default:
-        if ('children' in n) return phrasingToRtf((n as any).children)
-        if ('value' in n) return rtfEscape((n as any).value)
+        if (hasPhrasingChildren(n)) return phrasingToRtf(n.children)
+        if (hasStringValue(n)) return rtfEscape(n.value)
         return ''
     }
   }).join('')
@@ -302,7 +347,7 @@ export function exportAsRtf(book: Book): void {
     }
     body += `{\\pard\\fs${size}\\b ${rtfEscape(doc.name)}\\b0\\par}\n\\par\n`
     if (doc.content) {
-      body += astToRtf(parseMarkdown(doc.content)) + '\n\\par\n'
+      body += astToRtf(parseMarkdown(stripPasteArtifacts(doc.content))) + '\n\\par\n'
     }
   }
 
@@ -339,8 +384,8 @@ export async function exportAsDocx(book: Book): Promise<void> {
           runs.push(new TextRun({ break: 1 }))
           break
         default:
-          if ('children' in n) runs.push(...phrasingToRuns((n as any).children, opts))
-          else if ('value' in n) runs.push(new TextRun({ text: (n as any).value, ...opts }))
+          if (hasPhrasingChildren(n)) runs.push(...phrasingToRuns(n.children, opts))
+          else if (hasStringValue(n)) runs.push(new TextRun({ text: n.value, ...opts }))
           break
       }
     }
@@ -445,7 +490,7 @@ export async function exportAsDocx(book: Book): Promise<void> {
 
     // Document content
     if (doc.content) {
-      sectionChildren.push(...astToDocxChildren(parseMarkdown(doc.content)))
+      sectionChildren.push(...astToDocxChildren(parseMarkdown(stripPasteArtifacts(doc.content))))
     }
   }
 
@@ -489,15 +534,26 @@ export async function exportAsDocx(book: Book): Promise<void> {
 // ─── PDF Export (AST → pdfmake) ─────────────────────────
 
 export async function exportAsPdf(book: Book): Promise<void> {
-  const pdfMakeModule = await import('pdfmake/build/pdfmake') as any
+  type PdfValue = string | number | boolean | null | PdfObject | PdfValue[] | ((currentPage: number, pageCount?: number) => unknown)
+  interface PdfObject { [key: string]: PdfValue }
+  interface PdfMakeApi {
+    vfs?: unknown
+    createPdf: (definition: PdfObject) => { download: (filename: string) => void }
+  }
+  interface PdfFontsModule {
+    pdfMake?: { vfs?: unknown }
+    default?: { pdfMake?: { vfs?: unknown } }
+  }
+
+  const pdfMakeModule = await import('pdfmake/build/pdfmake') as unknown as (PdfMakeApi & { default?: PdfMakeApi })
   const pdfMake = pdfMakeModule.default || pdfMakeModule
-  const pdfFonts = await import('pdfmake/build/vfs_fonts') as any
+  const pdfFonts = await import('pdfmake/build/vfs_fonts') as unknown as PdfFontsModule
   const vfs = pdfFonts?.pdfMake?.vfs ?? pdfFonts?.default?.pdfMake?.vfs ?? pdfFonts?.default
   if (vfs) pdfMake.vfs = vfs
 
-  type PdfContent = any // pdfmake's Content type is complex, use any for the builder
+  type PdfContent = PdfObject
 
-  function phrasingToPdf(nodes: PhrasingContent[], style: Record<string, any> = {}): PdfContent[] {
+  function phrasingToPdf(nodes: PhrasingContent[], style: PdfObject = {}): PdfContent[] {
     const result: PdfContent[] = []
     for (const n of nodes) {
       switch (n.type) {
@@ -517,8 +573,8 @@ export async function exportAsPdf(book: Book): Promise<void> {
           result.push({ text: n.value, font: 'Courier', fontSize: 10, background: '#f0f0f0', ...style })
           break
         default:
-          if ('children' in n) result.push(...phrasingToPdf((n as any).children, style))
-          else if ('value' in n) result.push({ text: (n as any).value, ...style })
+          if (hasPhrasingChildren(n)) result.push(...phrasingToPdf(n.children, style))
+          else if (hasStringValue(n)) result.push({ text: n.value, ...style })
           break
       }
     }
@@ -636,7 +692,7 @@ export async function exportAsPdf(book: Book): Promise<void> {
 
     // Document content
     if (doc.content) {
-      content.push(...astToPdfContent(parseMarkdown(doc.content)))
+      content.push(...astToPdfContent(parseMarkdown(stripPasteArtifacts(doc.content))))
     }
   }
 
@@ -648,7 +704,7 @@ export async function exportAsPdf(book: Book): Promise<void> {
       lineHeight: 1.6,
     },
     pageMargins: [72, 72, 72, 72] as [number, number, number, number],
-    header: (currentPage: number, _pageCount: number) => {
+    header: (currentPage: number) => {
       if (currentPage <= 2) return null // Skip title and TOC pages
       return {
         text: book.title,
@@ -659,7 +715,7 @@ export async function exportAsPdf(book: Book): Promise<void> {
         color: '#999999',
       }
     },
-    footer: (currentPage: number, _pageCount: number) => {
+    footer: (currentPage: number) => {
       if (currentPage <= 1) return null // Skip title page
       return {
         text: `${currentPage}`,
@@ -672,6 +728,173 @@ export async function exportAsPdf(book: Book): Promise<void> {
   }
 
   pdfMake.createPdf(docDefinition).download(`${sanitizeFilename(book.title)}.pdf`)
+}
+
+// ─── EPUB Export (JSZip-based) ─────────────────────────
+
+export async function exportAsEpub(book: Book): Promise<void> {
+  const zip = new JSZip()
+
+  // mimetype must be first file, uncompressed
+  zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' })
+
+  // META-INF/container.xml
+  zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`)
+
+  const escXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+  /** Convert %%ALIGN:X%% markers to styled elements in XHTML output */
+  function applyEpubAlignment(html: string): string {
+    return html.replace(/(?:<p>)?%%ALIGN:(\w+)%%(?:<\/p>)?\s*(<[a-zA-Z][^>]*>)/g, (_m, align: string, tag: string) => {
+      if (tag.includes('style="')) {
+        return tag.replace('style="', `style="text-align: ${align}; `)
+      }
+      return tag.replace(/>$/, ` style="text-align: ${align};">`)
+    })
+  }
+
+  function contentToXhtml(doc: Document): string {
+    if (!doc.content) return ''
+    const cleaned = preprocessForEpub(doc.content)
+    const tree = parseMarkdown(cleaned)
+    // Use standard HTML converters but escape any remaining html AST nodes
+    // by temporarily replacing the html passthrough
+    let html = tree.children.map((node) => {
+      if (node.type === 'html') return `<p>${escapeHtml(node.value)}</p>`
+      return blockToHtml(node)
+    }).join('\n')
+    // Make XHTML-safe: self-close void elements
+    html = html.replace(/<br>/g, '<br/>').replace(/<hr>/g, '<hr/>')
+    // Escape any < that isn't part of a valid XHTML tag or closing tag
+    html = html.replace(/<(?!\/?(?:p|h[1-6]|strong|em|del|code|pre|ol|ul|li|blockquote|hr|br|div)\b[^>]*\/?>)/g, '&lt;')
+    html = applyEpubAlignment(html)
+    return html
+  }
+
+  // Group documents into chapters (top-level docs with their descendants)
+  interface Chapter { id: string; title: string; xhtml: string }
+  const chapters: Chapter[] = []
+
+  for (let i = 0; i < book.documents.length; i++) {
+    const doc = book.documents[i]
+    const depth = getDepth(doc, book.documents)
+    const level = Math.min(depth + 2, 6)
+    const heading = `<h${level}>${escapeHtml(doc.name)}</h${level}>`
+    const body = contentToXhtml(doc)
+
+    if (depth === 0) {
+      chapters.push({ id: `chapter-${chapters.length}`, title: doc.name, xhtml: heading + '\n' + body })
+    } else if (chapters.length > 0) {
+      chapters[chapters.length - 1].xhtml += '\n' + heading + '\n' + body
+    }
+  }
+
+  // Stylesheet
+  const css = `body { max-width: 100%; margin: 1em; font-family: Georgia, serif; line-height: 1.8; color: #222; }
+h1 { text-align: center; margin-bottom: 2em; }
+h2 { margin-top: 2em; border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
+h3, h4, h5, h6 { margin-top: 1.5em; }
+code { background: #f4f4f4; padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { background: #f4f4f4; padding: 1em; overflow-x: auto; }
+blockquote { border-left: 3px solid #ddd; margin-left: 0; padding-left: 1em; color: #555; }
+del { color: #999; }`
+  zip.file('OEBPS/style.css', css)
+
+  // Title page
+  const titleXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>${escXml(book.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
+<body>
+<h1 style="margin-top: 40%; text-align: center;">${escapeHtml(book.title)}</h1>
+</body>
+</html>`
+  zip.file('OEBPS/title.xhtml', titleXhtml)
+
+  // Chapter files
+  for (const ch of chapters) {
+    const xhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>${escXml(ch.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
+<body>
+${ch.xhtml}
+</body>
+</html>`
+    zip.file(`OEBPS/${ch.id}.xhtml`, xhtml)
+  }
+
+  // EPUB3 Navigation document
+  const navItems = chapters.map(ch => `    <li><a href="${ch.id}.xhtml">${escXml(ch.title)}</a></li>`).join('\n')
+  const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Table of Contents</title></head>
+<body>
+<nav epub:type="toc">
+  <h1>Table of Contents</h1>
+  <ol>
+${navItems}
+  </ol>
+</nav>
+</body>
+</html>`
+  zip.file('OEBPS/nav.xhtml', navXhtml)
+
+  // NCX (EPUB2 compat)
+  const bookId = `urn:writinator:${Date.now()}`
+  const ncxPoints = chapters.map((ch, i) => `  <navPoint id="navpoint-${i}" playOrder="${i + 1}">
+    <navLabel><text>${escXml(ch.title)}</text></navLabel>
+    <content src="${ch.id}.xhtml"/>
+  </navPoint>`).join('\n')
+  const ncx = `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="${bookId}"/>
+  </head>
+  <docTitle><text>${escXml(book.title)}</text></docTitle>
+  <navMap>
+${ncxPoints}
+  </navMap>
+</ncx>`
+  zip.file('OEBPS/toc.ncx', ncx)
+
+  // content.opf (package document)
+  const manifestItems = [
+    `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`,
+    `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`,
+    `    <item id="style" href="style.css" media-type="text/css"/>`,
+    `    <item id="title-page" href="title.xhtml" media-type="application/xhtml+xml"/>`,
+    ...chapters.map(ch => `    <item id="${ch.id}" href="${ch.id}.xhtml" media-type="application/xhtml+xml"/>`),
+  ].join('\n')
+  const spineItems = [
+    `    <itemref idref="title-page"/>`,
+    ...chapters.map(ch => `    <itemref idref="${ch.id}"/>`),
+  ].join('\n')
+  const opf = `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="book-id">${bookId}</dc:identifier>
+    <dc:title>${escXml(book.title)}</dc:title>
+    <dc:language>en</dc:language>
+    <meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}</meta>
+  </metadata>
+  <manifest>
+${manifestItems}
+  </manifest>
+  <spine toc="ncx">
+${spineItems}
+  </spine>
+</package>`
+  zip.file('OEBPS/content.opf', opf)
+
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/epub+zip' })
+  download(blob, `${sanitizeFilename(book.title)}.epub`, 'application/epub+zip')
 }
 
 // ─── ZIP Export ────────────────────────────────────────

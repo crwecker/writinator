@@ -7,6 +7,7 @@ import {
   exportAsRtf,
   exportAsDocx,
   exportAsPdf,
+  exportAsEpub,
   exportAsZip,
 } from '../../lib/export'
 import type { Book } from '../../types'
@@ -20,6 +21,7 @@ const formats: { label: string; action: ExportFn }[] = [
   { label: 'RTF (.rtf)', action: exportAsRtf },
   { label: 'Word (.docx)', action: exportAsDocx },
   { label: 'PDF (.pdf)', action: exportAsPdf },
+  { label: 'EPUB (.epub)', action: exportAsEpub },
 ]
 
 const zipFormats: { label: string; format: 'md' | 'txt' | 'html' }[] = [
