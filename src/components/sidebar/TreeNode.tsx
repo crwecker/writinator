@@ -139,10 +139,16 @@ export function TreeNode({
     return ids.size - 1
   }
 
-  function openIconPicker() {
-    setIconPickerRect({ top: contextMenuPos.y, left: contextMenuPos.x + 10 })
+  function openIconPickerAt(rect: { top: number; left: number }) {
+    setIconPickerRect(rect)
     setShowIconPicker(true)
     setShowContextMenu(false)
+  }
+
+  function openIconPickerFromIconButton(e: React.MouseEvent) {
+    e.stopPropagation()
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    openIconPickerAt({ top: r.bottom + 4, left: r.left })
   }
 
   function handleIconSelect(iconName: string | undefined) {
@@ -190,30 +196,32 @@ export function TreeNode({
         {...attributes}
         {...listeners}
       >
-        {/* Left zone: icon / chevron */}
-        <span
-          className="shrink-0 w-4 h-4 flex items-center justify-center"
-          onClick={(e) => {
-            if (hasChildren) {
+        {/* Disclosure chevron (branches only) */}
+        {hasChildren && (
+          <button
+            type="button"
+            className="shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-white"
+            onClick={(e) => {
               e.stopPropagation()
               onToggleCollapse()
-            }
-          }}
+            }}
+          >
+            <ChevronRight
+              size={14}
+              className={`transition-transform duration-150 ${!isCollapsed ? 'rotate-90' : ''}`}
+            />
+          </button>
+        )}
+
+        {/* Icon — click to open icon picker */}
+        <button
+          type="button"
+          className="shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-white"
+          style={doc.color ? { color: doc.color } : undefined}
+          onClick={openIconPickerFromIconButton}
         >
-          {hasChildren ? (
-            <>
-              {createElement(getIconComponent(doc.icon ?? ''), { size: 16, className: 'text-gray-400 group-hover:hidden' })}
-              <ChevronRight
-                size={16}
-                className={`text-gray-400 hidden group-hover:block transition-transform duration-150 ${
-                  !isCollapsed ? 'rotate-90' : ''
-                }`}
-              />
-            </>
-          ) : (
-            createElement(getIconComponent(doc.icon ?? ''), { size: 16, className: 'text-gray-400' })
-          )}
-        </span>
+          {createElement(getIconComponent(doc.icon ?? ''), { size: 16 })}
+        </button>
 
         {/* Middle zone: name / rename input */}
         {isEditing ? (
@@ -320,7 +328,7 @@ export function TreeNode({
                   className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
                   onClick={(e) => {
                     e.stopPropagation()
-                    openIconPicker()
+                    openIconPickerAt({ top: contextMenuPos.y, left: contextMenuPos.x + 10 })
                   }}
                 >
                   Change Icon
