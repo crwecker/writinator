@@ -17,32 +17,6 @@ export interface Book {
   updatedAt: string
 }
 
-// Quest system
-export interface Quest {
-  id: string
-  title: string
-  description: string
-  image: string          // URL or path to the quest reward image
-  wordsToWin: number
-  winningMessage: string
-}
-
-export interface QuestArc {
-  id: string
-  title: string
-  description: string
-  quests: Quest[]
-}
-
-export interface QuestProgress {
-  questId: string
-  arcId: string
-  wordsAtStart: number   // total word count when quest was started
-  wordsWritten: number   // words written toward this quest
-  completed: boolean
-  completedAt?: string
-}
-
 export interface UnsplashImage {
   id: string
   url: string

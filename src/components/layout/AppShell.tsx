@@ -15,9 +15,7 @@ import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
 import { StyleEditor } from '../editor/StyleEditor'
 import { QuestPicker } from '../quests/QuestPicker'
-import { QuestProgress } from '../quests/QuestProgress'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
-import { useQuestStore } from '../../stores/questStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { SubDocumentLinks } from '../editor/SubDocumentLinks'
 import { LandingPage } from './LandingPage'
@@ -29,8 +27,7 @@ export function AppShell() {
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
-  const activeQuest = useQuestStore((s) => s.activeQuest)
-  const activeImageSession = useImageRevealStore((s) => s.activeSession)
+  const activeSessions = useImageRevealStore((s) => s.activeSessions)
 
   const book = useDocumentStore((s) => s.book)
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
@@ -178,8 +175,6 @@ export function AppShell() {
           />
           <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} />
 
-          {/* Quest progress — above bottom bar */}
-          <QuestProgress />
           <ImageRevealPanel />
 
           <QuestPicker
@@ -212,7 +207,7 @@ export function AppShell() {
           <button
             onClick={() => setQuestPickerOpen(true)}
             className={`transition-colors ${
-              activeQuest || activeImageSession
+              activeSessions.length > 0
                 ? 'text-amber-500 hover:text-amber-400'
                 : 'text-gray-500 hover:text-gray-300'
             }`}

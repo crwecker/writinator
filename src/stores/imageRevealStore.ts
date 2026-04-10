@@ -2,14 +2,28 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
 import type { ImageRevealSession } from '../types'
-import { getPixelLevelIndex } from './questStore'
+
+// Pixelation levels: fully pixelated → fully clear
+export const PIXEL_LEVELS = [128, 64, 32, 16, 8, 4, 2, 0] as const
+
+export function getPixelLevelIndex(progress: number): number {
+  return Math.min(
+    Math.floor(progress * PIXEL_LEVELS.length),
+    PIXEL_LEVELS.length - 1
+  )
+}
+
+export function getPixelLevel(progress: number): number {
+  return PIXEL_LEVELS[getPixelLevelIndex(progress)]
+}
 
 interface ImageRevealState {
-  activeSession: ImageRevealSession | null
+  activeSessions: ImageRevealSession[]
   completedSessions: ImageRevealSession[]
   startSession: (imageUrl: string, imageWidth: number, imageHeight: number, wordGoal: number, photographer?: string, photographerUrl?: string, unsplashId?: string) => void
   addWords: (count: number) => void
-  abandonSession: () => void
+  abandonSession: (sessionId: string) => void
+  abandonAllSessions: () => void
 }
 
 const localforageStorage = createJSONStorage<ImageRevealState>(() => ({
@@ -28,64 +42,90 @@ const localforageStorage = createJSONStorage<ImageRevealState>(() => ({
 export const useImageRevealStore = create<ImageRevealState>()(
   persist(
     (set, get) => ({
-      activeSession: null,
+      activeSessions: [],
       completedSessions: [],
 
       startSession: (imageUrl: string, imageWidth: number, imageHeight: number, wordGoal: number, photographer?: string, photographerUrl?: string, unsplashId?: string) => {
-        set({
-          activeSession: {
-            id: crypto.randomUUID(),
-            unsplashId,
-            imageUrl,
-            imageWidth,
-            imageHeight,
-            wordGoal,
-            wordsWritten: 0,
-            currentLevel: 0,
-            completed: false,
-            startedAt: new Date().toISOString(),
-            ...(photographer ? { photographer, photographerUrl } : {}),
-          },
-        })
+        const newSession: ImageRevealSession = {
+          id: crypto.randomUUID(),
+          unsplashId,
+          imageUrl,
+          imageWidth,
+          imageHeight,
+          wordGoal,
+          wordsWritten: 0,
+          currentLevel: 0,
+          completed: false,
+          startedAt: new Date().toISOString(),
+          ...(photographer ? { photographer, photographerUrl } : {}),
+        }
+        set({ activeSessions: [...get().activeSessions, newSession] })
       },
 
       addWords: (count: number) => {
-        const { activeSession } = get()
-        if (!activeSession || activeSession.completed || count <= 0) return
+        if (count <= 0) return
+        const { activeSessions, completedSessions } = get()
+        const stillActive: ImageRevealSession[] = []
+        const newlyCompleted: ImageRevealSession[] = []
 
-        const newWordsWritten = Math.min(activeSession.wordsWritten + count, activeSession.wordGoal)
-        const progress = newWordsWritten / activeSession.wordGoal
-        const currentLevel = getPixelLevelIndex(progress)
-        const completed = newWordsWritten >= activeSession.wordGoal
-
-        const updated: ImageRevealSession = {
-          ...activeSession,
-          wordsWritten: newWordsWritten,
-          currentLevel,
-          completed,
-          ...(completed ? { completedAt: new Date().toISOString() } : {}),
+        for (const session of activeSessions) {
+          if (session.completed) {
+            stillActive.push(session)
+            continue
+          }
+          const newWordsWritten = Math.min(session.wordsWritten + count, session.wordGoal)
+          const progress = newWordsWritten / session.wordGoal
+          const currentLevel = getPixelLevelIndex(progress)
+          const completed = newWordsWritten >= session.wordGoal
+          const updated: ImageRevealSession = {
+            ...session,
+            wordsWritten: newWordsWritten,
+            currentLevel,
+            completed,
+            ...(completed ? { completedAt: new Date().toISOString() } : {}),
+          }
+          if (completed) {
+            newlyCompleted.push(updated)
+          } else {
+            stillActive.push(updated)
+          }
         }
 
-        if (completed) {
-          set({
-            activeSession: null,
-            completedSessions: [...get().completedSessions, updated],
-          })
-        } else {
-          set({ activeSession: updated })
-        }
+        set({
+          activeSessions: stillActive,
+          completedSessions: [...completedSessions, ...newlyCompleted],
+        })
       },
 
-      abandonSession: () => {
-        set({ activeSession: null })
+      abandonSession: (sessionId: string) => {
+        set({
+          activeSessions: get().activeSessions.filter((s) => s.id !== sessionId),
+        })
+      },
+
+      abandonAllSessions: () => {
+        set({ activeSessions: [] })
       },
     }),
     {
       name: 'writinator-image-reveal',
       storage: localforageStorage,
+      version: 1,
+      migrate: (persisted, version) => {
+        if (version === 0) {
+          // v0: activeSession was a single T | null; convert to activeSessions array
+          const state = persisted as Record<string, unknown>
+          if ('activeSession' in state) {
+            const old = state.activeSession as ImageRevealSession | null
+            state.activeSessions = old ? [old] : []
+            delete state.activeSession
+          }
+        }
+        return persisted as ImageRevealState
+      },
       partialize: (state) =>
         ({
-          activeSession: state.activeSession,
+          activeSessions: state.activeSessions,
           completedSessions: state.completedSessions,
         }) as unknown as ImageRevealState,
     }

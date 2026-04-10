@@ -4,7 +4,6 @@ import * as localforage from 'localforage'
 import type { Book, Document, DocumentStyles, GlobalSettings, WritinatorFile } from '../types'
 import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
-import { useQuestStore } from './questStore'
 import { useImageRevealStore } from './imageRevealStore'
 
 function countWords(text: string | null): number {
@@ -434,7 +433,6 @@ export const useDocumentStore = create<DocumentState>()(
           const newWords = countWords(_pendingContent)
           const delta = newWords - oldWords
           if (delta > 0) {
-            useQuestStore.getState().addWords(delta)
             useImageRevealStore.getState().addWords(delta)
           }
           set({

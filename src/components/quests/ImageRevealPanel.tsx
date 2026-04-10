@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useImageRevealStore } from '../../stores/imageRevealStore'
-import { PIXEL_LEVELS } from '../../stores/questStore'
+import { useImageRevealStore, PIXEL_LEVELS } from '../../stores/imageRevealStore'
 import { drawPixelated, animateReveal } from '../../lib/pixelate'
 import { loadImage } from '../../lib/unsplash'
 import type { ImageRevealSession } from '../../types'
 
 export function ImageRevealPanel() {
-  const activeSession = useImageRevealStore((s) => s.activeSession)
+  const activeSessions = useImageRevealStore((s) => s.activeSessions)
+  const activeSession = activeSessions[0] ?? null
   const abandonSession = useImageRevealStore((s) => s.abandonSession)
 
   const [expanded, setExpanded] = useState(false)
@@ -261,7 +261,7 @@ export function ImageRevealPanel() {
         {/* Actions */}
         <div className="flex items-center justify-end gap-2 px-3 py-2 border-t border-gray-700">
           <button
-            onClick={abandonSession}
+            onClick={() => activeSession && abandonSession(activeSession.id)}
             className="text-[10px] text-gray-600 hover:text-gray-400"
             title="Abandon session"
           >
