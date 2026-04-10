@@ -127,3 +127,9 @@ export interface WritinatorFile {
   snapshots: Record<string, Snapshot[]>  // keyed by document ID
   globalSettings: GlobalSettings
 }
+
+export interface RecentFile {
+  handle: FileSystemFileHandle
+  name: string
+  lastOpenedAt: number
+}

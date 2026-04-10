@@ -1,6 +1,7 @@
 import type { Book, GlobalSettings, WritinatorFile } from '../types'
 import { migrateFile } from './migration'
 import { getAllSnapshots } from '../stores/snapshotStore'
+import { useRecentFilesStore } from '../stores/recentFilesStore'
 
 const FILE_EXTENSION = '.writinator'
 const MIME_TYPE = 'application/json'
@@ -80,6 +81,11 @@ async function openWithFileSystemAccess(): Promise<WritinatorFile | null> {
     multiple: false,
   })
   storedFileHandle = handle
+  useRecentFilesStore.getState().addRecent({
+    handle,
+    name: handle.name,
+    lastOpenedAt: Date.now(),
+  })
   const file = await handle.getFile()
   const text = await file.text()
   return parseFileJSON(text)
@@ -132,6 +138,11 @@ async function saveWithFileSystemAccess(
           accept: { [MIME_TYPE]: [FILE_EXTENSION] },
         },
       ],
+    })
+    useRecentFilesStore.getState().addRecent({
+      handle: storedFileHandle,
+      name: storedFileHandle.name,
+      lastOpenedAt: Date.now(),
     })
   }
 

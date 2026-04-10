@@ -6,7 +6,7 @@ export type ActionName =
   | 'toggleTypewriter'
   | 'toggleFileTree'
   | 'saveToDisk'
-  | 'openFromDisk'
+  | 'closeBook'
   | 'snapshotHistory'
   | 'toggleRenderMode'
 
@@ -25,7 +25,7 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   toggleTypewriter: 'Toggle typewriter mode',
   toggleFileTree: 'Toggle file tree',
   saveToDisk: 'Save to disk',
-  openFromDisk: 'Open from disk',
+  closeBook: 'Close Book',
   snapshotHistory: 'Snapshot history',
   toggleRenderMode: 'Toggle source/rendered',
 }
@@ -34,7 +34,7 @@ export const DEFAULT_KEYMAP: KeyMap = {
   toggleTypewriter: { key: 'f', ctrl: true, shift: true },
   toggleFileTree: { key: 'b', ctrl: true },
   saveToDisk: { key: 's', ctrl: true },
-  openFromDisk: { key: 'o', ctrl: true },
+  closeBook: { key: 'o', ctrl: true },
   snapshotHistory: { key: 'h', ctrl: true, shift: true },
   toggleRenderMode: { key: 'e', ctrl: true, shift: true },
 }

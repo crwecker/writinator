@@ -99,7 +99,7 @@ export function AppShell() {
         toggleRenderMode()
         return
       }
-      if (matchesEvent(km.openFromDisk, e)) {
+      if (matchesEvent(km.closeBook, e)) {
         e.preventDefault()
         openFile().then((opened) => {
           if (opened) {

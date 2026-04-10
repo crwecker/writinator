@@ -12,7 +12,7 @@ const actionOrder: ActionName[] = [
   'toggleFileTree',
   'toggleRenderMode',
   'saveToDisk',
-  'openFromDisk',
+  'closeBook',
   'snapshotHistory',
 ]
 
