@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useDocumentStore } from '../../stores/documentStore'
-import type { TextStyle, HeadingStyle } from '../../types'
+import type { TextStyle, HeadingStyle, NamedStyle } from '../../types'
 
 interface BubbleToolbarProps {
   editorView: EditorView | null
@@ -147,7 +147,7 @@ function prependLineWith(view: EditorView, prefix: string) {
   view.focus()
 }
 
-function styleToCSS(style: TextStyle | HeadingStyle): string {
+function styleToCSS(style: TextStyle | HeadingStyle | NamedStyle): string {
   const parts: string[] = []
   if (style.fontFamily) parts.push(`font-family: ${style.fontFamily}`)
   if (style.fontSize) parts.push(`font-size: ${style.fontSize}px`)
@@ -155,6 +155,9 @@ function styleToCSS(style: TextStyle | HeadingStyle): string {
   if (style.color) parts.push(`color: ${style.color}`)
   if (style.letterSpacing) parts.push(`letter-spacing: ${style.letterSpacing}`)
   if ('fontWeight' in style && style.fontWeight) parts.push(`font-weight: ${style.fontWeight}`)
+  if ('fontStyle' in style && style.fontStyle) parts.push(`font-style: ${style.fontStyle}`)
+  if ('textDecoration' in style && style.textDecoration) parts.push(`text-decoration: ${style.textDecoration}`)
+  if ('backgroundColor' in style && style.backgroundColor) parts.push(`background-color: ${style.backgroundColor}`)
   return parts.join('; ')
 }
 
@@ -369,7 +372,7 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
 
       {/* Styles dropdown — default document styles + named styles */}
       {(() => {
-        const defaultStyles: { key: string; label: string; style: TextStyle | HeadingStyle | undefined }[] = [
+        const defaultStyles: { key: string; label: string; style: TextStyle | HeadingStyle | NamedStyle | undefined }[] = [
           { key: 'body', label: 'Body', style: documentStyles?.body },
           { key: 'h1', label: 'Heading 1', style: documentStyles?.h1 },
           { key: 'h2', label: 'Heading 2', style: documentStyles?.h2 },
@@ -377,9 +380,7 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
           { key: 'blockquote', label: 'Blockquote', style: documentStyles?.blockquote },
           { key: 'code', label: 'Code', style: documentStyles?.code },
         ]
-        const hasDefaults = defaultStyles.some((d) => d.style && styleToCSS(d.style))
         const hasNamed = namedStyles && Object.keys(namedStyles).length > 0
-        if (!hasDefaults && !hasNamed) return null
         return (
           <>
             <div className="mx-1 h-5 w-px bg-gray-700" />
@@ -403,13 +404,10 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
               className="bg-transparent text-gray-300 hover:text-gray-100 text-xs outline-none cursor-pointer px-1 py-1"
             >
               <option value="" disabled>Style</option>
-              {hasDefaults && defaultStyles
-                .filter((d) => d.style && styleToCSS(d.style))
-                .map((d) => (
-                  <option key={d.key} value={d.key}>{d.label}</option>
-                ))
-              }
-              {hasDefaults && hasNamed && (
+              {defaultStyles.map((d) => (
+                <option key={d.key} value={d.key}>{d.label}</option>
+              ))}
+              {hasNamed && (
                 <option disabled>───</option>
               )}
               {hasNamed && Object.keys(namedStyles!).map((name) => (
