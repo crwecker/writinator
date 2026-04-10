@@ -680,7 +680,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
 
     // Load initial document content
     const store = useDocumentStore.getState()
-    const activeDocument = store.book?.documents.find((doc) => doc.id === store.activeDocumentId)
+    const activeDocument = store.book?.documents?.find((doc) => doc.id === store.activeDocumentId)
     if (activeDocument?.content) {
       view.dispatch({ changes: { from: 0, to: 0, insert: activeDocument.content } })
       callbacksRef.current.onWordCountChange?.(countWords(activeDocument.content))
@@ -705,7 +705,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const view = viewRef.current
     if (!view) return
     const store = useDocumentStore.getState()
-    const activeDocument = store.book?.documents.find((doc) => doc.id === store.activeDocumentId)
+    const activeDocument = store.book?.documents?.find((doc) => doc.id === store.activeDocumentId)
     if (!activeDocument) return
     if (loadedDocumentRef.current === activeDocument.id) return
 

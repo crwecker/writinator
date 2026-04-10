@@ -150,7 +150,7 @@ export function Sidebar() {
 
   const activeDocument = useMemo(() => {
     if (!activeId || !book) return null
-    return book.documents.find((d) => d.id === activeId) ?? null
+    return book.documents?.find((d) => d.id === activeId) ?? null
   }, [activeId, book])
 
   const activeItemDepth = useMemo(() => {
@@ -163,15 +163,15 @@ export function Sidebar() {
       if (!book) return false
       if (dragId === targetId && intent === 'child') return false
 
-      const targetDoc = book.documents.find((d) => d.id === targetId)
+      const targetDoc = book.documents?.find((d) => d.id === targetId)
       if (!targetDoc) return false
 
       // Can't drop into own descendants
-      if (isDescendantOf(book.documents, targetId, dragId)) return false
+      if (isDescendantOf(book.documents ?? [], targetId, dragId)) return false
 
       // Check depth
       const newParentId = intent === 'child' ? targetId : targetDoc.parentId
-      if (wouldExceedMaxDepth(book.documents, dragId, newParentId)) return false
+      if (wouldExceedMaxDepth(book.documents ?? [], dragId, newParentId)) return false
 
       return true
     },
@@ -243,7 +243,7 @@ export function Sidebar() {
       return
     }
 
-    const targetDoc = book.documents.find((d) => d.id === targetId)
+    const targetDoc = book.documents?.find((d) => d.id === targetId)
     if (!targetDoc) {
       resetDragState()
       return
@@ -254,7 +254,7 @@ export function Sidebar() {
       moveDocument(dragId, targetId, 0)
     } else {
       // Insert before or after target, as sibling
-      const siblings = getChildren(book.documents, targetDoc.parentId)
+      const siblings = getChildren(book.documents ?? [], targetDoc.parentId)
       const targetSiblingIndex = siblings.findIndex((d) => d.id === targetId)
       const insertIndex = dropIntent === 'before' ? targetSiblingIndex : targetSiblingIndex + 1
       moveDocument(dragId, targetDoc.parentId, insertIndex)
@@ -345,7 +345,7 @@ export function Sidebar() {
           >
             <div className="flex-1 overflow-y-auto py-1">
               {flatItems.map((item) => {
-                const hasChildren = book.documents.some((d) => d.parentId === item.doc.id)
+                const hasChildren = book.documents?.some((d) => d.parentId === item.doc.id)
                 const isCollapsed = collapsedDocumentIds.includes(item.doc.id)
                 return (
                   <TreeNode
@@ -362,7 +362,7 @@ export function Sidebar() {
                     onRename={(name) => renameDocument(item.doc.id, name)}
                     onDelete={() => deleteDocument(item.doc.id)}
                     onAddSubDocument={() => handleAddDocument(item.doc.id)}
-                    isDeletable={book.documents.length > 1}
+                    isDeletable={(book.documents?.length ?? 0) > 1}
                     autoEdit={item.doc.id === newlyCreatedId}
                     onAutoEditConsumed={clearNewlyCreatedId}
                   />

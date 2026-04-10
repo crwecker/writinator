@@ -129,7 +129,7 @@ export function TreeNode({
     let changed = true
     while (changed) {
       changed = false
-      for (const d of book.documents) {
+      for (const d of book.documents ?? []) {
         if (d.parentId && ids.has(d.parentId) && !ids.has(d.id)) {
           ids.add(d.id)
           changed = true
