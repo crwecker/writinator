@@ -9,7 +9,7 @@ import { ShortcutsMenu } from './ShortcutsMenu'
 import { ExportMenu } from './ExportMenu'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { quickSave, saveAsNewFile, openFile } from '../../lib/fileSystem'
+import { quickSave, saveAsNewFile } from '../../lib/fileSystem'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
@@ -20,6 +20,7 @@ import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { useQuestStore } from '../../stores/questStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { SubDocumentLinks } from '../editor/SubDocumentLinks'
+import { LandingPage } from './LandingPage'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -33,8 +34,7 @@ export function AppShell() {
 
   const book = useDocumentStore((s) => s.book)
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
-  const createBook = useDocumentStore((s) => s.createBook)
-  const loadFile = useDocumentStore((s) => s.loadFile)
+  const hasHydrated = useDocumentStore((s) => s.hasHydrated)
   const distractionFree = useEditorStore((s) => s.distractionFree)
   const toggleDistractionFree = useEditorStore((s) => s.toggleDistractionFree)
   const renderMode = useEditorStore((s) => s.renderMode)
@@ -101,17 +101,13 @@ export function AppShell() {
       }
       if (matchesEvent(km.closeBook, e)) {
         e.preventDefault()
-        openFile().then((opened) => {
-          if (opened) {
-            loadFile(opened)
-          }
-        })
+        void useDocumentStore.getState().closeBook()
         return
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [loadFile, toggleDistractionFree, toggleRenderMode])
+  }, [toggleDistractionFree, toggleRenderMode])
 
   // Auto-snapshot every 5 minutes
   useEffect(() => {
@@ -129,18 +125,14 @@ export function AppShell() {
     return () => clearInterval(interval)
   }, [])
 
-  // Auto-create a book if none exists
-  useEffect(() => {
-    if (!book) {
-      createBook('Untitled Book')
-    }
-  }, [book, createBook])
-
   const titleText = book
     ? `${book.title}${activeDocument ? ` - ${activeDocument.name}` : ''}`
     : 'Writinator'
 
   const showSidebar = sidebarOpen && !distractionFree
+
+  if (!hasHydrated) return null
+  if (!book) return <LandingPage />
 
   return (
     <div className="flex flex-col h-screen w-screen bg-bg-darker text-gray-200 overflow-hidden">
