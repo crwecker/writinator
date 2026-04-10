@@ -512,9 +512,14 @@ export const useDocumentStore = create<DocumentState>()(
         }
         return persisted as DocumentState
       },
-      onRehydrateStorage: () => (_state, error) => {
+      onRehydrateStorage: () => (state, error) => {
         if (error) {
           console.error('[documentStore] rehydration error:', error)
+        }
+        // Ensure book.documents exists (old data may use 'chapters' or be missing)
+        if (state?.book && !state.book.documents) {
+          const legacy = (state.book as unknown as Record<string, unknown>).chapters as Document[] | undefined
+          state.book = { ...state.book, documents: legacy ?? [] }
         }
         // useDocumentStore is defined by the time this callback fires (zustand defers it)
         useDocumentStore.setState({ hasHydrated: true })
