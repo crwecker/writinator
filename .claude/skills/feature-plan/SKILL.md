@@ -7,9 +7,19 @@ user-invocable: true
 
 # Feature Plan: Multi-Phase Implementation Planning
 
-Break a large feature into a phased implementation plan designed for multiple Claude Code sessions. Each phase uses Opus 4.6 team agents to save context and parallelize work.
+Break a large feature into a phased implementation plan designed for multiple Claude Code sessions. Each phase uses a tiered team of agents to save context and parallelize work.
 
 The user will provide a feature description either inline (e.g., `/feature-plan add a notification system`) or you'll ask them to describe it.
+
+## Model Tier Rules (apply to every agent spawned by this skill)
+
+These rules are non-negotiable and mirror the project's model-usage policy:
+
+- **Opus** — Main brain. Orchestration loop. Codebase discovery. High-complexity reasoning. The top-level agent driving a `/feature-plan` session is always Opus, and so are Explore agents that do genuine codebase discovery (mapping unknown territory, tracing architecture).
+- **Sonnet** — Structured planning steps. Inner loop tasks. All team implementation agents (`editor-dev`, `ui-dev`, `storage-dev`, `general-purpose`, `reviewer`) that do the actual writing, editing, and testing of code run as Sonnet.
+- **Haiku** — Lower-complexity tasks. Context distillation. When an Explore agent's job is to read a known set of files (planning docs, progress trackers, a handful of source files for a phase) and return a focused summary, it runs as Haiku.
+
+Every `Agent(...)` call in this skill's output must set `model` to one of these three, matching the role.
 
 ## Step 1: Understand the Feature
 
@@ -17,7 +27,7 @@ If the user didn't provide a feature description inline, ask them to describe wh
 
 ## Step 2: Explore the Codebase (2 Parallel Explore Agents)
 
-Spawn 2 **Explore** agents (model: opus) in parallel to understand what exists. Do NOT read these files yourself (save your context window):
+Spawn 2 **Explore** agents (`model: opus` — this is codebase discovery) in parallel to understand what exists. Do NOT read these files yourself (save your context window):
 
 ### Agent 1: `ui-explorer`
 Explore the React component layer for anything related to this feature:
@@ -54,28 +64,37 @@ Create `research/{feature-name}/` with 4 files:
 - New work needed
 
 ### implementation-plan.md
-Split the feature into phases. Each implementation phase is followed by a dedicated QA phase. Both are separate Claude Code sessions. The numbering is: Phase 1 (implement), Phase 1 QA (verify), Phase 2 (implement), Phase 2 QA (verify), etc.
+Split the feature into phases. Each phase is a single Claude Code session that includes its own inline QA at the end — **there are no separate QA phases**. The numbering is simply Phase 1, Phase 2, Phase 3, etc.
 
 **Phase sizing (critical):**
-Prefer many small phases over fewer large ones. A phase that tries to do too much burns context, produces sloppier output, and misses details. Each implementation phase should be completable in a single focused session without exhausting the context window. Rules of thumb:
+Prefer many small phases over fewer large ones. A phase that tries to do too much burns context, produces sloppier output, and misses details. Each phase should be completable in a single focused session without exhausting the context window. Rules of thumb:
 - One phase = one logical slice (e.g., "add the Zustand store + persistence + types" or "build the modal component + wire to existing store"). If you find yourself writing "and also..." in the phase description, split it.
 - 2-4 deliverables per phase is ideal. More than 5 is a sign the phase is too big.
-- When in doubt, split. Two small phases with QA passes will always produce better work than one large phase that rushes through.
+- When in doubt, split. Two small phases will always produce better work than one large phase that rushes through.
 
 **Phase ordering principles:**
 1. Phase 1 is always architecture/foundation (types, store shape, patterns that all later phases follow)
-2. Phase 1 QA verifies Phase 1
-3. Next phases build stores, utilities, and core logic (testable in isolation)
-4. Then phases that build React components (views, modals, toolbars, editor extensions)
-5. Then integration, polish, and wiring everything together last
-6. Every implementation phase gets a QA phase immediately after it
+2. Next phases build stores, utilities, and core logic (testable in isolation)
+3. Then phases that build React components (views, modals, toolbars, editor extensions)
+4. Then integration, polish, and wiring everything together last
+5. Every phase ends with inline QA (lint/type/build + visual check + screenshot) before being marked done
 
 **Team Workflow section (include at top of plan):**
-Every phase uses Opus 4.6 team agents. The project has specialized agent types available: `editor-dev` (editor, CodeMirror extensions, formatting, VIM), `ui-dev` (sidebar, layout, modals, Tailwind), and `storage-dev` (Zustand stores, localforage, file system). Include this standard workflow:
-1. **Step 1 - Load Context**: Spawn an Explore agent to read planning docs and relevant source files. The main agent does NOT read large docs directly. The Explore agent returns a focused summary.
-2. **Step 2 - Create Team**: Spawn parallel implementation agents (model: opus, mode: bypassPermissions). Use the appropriate specialized agent type (`editor-dev`, `ui-dev`, or `storage-dev`) based on the work. Give each agent ONLY the context it needs from the Explore summary, not raw planning docs.
-3. **Step 3 - QA**: `npx eslint .`, `npx tsc -b --noEmit`, `npx vite build`, commit.
-4. **Step 4 - Update Docs**: Update progress.md and state.md.
+Every phase uses a tiered team of agents per the model rules above. The project has specialized agent types available: `editor-dev` (editor, CodeMirror extensions, formatting, VIM), `ui-dev` (sidebar, layout, modals, Tailwind), and `storage-dev` (Zustand stores, localforage, file system). Include this standard workflow:
+1. **Step 1 - Load Context (Haiku)**: Spawn an Explore agent (`model: haiku`) to read planning docs and a short list of relevant source files, then return a focused summary. This is context distillation, not discovery — the target files are already known. The main agent does NOT read large docs directly.
+2. **Step 2 - Create Team (Sonnet)**: Spawn parallel implementation agents (`model: sonnet`, `mode: bypassPermissions`). Use the appropriate specialized agent type (`editor-dev`, `ui-dev`, or `storage-dev`) based on the work. Give each agent ONLY the context it needs from the Haiku summary, not raw planning docs.
+3. **Step 3 - Static QA**: `npx eslint .`, `npx tsc -b --noEmit`, `npx vite build`. Fix anything that breaks before moving on.
+4. **Step 4 - Visual QA (main Opus agent does this itself)**: Launch the website with `npm run dev`, drive the UI to confirm the changes look as expected, and capture exactly one screenshot saved to `research/{feature-name}/screenshots/phase-N.png`. Details below.
+5. **Step 5 - Commit & Update Docs**: Commit the phase, then update `progress.md` and `state.md`.
+
+**Visual QA Step — required details (include in Team Workflow):**
+Every phase must end with a real visual verification, not just a type-check. The main Opus agent performs this step itself — it has the context to judge whether the screen looks right:
+- Start the dev server in the background: `npm run dev` via `Bash` with `run_in_background: true`. Wait for the server to report it's listening by polling the background output (do not `sleep`).
+- Navigate to the local dev URL (default `http://localhost:5173`) using whichever browser automation tool is available in the session (Playwright MCP, Chrome DevTools MCP, Puppeteer, etc.). If none is available, fall back to `screencapture -x` against a manually opened browser window and note that in `progress.md`.
+- Drive the UI just enough to exercise this phase's changes (open the new modal, click the new button, trigger the new editor extension, etc.) and confirm the result matches the phase's goal.
+- Take exactly **one** screenshot of the most representative state and save it to `research/{feature-name}/screenshots/phase-N.png` (create the `screenshots/` subfolder if it doesn't exist). One screenshot per phase — not a gallery.
+- Stop the background dev server before finishing the phase.
+- If the visual QA reveals a problem, fix it in the same session (spawn a follow-up Sonnet agent if needed), re-run static QA, re-capture the screenshot, then commit.
 
 **Agent Scaling Guidelines (include in Team Workflow):**
 The starter prompts suggest a default split based on the specialized agent types, but the orchestrator MUST assess the actual workload and scale accordingly:
@@ -83,7 +102,7 @@ The starter prompts suggest a default split based on the specialized agent types
 - **Split large store work across multiple agents** when a single agent would handle 4+ independent stores or complex cross-store logic. Signs a split is needed: the deliverable list has 10+ items, the work spans 4+ files, or the concerns are independent.
 - **Merge small work into a single agent** when one side has only 1-2 trivial changes (e.g., adding a field to an existing type, updating a constant). Don't spawn a dedicated agent for work that takes 5 minutes.
 - **Split large component work** when a phase creates 3+ new components plus modals plus editor extensions. One agent for layout/UI, one for editor-specific work.
-- **Use a dedicated reviewer agent** when a phase has significant changes across multiple domains. The `reviewer` agent type can run lint, type-check, and build in parallel after implementation agents commit their code.
+- **Use a dedicated reviewer agent (`reviewer`, `model: sonnet`)** when a phase has significant changes across multiple domains. It can run lint, type-check, and build in parallel after implementation agents commit their code.
 - **Never exceed 5 parallel agents.** Coordination overhead outweighs parallelism beyond this point. Sequential follow-up agents are fine when needed.
 - **Each agent should own complete vertical slices.** Don't split by file type (one for components, another for stores). Split by domain (one for snapshot feature, another for export feature). Each agent writes its own tests for the code it creates.
 
@@ -102,8 +121,8 @@ This is Phase N of the {Feature Name} feature: {Phase Title}.
 
 Goal: {one sentence}
 
-STEP 1 - LOAD CONTEXT (do NOT read planning docs directly, save your context):
-Spawn an Explore agent (model: opus) to read and summarize:
+STEP 1 - LOAD CONTEXT (Haiku, context distillation — do NOT read planning docs yourself):
+Spawn an Explore agent (model: haiku) to read and summarize:
 - research/{feature-name}/state.md
 - research/{feature-name}/progress.md
 - research/{feature-name}/implementation-plan.md (Phase N section only)
@@ -111,9 +130,10 @@ Spawn an Explore agent (model: opus) to read and summarize:
 - CLAUDE.md
 The agent should return: {what specific info this phase needs}.
 
-STEP 2 - CREATE TEAM ({feature-name}-phase-N):
-Spawn parallel implementation agents using the Explore summary (not raw docs).
-Use the appropriate specialized agent type for each:
+STEP 2 - CREATE TEAM ({feature-name}-phase-N, Sonnet inner loop):
+Spawn parallel implementation agents (model: sonnet, mode: bypassPermissions)
+using the Haiku summary (not raw docs). Use the appropriate specialized
+agent type for each:
 
 {agent-type} agent deliverables:
 {bulleted list of store, lib, type work}
@@ -121,47 +141,19 @@ Use the appropriate specialized agent type for each:
 {agent-type} agent deliverables:
 {bulleted list of components, modals, editor extensions}
 
-STEP 3 - QA: eslint, tsc, vite build, commit.
-STEP 4 - UPDATE DOCS: progress.md and state.md.
-```
-````
+STEP 3 - STATIC QA: npx eslint ., npx tsc -b --noEmit, npx vite build. Fix any failures.
 
-**Every QA phase starter prompt must follow this structure:**
-````
-### QA Starter Prompt
-```
-This is Phase N QA of the {Feature Name} feature: Verify {Phase Title}.
+STEP 4 - VISUAL QA (Opus, main agent does this itself):
+- Launch dev server: `npm run dev` in the background, wait for it to report ready.
+- Open http://localhost:5173 with the available browser automation tool.
+- Drive the UI to exercise this phase's changes: {what specifically to click/type/open}.
+- Confirm the result matches the goal.
+- Save exactly one screenshot to research/{feature-name}/screenshots/phase-N.png.
+- Stop the background dev server.
+- If anything looks wrong, fix it (spawn a follow-up Sonnet agent if needed),
+  re-run STEP 3, re-capture the screenshot, then continue.
 
-Goal: Audit Phase N implementation for correctness, missing edge cases, dead code, and lint/type errors.
-
-STEP 1 - LOAD CONTEXT (do NOT read planning docs directly, save your context):
-Spawn an Explore agent (model: opus) to read and summarize:
-- research/{feature-name}/state.md (new files from Phase N)
-- research/{feature-name}/progress.md (Phase N deliverables checklist)
-- research/{feature-name}/implementation-plan.md (Phase N section only)
-- All files created or modified in Phase N
-- CLAUDE.md
-The agent should return: full list of Phase N deliverables, all new/modified files, and any known issues.
-
-STEP 2 - QA AUDIT (spawn parallel review agents using Explore summary):
-
-Correctness agent:
-- Verify every deliverable from Phase N was actually implemented
-- Check for logic bugs, missing null/undefined guards, incorrect state updates
-- Verify data flow between stores, components, and effects
-- Test edge cases: empty states, missing data, boundary values
-- Run eslint, tsc, and vite build to verify no regressions
-
-Dead code & cleanup agent:
-- Find unused imports, functions, and components left behind
-- Remove commented-out code
-- Consolidate duplicate or near-duplicate logic
-- Verify no TODO/FIXME items were left unresolved
-- Check for `any` types, inconsistent naming, or patterns that diverge from the rest of the codebase
-- Verify React effects have proper cleanup and dependency arrays
-
-STEP 3 - FIX: Apply all fixes, run eslint, tsc, vite build, commit.
-STEP 4 - UPDATE DOCS: Update progress.md (mark Phase N QA complete) and state.md.
+STEP 5 - COMMIT & UPDATE DOCS: Commit the phase, then update progress.md and state.md.
 ```
 ````
 
@@ -193,10 +185,9 @@ Export & persistence:
 - Document structure: Book → Chapters (with nesting support)
 
 ### progress.md
-- Overall status table (phase | status | date started | date completed), includes both implementation and QA phases
-- Per-phase checklist matching deliverables from implementation-plan.md
-- Per-QA-phase checklist (fixes applied, dead code removed)
-- Notes section per phase (filled in after completion)
+- Overall status table (phase | status | date started | date completed) — one row per phase, no separate QA rows
+- Per-phase checklist matching deliverables from implementation-plan.md, plus a final "Visual QA screenshot captured" checkbox pointing to `screenshots/phase-N.png`
+- Notes section per phase (filled in after completion, including anything the visual QA surfaced)
 
 ### state.md
 Cross-phase cheat sheet. Contains ONLY what the next session needs:
@@ -207,12 +198,13 @@ Cross-phase cheat sheet. Contains ONLY what the next session needs:
 - New stores and their persistence keys per phase
 - Architecture decisions (locked once made)
 - Known issues / gotchas
+- Path to the most recent phase screenshot under `screenshots/`
 
 ## Step 5: Present Summary
 
 Do NOT commit or stage the planning docs — the `research/` folder is gitignored and should stay out of version control.
 
 Present a summary to the user:
-- Number of phases (implementation + QA)
-- What each phase covers (one line each, showing the implement/QA pairs)
+- Number of phases
+- What each phase covers (one line each)
 - How to start Phase 1 (copy the starter prompt)
