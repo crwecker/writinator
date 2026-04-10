@@ -46,6 +46,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
       completedSessions: [],
 
       startSession: (imageUrl: string, imageWidth: number, imageHeight: number, wordGoal: number, photographer?: string, photographerUrl?: string, unsplashId?: string) => {
+        if (get().activeSessions.length >= 25) return
         const newSession: ImageRevealSession = {
           id: crypto.randomUUID(),
           unsplashId,

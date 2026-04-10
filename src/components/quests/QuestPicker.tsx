@@ -165,24 +165,6 @@ export function QuestPicker({ open, onClose }: Props) {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
 
-          {/* Active Sessions */}
-          {activeSessions.length > 0 && (
-            <section>
-              <p className="text-xs font-medium text-gray-400 mb-2">
-                Active <span className="text-gray-600">({activeSessions.length})</span>
-              </p>
-              <div className="space-y-2">
-                {activeSessions.map((session) => (
-                  <ActiveSessionCard
-                    key={session.id}
-                    session={session}
-                    onAbandon={abandonSession}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-
           {/* Start New Quest */}
           <section>
             <p className="text-xs font-medium text-gray-400 mb-2">New Quest</p>
@@ -232,10 +214,10 @@ export function QuestPicker({ open, onClose }: Props) {
 
             <button
               onClick={handleStartQuest}
-              disabled={loading}
+              disabled={loading || activeSessions.length >= 25}
               className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium text-white transition-colors"
             >
-              {loading ? 'Finding image...' : 'Start Writing'}
+              {activeSessions.length >= 25 ? 'Quest limit reached (25)' : loading ? 'Finding image...' : 'Start Quest'}
             </button>
 
             <p className="text-[10px] text-gray-600 mt-2">
@@ -243,11 +225,29 @@ export function QuestPicker({ open, onClose }: Props) {
             </p>
           </section>
 
+          {/* Active Sessions */}
+          {activeSessions.length > 0 && (
+            <section>
+              <p className="text-xs font-medium text-gray-400 mb-2">
+                Active Quests <span className="text-gray-600">({activeSessions.length})</span>
+              </p>
+              <div className="space-y-2">
+                {activeSessions.map((session) => (
+                  <ActiveSessionCard
+                    key={session.id}
+                    session={session}
+                    onAbandon={abandonSession}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Completed Gallery */}
           {completedSessions.length > 0 && (
             <section>
               <p className="text-xs font-medium text-gray-400 mb-2">
-                Revealed <span className="text-gray-600">({completedSessions.length})</span>
+                Completed Quests <span className="text-gray-600">({completedSessions.length})</span>
               </p>
               <div className="grid grid-cols-3 gap-2">
                 {[...completedSessions].reverse().map((session) => (

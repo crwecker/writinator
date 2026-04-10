@@ -13,7 +13,7 @@ import type { ImageRevealSession } from '../../types'
  * or drilling into a single session.  Celebration is handled separately via
  * a queue so it doesn't interfere with navigation intent.
  */
-type UserView = 'collapsed' | 'stack' | { kind: 'detail'; sessionId: string }
+type UserView = 'collapsed' | 'expanded'
 
 interface LoadedImages {
   [sessionId: string]: HTMLImageElement
@@ -22,31 +22,6 @@ interface LoadedImages {
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-
-interface ThumbnailCanvasProps {
-  session: ImageRevealSession
-  image: HTMLImageElement | undefined
-}
-
-function ThumbnailCanvas({ session, image }: ThumbnailCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    if (!image || !canvasRef.current) return
-    drawPixelated(canvasRef.current, image, PIXEL_LEVELS[session.currentLevel])
-  }, [image, session.currentLevel])
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={64}
-      height={64}
-      className="w-16 h-16 rounded shrink-0 object-cover bg-gray-800"
-    />
-  )
-}
-
-// -----------
 
 interface DetailCanvasProps {
   session: ImageRevealSession
@@ -256,8 +231,6 @@ function CollapsedThumbnail({ session, image }: CollapsedThumbnailProps) {
 
 export function ImageRevealPanel() {
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
-  const abandonSession = useImageRevealStore((s) => s.abandonSession)
-
   // userView: what the user has explicitly navigated to
   const [userView, setUserView] = useState<UserView>('collapsed')
   const [loadedImages, setLoadedImages] = useState<LoadedImages>({})
@@ -335,13 +308,7 @@ export function ImageRevealPanel() {
   // Derive effective panel state from user intent + data
   // ------------------------------------------------------------------
 
-  // If the detailed session was abandoned, treat it as stack
-  const resolvedUserView: UserView =
-    typeof userView === 'object' && userView.kind === 'detail'
-      ? activeSessions.some((s) => s.id === userView.sessionId)
-        ? userView
-        : 'stack'
-      : userView
+  const resolvedUserView: UserView = userView
 
   // Nothing to show at all
   const hasAnything =
@@ -354,7 +321,6 @@ export function ImageRevealPanel() {
   const showingCelebration =
     resolvedUserView !== 'collapsed' && celebrationQueue.length > 0
 
-  // If sessions ran out but we're expanded without a celebration, collapse
   const effectiveUserView: UserView =
     activeSessions.length === 0 && !showingCelebration
       ? 'collapsed'
@@ -366,14 +332,14 @@ export function ImageRevealPanel() {
 
   const collapse = () => setUserView('collapsed')
 
-  const expand = () => setUserView('stack')
+  const expand = () => setUserView('expanded')
 
   const dismissCelebration = () => {
     // Pop head of queue
     setCelebrationQueue((prev) => prev.slice(1))
     // Return to appropriate view
     if (activeSessions.length > 0) {
-      setUserView('stack')
+      setUserView('expanded')
     } else {
       setUserView('collapsed')
     }
@@ -459,99 +425,44 @@ export function ImageRevealPanel() {
   }
 
   // ==================================================================
-  // STACK
+  // EXPANDED — all sessions at full size
   // ==================================================================
-  if (effectiveUserView === 'stack') {
-    return (
-      <div className="fixed bottom-12 right-4 z-40 animate-fade-in">
-        <div className="w-80 bg-gray-900 border border-gray-700 shadow-2xl rounded-lg overflow-hidden flex flex-col">
-          <PanelHeader
-            title={`Image Quests (${activeSessions.length})`}
-            onCollapse={collapse}
-          />
-
-          <div className="overflow-y-auto max-h-[400px]">
-            {activeSessions.map((session) => {
-              const image = loadedImages[session.id]
-
-              return (
-                <button
-                  key={session.id}
-                  onClick={() => setUserView({ kind: 'detail', sessionId: session.id })}
-                  className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-800 transition-colors border-b border-gray-800 last:border-b-0 text-left"
-                >
-                  <ThumbnailCanvas session={session} image={image} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-gray-300 font-medium mb-1 truncate">
-                      {session.wordGoal.toLocaleString()} words
-                    </div>
-                    <ProgressBar session={session} showText={false} />
-                    <div className="text-[10px] text-gray-500 tabular-nums mt-1">
-                      {session.wordsWritten.toLocaleString()} / {session.wordGoal.toLocaleString()}
-                    </div>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // ==================================================================
-  // DETAIL
-  // ==================================================================
-  // effectiveUserView here must be the detail object
-  const detailView = effectiveUserView
-  if (typeof detailView !== 'object' || detailView.kind !== 'detail') return null
-
-  const session = activeSessions.find((s) => s.id === detailView.sessionId)
-  if (!session) return null
-
-  const image = loadedImages[session.id]
-  const remaining = Math.max(session.wordGoal - session.wordsWritten, 0)
-
   return (
     <div className="fixed bottom-12 right-4 z-40 animate-fade-in">
       <div className="w-80 bg-gray-900 border border-gray-700 shadow-2xl rounded-lg overflow-hidden flex flex-col">
         <PanelHeader
-          title="Image Quest"
-          onBack={() => setUserView('stack')}
+          title="Image Quests"
           onCollapse={collapse}
         />
 
-        <div className="p-3">
-          <DetailCanvas session={session} image={image} />
-        </div>
+        <div className="overflow-y-auto max-h-[80vh]">
+          {activeSessions.map((session) => {
+            const image = loadedImages[session.id]
+            const remaining = Math.max(session.wordGoal - session.wordsWritten, 0)
 
-        <div className="px-3 pb-2">
-          <div className="flex items-center justify-between text-xs mb-1">
-            <span className="text-gray-400 tabular-nums">
-              {session.wordsWritten.toLocaleString()} / {session.wordGoal.toLocaleString()}
-            </span>
-            <span className="text-gray-500 tabular-nums">
-              {remaining.toLocaleString()} left
-            </span>
-          </div>
-          <ProgressBar session={session} showText={false} />
-        </div>
+            return (
+              <div
+                key={session.id}
+                className="border-b border-gray-800 last:border-b-0"
+              >
+                <div className="px-3 pt-3">
+                  <DetailCanvas session={session} image={image} />
+                </div>
 
-        <div className="px-3 pb-1">
-          <PhotographerCredit session={session} />
-        </div>
-
-        <div className="flex items-center justify-end px-3 py-2 border-t border-gray-700">
-          <button
-            onClick={() => {
-              abandonSession(session.id)
-              setUserView('stack')
-            }}
-            className="text-[10px] text-gray-600 hover:text-red-400 transition-colors"
-            title="Abandon this quest"
-          >
-            Abandon
-          </button>
+                <div className="px-3 py-2">
+                  <ProgressBar session={session} showText={false} />
+                  <div className="flex items-center justify-between text-[10px] text-gray-500 tabular-nums mt-1">
+                    <span>
+                      {session.wordsWritten.toLocaleString()} / {session.wordGoal.toLocaleString()}
+                    </span>
+                    <span>
+                      {remaining.toLocaleString()} left
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
