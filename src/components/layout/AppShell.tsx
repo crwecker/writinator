@@ -39,7 +39,7 @@ export function AppShell() {
   const sidebarOpen = useEditorStore((s) => s.sidebarOpen)
   const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
 
-  const activeDocument = book?.documents.find((doc) => doc.id === activeDocumentId)
+  const activeDocument = book?.documents?.find((doc) => doc.id === activeDocumentId)
 
   const handleWordCountChange = useCallback((c: number) => setWordCount(c), [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
@@ -112,7 +112,7 @@ export function AppShell() {
       const { book, activeDocumentId } = useDocumentStore.getState()
       if (!book || !activeDocumentId) return
       useDocumentStore.getState()._flushContentUpdate()
-      const document = useDocumentStore.getState().book?.documents.find(
+      const document = useDocumentStore.getState().book?.documents?.find(
         (doc) => doc.id === activeDocumentId
       )
       if (document?.content) {
