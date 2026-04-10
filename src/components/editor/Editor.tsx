@@ -12,6 +12,13 @@ import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
 import './editor.css'
 
+// Map j/k to gj/gk so vim navigation respects visual (wrapped) lines
+// instead of jumping over whole paragraphs.
+Vim.map('j', 'gj', 'normal')
+Vim.map('k', 'gk', 'normal')
+Vim.map('j', 'gj', 'visual')
+Vim.map('k', 'gk', 'visual')
+
 const FONT_FAMILY_MAP: Record<string, string> = {
   serif: "'Lora', serif",
   sans: 'system-ui, -apple-system, sans-serif',
@@ -408,14 +415,16 @@ const markdownDecorationPlugin = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations }
 )
 
-// Custom kj keymap for exiting insert mode
+// Custom kj keymap for exiting insert mode.
+// Fires when 'j' arrives at exactly the cursor position where 'k' was just
+// inserted — no time limit, but any intervening edit or cursor movement resets
+// the sequence so a stray k earlier in a paragraph won't accidentally trigger.
 function kjExitInsertMode(): Extension {
   let lastKey = ''
-  let lastTime = 0
+  let kPos = -1
 
   return EditorView.domEventHandlers({
     keydown(event, view) {
-      const ts = Date.now()
       const cmVim = getVimCM(view)
       if (!cmVim) return false
 
@@ -426,23 +435,25 @@ function kjExitInsertMode(): Extension {
         return false
       }
 
-      if (event.key === 'j') {
-        lastKey = 'j'
-        lastTime = ts
+      if (event.key === 'k') {
+        lastKey = 'k'
+        // Cursor is still at pre-insertion position; after k is typed it will
+        // sit at kPos + 1.
+        kPos = view.state.selection.main.head
         return false
       }
 
-      if (event.key === 'k' && lastKey === 'j' && ts - lastTime < 500) {
-        event.preventDefault()
-        // Delete the 'j' that was typed
+      if (event.key === 'j' && lastKey === 'k') {
         const cursor = view.state.selection.main.head
-        if (cursor > 0) {
+        if (cursor === kPos + 1) {
+          event.preventDefault()
+          // Delete the 'k' that was typed
           view.dispatch({ changes: { from: cursor - 1, to: cursor } })
+          // Use VIM API to exit insert mode instead of synthetic Escape event
+          Vim.handleKey(cmVim, '<Esc>', 'mapping')
+          lastKey = ''
+          return true
         }
-        // Use VIM API to exit insert mode instead of synthetic Escape event
-        Vim.handleKey(cmVim, '<Esc>', 'mapping')
-        lastKey = ''
-        return true
       }
 
       lastKey = ''
