@@ -503,6 +503,13 @@ export const useDocumentStore = create<DocumentState>()(
           delete state.documentStyles
           state.globalSettings = { documentStyles } as GlobalSettings
         }
+        // Ensure book.documents exists (old data may use 'chapters')
+        const state = persisted as Record<string, unknown>
+        const book = state.book as Record<string, unknown> | undefined
+        if (book && !book.documents) {
+          book.documents = book.chapters ?? []
+          delete book.chapters
+        }
         return persisted as DocumentState
       },
       onRehydrateStorage: () => (_state, error) => {

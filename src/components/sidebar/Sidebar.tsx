@@ -135,7 +135,7 @@ export function Sidebar() {
 
   const flatItems = useMemo(() => {
     if (!book) return []
-    return flattenTree(book.documents, collapsedDocumentIds)
+    return flattenTree(book.documents ?? [], collapsedDocumentIds)
   }, [book, collapsedDocumentIds])
 
   const flatItemIds = useMemo(() => flatItems.map((item) => item.doc.id), [flatItems])
