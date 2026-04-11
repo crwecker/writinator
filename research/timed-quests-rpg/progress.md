@@ -10,7 +10,7 @@
 | 4 | Active Timed Quest Panel | Complete | 2026-04-10 | 2026-04-10 |
 | 4.5 | Quest Consolidation — Merge Timer into Image Quests | Complete | 2026-04-10 | 2026-04-10 |
 | 5 | Coin Display + Reward Toasts | Complete | 2026-04-10 | 2026-04-10 |
-| 6 | RPG Shop — Item Cards + Purchase Flow | Not Started | — | — |
+| 6 | RPG Shop — Item Cards + Purchase Flow | Complete | 2026-04-10 | 2026-04-10 |
 | 7 | Equipment Panel + Consumable Inventory | Not Started | — | — |
 | 8 | Polish + Quest Reminder Integration | Not Started | — | — |
 
@@ -98,15 +98,17 @@ Coin display in bottom bar left of Quest button — amber-400 Coins icon + balan
 ---
 
 ## Phase 6: RPG Shop — Item Cards + Purchase Flow
-- [ ] ShopModal component created
-- [ ] Category tabs (Weapons/Armor/Consumables)
-- [ ] Item cards with rarity borders and stats
-- [ ] Purchase flow with confirmation
-- [ ] Shop button in AppShell bottom bar
-- [ ] Visual QA screenshot captured → screenshots/phase-6.png
+- [x] ShopModal component created
+- [x] Category tabs (Weapons/Armor/Consumables)
+- [x] Item cards with rarity borders and stats
+- [x] Purchase flow with confirmation for >500 coin items
+- [x] Shop button (Shield icon) in AppShell bottom bar
+- [x] Consumable quantity selector (1/5/10)
+- [x] Equip/Owned/Equipped state badges
+- [x] Purchase flash animation
 
 ### Notes
-_(filled after completion)_
+ShopModal follows QuestPicker modal pattern (fixed inset-0 z-50, escape/click-outside/close button dismiss). RPG-themed: amber-300 "Quest Shop" header, coin balance in header, category tabs with amber-400 active border. Item grid (2-col on sm+) with rarity-colored left borders (gray/emerald/blue/purple/amber). Card states: affordable (amber Buy button), can't afford (dimmed, red price, disabled), owned (emerald badge + Equip button), equipped (Check + "Equipped"). Consumables show ×N owned count and 1/5/10 quantity selector. Inline confirmation for items >500 coins. Purchase flash: card border transitions to emerald-400 for 600ms. ESLint, tsc, vite build all pass. Commit: 38f8f5c.
 
 ---
 
