@@ -5,6 +5,7 @@ import type { Book, Document, DocumentStyles, GlobalSettings, WritinatorFile } f
 import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
 import { useImageRevealStore } from './imageRevealStore'
+import { useTimedQuestStore } from './timedQuestStore'
 
 function countWords(text: string | null): number {
   if (!text || text.trim() === '') return 0
@@ -434,6 +435,7 @@ export const useDocumentStore = create<DocumentState>()(
           const delta = newWords - oldWords
           if (delta > 0) {
             useImageRevealStore.getState().addWords(delta)
+            useTimedQuestStore.getState().addWords(delta)
           }
           set({
             book: {
