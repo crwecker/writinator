@@ -7,7 +7,7 @@
 | 1 | Foundation — Types, Items, Player Store | Complete | 2026-04-10 | 2026-04-10 |
 | 2 | Timed Quest Store + Timer Utility | Complete | 2026-04-10 | 2026-04-10 |
 | 3 | Quest Creation UI — Timed Quest Tab | Complete | 2026-04-10 | 2026-04-10 |
-| 4 | Active Timed Quest Panel | Not Started | — | — |
+| 4 | Active Timed Quest Panel | Complete | 2026-04-10 | 2026-04-10 |
 | 5 | Coin Display + Reward Toasts | Not Started | — | — |
 | 6 | RPG Shop — Item Cards + Purchase Flow | Not Started | — | — |
 | 7 | Equipment Panel + Consumable Inventory | Not Started | — | — |
@@ -53,17 +53,17 @@ QuestPicker now has "Image Quest" / "Timed Quest" tabs. Defaults to Timed tab wh
 ---
 
 ## Phase 4: Active Timed Quest Panel
-- [ ] TimedQuestPanel floating component created
-- [ ] Collapsed view (timer + word count)
-- [ ] Expanded view (full details + consumables)
-- [ ] Timer countdown with color transitions
-- [ ] Consumable quick-use buttons
-- [ ] Completion/failure celebration overlays
-- [ ] Wired into AppShell
-- [ ] Visual QA screenshot captured → screenshots/phase-4.png
+- [x] TimedQuestPanel floating component created
+- [x] Collapsed view (timer + word count + difficulty dot)
+- [x] Expanded view (full details + consumables)
+- [x] Timer countdown with color transitions (white → amber → orange → red+pulse)
+- [x] Consumable quick-use buttons with count badges
+- [x] Completion/failure result overlays
+- [x] Wired into AppShell
+- [x] Visual QA screenshot captured → screenshots/phase-4.png
 
 ### Notes
-_(filled after completion)_
+TimedQuestPanel at fixed bottom-12 left-4 (opposite side from ImageRevealPanel). Collapsed bar shows difficulty dot, MM:SS countdown, word fraction. Expanded shows large timer with color coding by percentRemaining, progress bar, equipment info, consumable buttons (disabled when count=0), pause/resume toggle, abandon with inline confirmation. Result overlays captured via Zustand subscribe detecting activeQuest→null transition, with snapshot of quest state for display. Difficulty uses 'epic' (not 'legendary') per actual QuestDifficulty type. ESLint, tsc, vite build all pass.
 
 ---
 

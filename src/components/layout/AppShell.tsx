@@ -16,6 +16,7 @@ import { SnapshotBrowser } from './SnapshotBrowser'
 import { StyleEditor } from '../editor/StyleEditor'
 import { QuestPicker } from '../quests/QuestPicker'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
+import { TimedQuestPanel } from '../quests/TimedQuestPanel'
 import { QuestReminder } from '../quests/QuestReminder'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { SubDocumentLinks } from '../editor/SubDocumentLinks'
@@ -177,6 +178,7 @@ export function AppShell() {
           <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} />
 
           <ImageRevealPanel />
+          <TimedQuestPanel />
 
           {activeSessions.length === 0 && (
             <QuestReminder onStartQuest={() => setQuestPickerOpen(true)} />

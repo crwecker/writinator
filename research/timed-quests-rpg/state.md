@@ -1,7 +1,7 @@
 # Timed Quests + RPG Reward System — Cross-Phase State
 
 ## Current Phase
-Phase 4 (not started) — Phase 3 complete
+Phase 5 (not started) — Phase 4 complete
 
 ## Key Existing File Paths
 - `src/types/index.ts` — shared TypeScript types
@@ -26,6 +26,7 @@ Phase 4 (not started) — Phase 3 complete
 - Phase 1: (none — data-only phase)
 - Phase 2: (none — data-only phase)
 - Phase 3: (none — refactored existing QuestPicker.tsx with tabs + timed quest form)
+- Phase 4: `src/components/quests/TimedQuestPanel.tsx`
 
 ## New Stores and Persistence Keys
 - Phase 1: `usePlayerStore` → `writinator-player` (v1)
@@ -47,4 +48,4 @@ Phase 4 (not started) — Phase 3 complete
 - localforageStorage adapter is copy-pasted across stores (not extracted, acceptable)
 
 ## Latest Screenshot
-Phase 3: no screenshot (no browser automation available)
+Phase 4: screenshots/phase-4.png (expanded panel with active quest, word count updating)
