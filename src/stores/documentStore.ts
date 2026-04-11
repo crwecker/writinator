@@ -5,11 +5,7 @@ import type { Book, Document, DocumentStyles, GlobalSettings, WritinatorFile } f
 import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
 import { useImageRevealStore } from './imageRevealStore'
-
-function countWords(text: string | null): number {
-  if (!text || text.trim() === '') return 0
-  return text.trim().split(/\s+/).length
-}
+import { countWords } from '../lib/words'
 
 interface DocumentState {
   book: Book | null
@@ -169,6 +165,11 @@ export const useDocumentStore = create<DocumentState>()(
           await snapshotBook(book, 'closeBook')
         }
         get()._flushContentUpdate()
+        // Pause timed quest timer when closing the book
+        const imageRevealState = useImageRevealStore.getState()
+        if (imageRevealState.activeSessions.some((s) => s.timeMinutes !== undefined)) {
+          imageRevealState.pauseTimer()
+        }
         clearFileHandle()
         set({ book: null, activeDocumentId: null })
       },

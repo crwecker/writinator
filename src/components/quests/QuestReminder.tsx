@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useDocumentStore } from '../../stores/documentStore'
+import { useImageRevealStore } from '../../stores/imageRevealStore'
+import { countWords } from '../../lib/words'
 
 interface QuestReminderProps {
   onStartQuest: () => void
@@ -16,24 +18,23 @@ export function QuestReminder({ onStartQuest }: QuestReminderProps) {
 
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
   const book = useDocumentStore((s) => s.book)
+  const activeSessions = useImageRevealStore((s) => s.activeSessions)
 
   const currentWordCount = (() => {
     if (!book || !activeDocumentId) return 0
     const doc = book.documents.find((d) => d.id === activeDocumentId)
-    const content = doc?.content
-    if (!content || content.trim() === '') return 0
-    return content.trim().split(/\s+/).length
+    return countWords(doc?.content ?? null)
   })()
 
   // Keep a stable ref to the previous word count
   const prevWordCountRef = useRef(currentWordCount)
 
-  // Schedule the reminder whenever writing is first detected
-  // (word count increased by at least 1 word since last render)
+  // Schedule the reminder whenever writing is first detected and no active quests
   useEffect(() => {
     if (dismissed) return
     if (hasWrittenRef.current) return
     if (timerRef.current) return
+    if (activeSessions.length > 0) return
 
     const delta = currentWordCount - prevWordCountRef.current
     prevWordCountRef.current = currentWordCount
@@ -65,7 +66,7 @@ export function QuestReminder({ onStartQuest }: QuestReminderProps) {
     onStartQuest()
   }
 
-  if (dismissed) return null
+  if (dismissed || activeSessions.length > 0) return null
 
   return (
     <div
@@ -74,12 +75,12 @@ export function QuestReminder({ onStartQuest }: QuestReminderProps) {
       }`}
       style={{ bottom: '40px' }}
     >
-      <div className="flex items-center gap-3 bg-gray-900/90 border border-gray-700 shadow-xl rounded-lg px-4 py-3 backdrop-blur-sm min-w-[260px] max-w-xs">
+      <div className="flex items-center gap-3 bg-gray-900/90 border border-gray-700 shadow-xl rounded-lg px-4 py-3 backdrop-blur-sm min-w-[300px] max-w-xs">
         <span className="text-base shrink-0" aria-hidden="true">
-          &#10024;
+          &#9876;&#65039;
         </span>
         <span className="text-gray-300 text-sm flex-1">
-          Start a writing quest?
+          Start a quest to make your writing count!
         </span>
         <div className="flex items-center gap-2 shrink-0">
           <button

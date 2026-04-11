@@ -1,5 +1,6 @@
 import * as localforage from 'localforage'
 import type { Book, Snapshot } from '../types'
+import { countWords } from '../lib/words'
 
 const MAX_SNAPSHOTS_PER_DOCUMENT = 100
 const STORAGE_PREFIX = 'writinator-snapshots-'
@@ -12,10 +13,6 @@ function enqueue<T>(documentId: string, fn: () => Promise<T>): Promise<T> {
   const next = prev.then(fn, fn)
   writeQueues.set(documentId, next)
   return next
-}
-
-function countWords(text: string): number {
-  return text.trim() === '' ? 0 : text.trim().split(/\s+/).length
 }
 
 async function loadSnapshots(documentId: string): Promise<Snapshot[]> {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import { Coins } from 'lucide-react'
 import { subscribeToasts, getToastsSnapshot } from './rewardToastStore'
 import type { Toast } from './rewardToastStore'
@@ -6,27 +6,26 @@ import type { Toast } from './rewardToastStore'
 // ── Individual toast item ────────────────────────────────────────────────────
 
 function ToastItem({ toast }: { toast: Toast }) {
-  const ref = useRef<HTMLDivElement>(null)
+  const [entered, setEntered] = useState(false)
 
   useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    // Double rAF ensures initial off-screen state is painted before transition
+    // Double rAF ensures initial hidden state is painted before transition
     const raf1 = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        el.style.opacity = '1'
-        el.style.transform = 'translateY(0)'
-      })
+      const raf2 = requestAnimationFrame(() => setEntered(true))
+      return () => cancelAnimationFrame(raf2)
     })
     return () => cancelAnimationFrame(raf1)
   }, [])
 
   return (
     <div
-      ref={ref}
       style={{
-        opacity: toast.exiting ? 0 : undefined,
-        transform: toast.exiting ? 'translateY(8px)' : undefined,
+        opacity: toast.exiting ? 0 : entered ? 1 : 0,
+        transform: toast.exiting
+          ? 'translateY(8px)'
+          : entered
+            ? 'translateY(0)'
+            : 'translateY(-8px)',
         transition: 'opacity 0.3s ease, transform 0.3s ease',
       }}
       className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-gray-900 px-4 py-2 shadow-lg"

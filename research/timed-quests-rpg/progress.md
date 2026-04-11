@@ -12,7 +12,7 @@
 | 5 | Coin Display + Reward Toasts | Complete | 2026-04-10 | 2026-04-10 |
 | 6 | RPG Shop — Item Cards + Purchase Flow | Complete | 2026-04-10 | 2026-04-10 |
 | 7 | Equipment Panel + Consumable Inventory | Complete | 2026-04-10 | 2026-04-10 |
-| 8 | Polish + Quest Reminder Integration | Not Started | — | — |
+| 8 | Polish + Quest Reminder Integration | Complete | 2026-04-10 | 2026-04-10 |
 
 ---
 
@@ -126,11 +126,11 @@ EquipmentPanel added as new "Equipment" tab in ShopModal (first tab, default vie
 ---
 
 ## Phase 8: Polish + Quest Reminder Integration
-- [ ] QuestReminder updated for both quest types
-- [ ] countWords consolidated into src/lib/words.ts
-- [ ] Edge cases handled (close book, tab background, page reload)
-- [ ] Reward balance verified
-- [ ] Visual QA screenshot captured → screenshots/phase-8.png
+- [x] QuestReminder updated for both quest types
+- [x] countWords consolidated into src/lib/words.ts
+- [x] Edge cases handled (close book, tab background, page reload)
+- [x] Reward balance verified
+- [x] Visual QA screenshot captured → screenshots/phase-8.png
 
 ### Notes
-_(filled after completion)_
+Consolidated countWords into src/lib/words.ts, updated imports in documentStore.ts and snapshotStore.ts. QuestReminder copy changed to "Start a quest to make your writing count!" with sword icon, auto-hides when active sessions exist, uses shared countWords. RewardToast entry animation fixed (was no-op, now proper slide-in via useState + double-rAF). closeBook() now pauses timed quest timer via imageRevealStore.pauseTimer(). Timer confirmed wall-clock based (Date.now() - startedAt - pausedDuration) — backgrounded tabs and page reloads work correctly. Reward balance reviewed: 250 words/10min classifies as "hard" (25 wpm on boundary), yields ~525 coins; 1000 words/15min classifies as "epic", yields ~3100 coins — both feel balanced. ESLint, tsc, vite build all pass.

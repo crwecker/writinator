@@ -1,7 +1,7 @@
 # Timed Quests + RPG Reward System — Cross-Phase State
 
 ## Current Phase
-Phase 8 (not started) — Phase 7 complete
+All phases complete (1–8)
 
 ## Key Existing File Paths
 - `src/types/index.ts` — shared TypeScript types
@@ -24,6 +24,7 @@ Phase 8 (not started) — Phase 7 complete
 - Phase 5: `src/components/quests/RewardToast.tsx`, `src/components/quests/rewardToastStore.ts`, `src/components/quests/useRewardToast.ts`
 - Phase 6: `src/components/quests/ShopModal.tsx`
 - Phase 7: `src/components/quests/EquipmentPanel.tsx`
+- Phase 8: `src/lib/words.ts`
 
 ## New Components Per Phase
 - Phase 1: (none — data-only phase)
@@ -56,9 +57,8 @@ Phase 8 (not started) — Phase 7 complete
 - Shop is RPG-styled (fantasy theme within the dark UI)
 
 ## Known Issues / Gotchas
-- `countWords()` is duplicated in documentStore.ts and snapshotStore.ts — consolidate in Phase 8
 - Word deltas are debounced 1500ms in documentStore — timed quest words will also be delayed
 - localforageStorage adapter is copy-pasted across stores (not extracted, acceptable)
 
 ## Latest Screenshot
-Phase 7: screenshots/phase-7.png (Equipment tab in Quest Shop — equipped gear, stats, consumable inventory)
+Phase 8: screenshots/phase-8.png (Editor with QuestReminder toast visible at bottom-right)
