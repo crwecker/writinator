@@ -71,7 +71,7 @@ export function QuestReminder({ onStartQuest }: QuestReminderProps) {
   return (
     <div
       className={`fixed right-4 z-30 transition-transform duration-300 ease-out ${
-        visible ? 'translate-y-0' : 'translate-y-[calc(100%+2rem)]'
+        visible ? 'translate-y-0' : 'translate-y-[calc(100%+40px)]'
       }`}
       style={{ bottom: '40px' }}
     >

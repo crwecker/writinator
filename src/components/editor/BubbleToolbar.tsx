@@ -36,24 +36,142 @@ const FONT_FAMILIES: Record<string, string> = {
   mono: "'JetBrains Mono', monospace",
 }
 
+// All inline markers, longest first so matching prefers ** over *
+const INLINE_MARKERS = ['**', '~~', '`', '*']
+
+/**
+ * Scan outward from a selection through other inline formatting markers
+ * to find if a specific marker already wraps the selection.
+ * E.g. for selection "text" in `~~**text**~~`, searching for ** finds it
+ * even though ~~ sits between the selection and the ** markers.
+ */
+function findSurroundingMarker(
+  view: EditorView, from: number, to: number, marker: string
+): { openFrom: number; openTo: number; closeFrom: number; closeTo: number } | null {
+  const line = view.state.doc.lineAt(from)
+  if (view.state.doc.lineAt(to).number !== line.number) return null
+
+  const lineText = line.text
+  const relFrom = from - line.from
+  const relTo = to - line.from
+  const otherMarkers = INLINE_MARKERS.filter((m) => m !== marker)
+
+  // Scan backward from selection start, skipping through other markers
+  let backPos = relFrom
+  for (let i = 0; i < 3 && backPos > 0; i++) {
+    let skipped = false
+    for (const m of otherMarkers) {
+      if (backPos >= m.length && lineText.substring(backPos - m.length, backPos) === m) {
+        // For single *, make sure it's not actually part of **
+        if (m === '*' && backPos - m.length > 0 && lineText[backPos - m.length - 1] === '*') continue
+        backPos -= m.length
+        skipped = true
+        break
+      }
+    }
+    if (!skipped) break
+  }
+
+  // Check for our marker at the scanned position
+  if (backPos < marker.length) return null
+  if (lineText.substring(backPos - marker.length, backPos) !== marker) return null
+  // For single *, verify it's not part of **
+  if (marker === '*' && backPos - marker.length > 0 && lineText[backPos - marker.length - 1] === '*') return null
+
+  const openFrom = line.from + backPos - marker.length
+  const openTo = line.from + backPos
+
+  // Scan forward from selection end, skipping through other markers
+  let fwdPos = relTo
+  for (let i = 0; i < 3 && fwdPos < lineText.length; i++) {
+    let skipped = false
+    for (const m of otherMarkers) {
+      if (fwdPos + m.length <= lineText.length && lineText.substring(fwdPos, fwdPos + m.length) === m) {
+        if (m === '*' && fwdPos + m.length < lineText.length && lineText[fwdPos + m.length] === '*') continue
+        fwdPos += m.length
+        skipped = true
+        break
+      }
+    }
+    if (!skipped) break
+  }
+
+  if (fwdPos + marker.length > lineText.length) return null
+  if (lineText.substring(fwdPos, fwdPos + marker.length) !== marker) return null
+  if (marker === '*' && fwdPos + marker.length < lineText.length && lineText[fwdPos + marker.length] === '*') return null
+
+  return {
+    openFrom,
+    openTo,
+    closeFrom: line.from + fwdPos,
+    closeTo: line.from + fwdPos + marker.length,
+  }
+}
+
 function wrapSelection(view: EditorView, before: string, after: string) {
   const { from, to } = view.state.selection.main
   if (from === to) return
   const selected = view.state.sliceDoc(from, to)
   const lines = selected.split('\n')
+
   if (lines.length <= 1) {
-    view.dispatch({
-      changes: { from, to, insert: `${before}${selected}${after}` },
-      selection: { anchor: from + before.length, head: to + before.length },
-    })
+    // Check if selected text itself is wrapped with these markers
+    if (selected.length > before.length + after.length
+      && selected.startsWith(before) && selected.endsWith(after)) {
+      const inner = selected.slice(before.length, selected.length - after.length)
+      // For single *, make sure we're not stripping one * from **
+      const isFalseMatch = before === '*' && (inner.startsWith('*') || inner.endsWith('*'))
+      if (!isFalseMatch) {
+        view.dispatch({
+          changes: { from, to, insert: inner },
+          selection: { anchor: from, head: from + inner.length },
+        })
+        view.focus()
+        return
+      }
+    }
+
+    // Check for markers surrounding the selection (possibly through other nested markers)
+    const outer = findSurroundingMarker(view, from, to, before)
+    if (outer) {
+      // Remove both opening and closing markers
+      view.dispatch({
+        changes: [
+          { from: outer.openFrom, to: outer.openTo, insert: '' },
+          { from: outer.closeFrom, to: outer.closeTo, insert: '' },
+        ],
+      })
+    } else {
+      // Apply formatting
+      view.dispatch({
+        changes: { from, to, insert: `${before}${selected}${after}` },
+        selection: { anchor: from + before.length, head: to + before.length },
+      })
+    }
   } else {
-    const wrapped = lines.map((line) =>
-      line.trim() ? `${before}${line}${after}` : line
-    ).join('\n')
-    view.dispatch({
-      changes: { from, to, insert: wrapped },
-      selection: { anchor: from, head: from + wrapped.length },
-    })
+    // Multi-line: check if ALL non-empty lines are wrapped
+    const escBefore = before.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const escAfter = after.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const wrapRe = new RegExp(`^${escBefore}(.*)${escAfter}$`)
+    const allWrapped = lines.every((line) => !line.trim() || wrapRe.test(line))
+    if (allWrapped) {
+      const unwrapped = lines.map((line) => {
+        const m = line.match(wrapRe)
+        return m ? m[1] : line
+      }).join('\n')
+      view.dispatch({
+        changes: { from, to, insert: unwrapped },
+        selection: { anchor: from, head: from + unwrapped.length },
+      })
+    } else {
+      const wrapped = lines.map((line) =>
+        line.trim() ? `${before}${line}${after}` : line
+      ).join('\n')
+      view.dispatch({
+        changes: { from, to, insert: wrapped },
+        selection: { anchor: from, head: from + wrapped.length },
+      })
+    }
   }
   view.focus()
 }
@@ -122,28 +240,119 @@ function prependLineWith(view: EditorView, prefix: string) {
   const line = view.state.doc.lineAt(from)
   const text = line.text
 
-  // Toggle: if line already starts with this prefix, remove it
-  if (text.startsWith(prefix)) {
+  // Strip alignment prefix to find the content portion
+  const alignMatch = text.match(/^(\{align:(?:center|right|left)\}\s?)/)
+  const alignPrefix = alignMatch ? alignMatch[1] : ''
+  const contentStart = line.from + alignPrefix.length
+  const content = text.slice(alignPrefix.length)
+
+  // Toggle: if content already starts with this prefix, remove it
+  if (content.startsWith(prefix)) {
     view.dispatch({
-      changes: { from: line.from, to: line.from + prefix.length },
+      changes: { from: contentStart, to: contentStart + prefix.length },
     })
   } else {
     // Remove any existing heading prefix first
-    const existingHeading = text.match(/^#{1,3}\s/)
+    const existingHeading = content.match(/^#{1,3}\s/)
     if (existingHeading) {
       view.dispatch({
         changes: {
-          from: line.from,
-          to: line.from + existingHeading[0].length,
+          from: contentStart,
+          to: contentStart + existingHeading[0].length,
           insert: prefix,
         },
       })
     } else {
       view.dispatch({
-        changes: { from: line.from, to: line.from, insert: prefix },
+        changes: { from: contentStart, to: contentStart, insert: prefix },
       })
     }
   }
+  view.focus()
+}
+
+function toggleBlockPrefix(view: EditorView, prefix: string) {
+  const { from, to } = view.state.selection.main
+  const startLine = view.state.doc.lineAt(from)
+  const endLine = view.state.doc.lineAt(to)
+  const changes: { from: number; to: number; insert: string }[] = []
+
+  // Check if all non-empty lines already have the prefix
+  let allPrefixed = true
+  for (let i = startLine.number; i <= endLine.number; i++) {
+    const line = view.state.doc.line(i)
+    if (line.text.trim() && !line.text.startsWith(prefix)) {
+      allPrefixed = false
+      break
+    }
+  }
+
+  for (let i = startLine.number; i <= endLine.number; i++) {
+    const line = view.state.doc.line(i)
+    if (!line.text.trim()) continue
+    if (allPrefixed) {
+      // Remove prefix
+      if (line.text.startsWith(prefix)) {
+        changes.push({ from: line.from, to: line.from + prefix.length, insert: '' })
+      }
+    } else {
+      // Add prefix (only if not already there)
+      if (!line.text.startsWith(prefix)) {
+        changes.push({ from: line.from, to: line.from, insert: prefix })
+      }
+    }
+  }
+
+  if (changes.length > 0) view.dispatch({ changes })
+  view.focus()
+}
+
+function toggleCodeBlock(view: EditorView) {
+  const { from, to } = view.state.selection.main
+  if (from === to) return
+  const selected = view.state.sliceDoc(from, to)
+
+  // Check if selection is already a code block (wrapped in ```)
+  const codeBlockMatch = selected.match(/^```\n?([\s\S]*?)\n?```$/)
+  if (codeBlockMatch) {
+    // Unwrap
+    const inner = codeBlockMatch[1]
+    view.dispatch({
+      changes: { from, to, insert: inner },
+      selection: { anchor: from, head: from + inner.length },
+    })
+  } else {
+    const wrapped = `\`\`\`\n${selected}\n\`\`\``
+    view.dispatch({
+      changes: { from, to, insert: wrapped },
+      selection: { anchor: from, head: from + wrapped.length },
+    })
+  }
+  view.focus()
+}
+
+function stripBlockPrefixes(view: EditorView) {
+  const { from, to } = view.state.selection.main
+  const startLine = view.state.doc.lineAt(from)
+  const endLine = view.state.doc.lineAt(to)
+  const changes: { from: number; to: number; insert: string }[] = []
+
+  for (let i = startLine.number; i <= endLine.number; i++) {
+    const line = view.state.doc.line(i)
+    if (!line.text.trim()) continue
+    // Strip heading prefix
+    const headingMatch = line.text.match(/^#{1,3}\s/)
+    if (headingMatch) {
+      changes.push({ from: line.from, to: line.from + headingMatch[0].length, insert: '' })
+    }
+    // Strip blockquote prefix
+    const bqMatch = line.text.match(/^>\s?/)
+    if (bqMatch) {
+      changes.push({ from: line.from, to: line.from + bqMatch[0].length, insert: '' })
+    }
+  }
+
+  if (changes.length > 0) view.dispatch({ changes })
   view.focus()
 }
 
@@ -391,6 +600,19 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
                 const val = e.target.value
                 if (val.startsWith('named:')) {
                   wrapWithSpanClass(editorView, val.slice(6))
+                } else if (val === 'blockquote') {
+                  toggleBlockPrefix(editorView, '> ')
+                } else if (val === 'code') {
+                  toggleCodeBlock(editorView)
+                } else if (val === 'h1') {
+                  prependLineWith(editorView, '# ')
+                } else if (val === 'h2') {
+                  prependLineWith(editorView, '## ')
+                } else if (val === 'h3') {
+                  prependLineWith(editorView, '### ')
+                } else if (val === 'body') {
+                  // Remove heading/blockquote prefixes to reset to body
+                  stripBlockPrefixes(editorView)
                 } else {
                   const found = defaultStyles.find((d) => d.key === val)
                   if (found?.style) {
