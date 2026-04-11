@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins } from 'lucide-react'
+import { Coins, Shield } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -16,6 +16,7 @@ import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
 import { StyleEditor } from '../editor/StyleEditor'
 import { QuestPicker } from '../quests/QuestPicker'
+import { ShopModal } from '../quests/ShopModal'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
@@ -31,6 +32,7 @@ export function AppShell() {
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
+  const [shopOpen, setShopOpen] = useState(false)
   const [coinPulsing, setCoinPulsing] = useState(false)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
   const coins = usePlayerStore((s) => s.coins)
@@ -218,6 +220,10 @@ export function AppShell() {
             open={questPickerOpen}
             onClose={() => setQuestPickerOpen(false)}
           />
+          <ShopModal
+            open={shopOpen}
+            onClose={() => setShopOpen(false)}
+          />
         </div>
       </div>
 
@@ -253,6 +259,13 @@ export function AppShell() {
               {coins.toLocaleString()}
             </span>
           </span>
+          <button
+            onClick={() => setShopOpen(true)}
+            className="text-gray-500 hover:text-gray-300 transition-colors"
+            title="Shop"
+          >
+            <Shield size={14} />
+          </button>
           <button
             onClick={() => setQuestPickerOpen(true)}
             className={`transition-colors ${
