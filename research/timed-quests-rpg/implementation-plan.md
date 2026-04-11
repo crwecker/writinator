@@ -13,7 +13,7 @@ Spawn parallel implementation agents (`model: sonnet`, `mode: bypassPermissions`
 
 ### Step 4 — Visual QA (Opus, main agent)
 - Launch dev server: `npm run dev` in background, wait for ready.
-- Open `http://localhost:5173` with browser automation.
+- Use **puppeteer** (installed as a dev dependency) for browser automation: launch headless Chrome, navigate to the dev server, interact with the UI (click buttons, open modals, etc.), and take screenshots.
 - Drive UI to exercise phase changes. Confirm result matches goal.
 - Save one screenshot to `research/timed-quests-rpg/screenshots/phase-N.png`.
 - Stop background dev server.
