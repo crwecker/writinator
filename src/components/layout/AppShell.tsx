@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { EditorView } from '@codemirror/view'
+import { Coins } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -20,6 +21,8 @@ import { QuestReminder } from '../quests/QuestReminder'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { SubDocumentLinks } from '../editor/SubDocumentLinks'
 import { LandingPage } from './LandingPage'
+import { RewardToast } from '../quests/RewardToast'
+import { usePlayerStore } from '../../stores/playerStore'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -28,7 +31,11 @@ export function AppShell() {
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
+  const [coinPulsing, setCoinPulsing] = useState(false)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
+  const coins = usePlayerStore((s) => s.coins)
+  const retroactiveGrantApplied = usePlayerStore((s) => s.retroactiveGrantApplied)
+  const prevCoinsRef = useRef(coins)
 
   const book = useDocumentStore((s) => s.book)
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
@@ -123,6 +130,29 @@ export function AppShell() {
     return () => clearInterval(interval)
   }, [])
 
+  // Coin pulse animation when balance changes
+  useEffect(() => {
+    if (coins !== prevCoinsRef.current) {
+      prevCoinsRef.current = coins
+      setCoinPulsing(true)
+      const timer = setTimeout(() => setCoinPulsing(false), 400)
+      return () => clearTimeout(timer)
+    }
+  }, [coins])
+
+  // Retroactive coin grant for existing completed sessions
+  useEffect(() => {
+    if (retroactiveGrantApplied) return
+    const { completedSessions } = useImageRevealStore.getState()
+    const { addCoins, setRetroactiveGrantApplied } = usePlayerStore.getState()
+    const successCount = completedSessions.filter((s) => s.result === 'success').length
+    if (successCount > 0) {
+      addCoins(successCount * 100)
+    }
+    setRetroactiveGrantApplied()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const titleText = book
     ? `${book.title}${activeDocument ? ` - ${activeDocument.name}` : ''}`
     : 'Writinator'
@@ -133,6 +163,8 @@ export function AppShell() {
   if (!book) return <LandingPage />
 
   return (
+    <>
+    <RewardToast />
     <div className="flex flex-col h-screen w-screen bg-bg-darker text-gray-200 overflow-hidden">
       {/* Top bar — hidden in distraction-free mode */}
       {!distractionFree && (
@@ -209,6 +241,18 @@ export function AppShell() {
           >
             {renderMode === 'source' ? 'Source' : 'Rendered'}
           </button>
+          <span
+            className="flex items-center gap-1 text-amber-400 tabular-nums"
+            title="Coin balance"
+          >
+            <Coins
+              size={12}
+              className={coinPulsing ? 'animate-coin-pulse' : ''}
+            />
+            <span className={`tabular-nums${coinPulsing ? ' animate-coin-pulse' : ''}`}>
+              {coins.toLocaleString()}
+            </span>
+          </span>
           <button
             onClick={() => setQuestPickerOpen(true)}
             className={`transition-colors ${
@@ -231,5 +275,6 @@ export function AppShell() {
         </div>
       </div>
     </div>
+    </>
   )
 }

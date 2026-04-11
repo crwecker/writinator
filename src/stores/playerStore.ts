@@ -11,6 +11,7 @@ interface PlayerState {
   equippedArmor: string
   consumableInventory: Record<string, number>
   questStats: PlayerStats
+  retroactiveGrantApplied: boolean
 
   addCoins: (amount: number) => void
   spendCoins: (amount: number) => boolean
@@ -19,6 +20,7 @@ interface PlayerState {
   unequipItem: (slot: 'weapon' | 'armor') => void
   useConsumable: (itemId: string) => boolean
   addQuestStats: (completed: number, words: number, coinsEarned: number) => void
+  setRetroactiveGrantApplied: () => void
 }
 
 const localforageStorage = createJSONStorage<PlayerState>(() => ({
@@ -43,6 +45,7 @@ export const usePlayerStore = create<PlayerState>()(
       equippedArmor: 'cloth-tunic',
       consumableInventory: {},
       questStats: { totalCompleted: 0, totalWords: 0, totalCoins: 0 },
+      retroactiveGrantApplied: false,
 
       addCoins: (amount: number) => {
         set((state) => ({ coins: state.coins + amount }))
@@ -122,6 +125,10 @@ export const usePlayerStore = create<PlayerState>()(
           },
         }))
       },
+
+      setRetroactiveGrantApplied: () => {
+        set({ retroactiveGrantApplied: true })
+      },
     }),
     {
       name: 'writinator-player',
@@ -135,6 +142,7 @@ export const usePlayerStore = create<PlayerState>()(
           equippedArmor: state.equippedArmor,
           consumableInventory: state.consumableInventory,
           questStats: state.questStats,
+          retroactiveGrantApplied: state.retroactiveGrantApplied,
         }) as unknown as PlayerState,
     }
   )

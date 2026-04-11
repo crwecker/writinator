@@ -47,3 +47,13 @@ html {
 .animate-fade-in {
   animation: fade-in 0.4s ease-out;
 }
+
+@keyframes coin-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+
+.animate-coin-pulse {
+  animation: coin-pulse 0.4s ease-out;
+}
