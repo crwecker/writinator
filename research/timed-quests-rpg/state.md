@@ -33,9 +33,15 @@ Phase 5 (not started) — Phase 4 complete
 - Phase 2: `useTimedQuestStore` → `writinator-timed-quest` (v1)
 
 ## Architecture Decisions (Locked)
+- Single quest type: image reveal quests with optional timer (no separate timed quest type)
+- RPG mechanics (equipment, consumables, coins) apply to ALL quests — timer is a reward multiplier
+- Untimed quests earn base coins (~10% of word goal × weapon multiplier)
+- Timed quests earn base + difficulty bonus (2-5x more than untimed)
 - Difficulty is auto-calculated from words-per-minute: <15 easy, 15-25 medium, 25-40 hard, 40+ epic
 - Equipment is functional only (no cosmetic effects)
-- One timed quest active at a time (image reveal quests remain concurrent)
+- Weapon multiplier applies to ALL quests (timed and untimed)
+- Armor time bonus only applies when timer is set
+- One timed session at a time (untimed sessions remain concurrent, up to 25)
 - Timer uses wall-clock time (Date.now() - startedAt - pausedDuration), not intervals
 - Coins are the sole currency. No XP or leveling system.
 - Item catalog is static (defined in code, not user-configurable)

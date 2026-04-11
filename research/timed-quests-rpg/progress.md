@@ -8,6 +8,7 @@
 | 2 | Timed Quest Store + Timer Utility | Complete | 2026-04-10 | 2026-04-10 |
 | 3 | Quest Creation UI — Timed Quest Tab | Complete | 2026-04-10 | 2026-04-10 |
 | 4 | Active Timed Quest Panel | Complete | 2026-04-10 | 2026-04-10 |
+| 4.5 | Quest Consolidation — Merge Timer into Image Quests | Not Started | — | — |
 | 5 | Coin Display + Reward Toasts | Not Started | — | — |
 | 6 | RPG Shop — Item Cards + Purchase Flow | Not Started | — | — |
 | 7 | Equipment Panel + Consumable Inventory | Not Started | — | — |
@@ -64,6 +65,24 @@ QuestPicker now has "Image Quest" / "Timed Quest" tabs. Defaults to Timed tab wh
 
 ### Notes
 TimedQuestPanel at fixed bottom-12 left-4 (opposite side from ImageRevealPanel). Collapsed bar shows difficulty dot, MM:SS countdown, word fraction. Expanded shows large timer with color coding by percentRemaining, progress bar, equipment info, consumable buttons (disabled when count=0), pause/resume toggle, abandon with inline confirmation. Result overlays captured via Zustand subscribe detecting activeQuest→null transition, with snapshot of quest state for display. Difficulty uses 'epic' (not 'legendary') per actual QuestDifficulty type. ESLint, tsc, vite build all pass.
+
+---
+
+## Phase 4.5: Quest Consolidation — Merge Timer into Image Quests
+- [ ] ImageRevealSession extended with optional timer fields
+- [ ] TimedQuest type deleted
+- [ ] calculateBaseReward + calculateQuestReward added
+- [ ] Timer logic merged into imageRevealStore (tick, pause, consumables, fail)
+- [ ] Weapon multiplier applied to ALL quests (not just timed)
+- [ ] timedQuestStore.ts deleted
+- [ ] documentStore word delta simplified (single store dispatch)
+- [ ] TimedQuestPanel merged into ImageRevealPanel
+- [ ] TimedQuestPanel.tsx deleted
+- [ ] QuestPicker tabs removed, single flow with "Add Timer" toggle
+- [ ] Visual QA screenshot → screenshots/phase-4.5.png
+
+### Notes
+_(filled after completion)_
 
 ---
 
