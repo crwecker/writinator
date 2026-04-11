@@ -11,7 +11,7 @@
 | 4.5 | Quest Consolidation — Merge Timer into Image Quests | Complete | 2026-04-10 | 2026-04-10 |
 | 5 | Coin Display + Reward Toasts | Complete | 2026-04-10 | 2026-04-10 |
 | 6 | RPG Shop — Item Cards + Purchase Flow | Complete | 2026-04-10 | 2026-04-10 |
-| 7 | Equipment Panel + Consumable Inventory | Not Started | — | — |
+| 7 | Equipment Panel + Consumable Inventory | Complete | 2026-04-10 | 2026-04-10 |
 | 8 | Polish + Quest Reminder Integration | Not Started | — | — |
 
 ---
@@ -113,15 +113,15 @@ ShopModal follows QuestPicker modal pattern (fixed inset-0 z-50, escape/click-ou
 ---
 
 ## Phase 7: Equipment Panel + Consumable Inventory
-- [ ] EquipmentPanel component created
-- [ ] Equipment slots with equip/unequip
-- [ ] Stats summary display
-- [ ] Consumable inventory grid
-- [ ] Integrated into ShopModal
-- [ ] Visual QA screenshot captured → screenshots/phase-7.png
+- [x] EquipmentPanel component created
+- [x] Equipment slots with equip/unequip
+- [x] Stats summary display
+- [x] Consumable inventory grid
+- [x] Integrated into ShopModal
+- [x] Visual QA screenshot captured → screenshots/phase-7.png
 
 ### Notes
-_(filled after completion)_
+EquipmentPanel added as new "Equipment" tab in ShopModal (first tab, default view). Two sections: Equipped Gear shows weapon + armor cards side-by-side with rarity-colored borders, item icon/name/rarity/stat, swap dropdown of owned alternatives, and unequip button (hidden for starter items). Stats section in 3-col/2-row grid: word multiplier, time bonus, quests done, total words, coins earned — amber-400 accent on multiplier values. Consumable Inventory shows owned consumables in a grid with count badges and effect descriptions, or empty state directing to Consumables tab. ShopModal tabs array extended with 'equipment' first, default activeTab changed to 'equipment'. ESLint, tsc, vite build all pass.
 
 ---
 

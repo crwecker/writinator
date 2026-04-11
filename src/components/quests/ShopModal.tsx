@@ -3,13 +3,14 @@ import { Coins, Check } from 'lucide-react'
 import { usePlayerStore } from '../../stores/playerStore'
 import { getItemsByCategory } from '../../lib/items'
 import type { Item, WeaponItem, ArmorItem, ConsumableItem, ItemCategory, ItemRarity } from '../../types'
+import { EquipmentPanel } from './EquipmentPanel'
 
 interface Props {
   open: boolean
   onClose: () => void
 }
 
-type ShopTab = 'weapon' | 'armor' | 'consumable'
+type ShopTab = 'equipment' | 'weapon' | 'armor' | 'consumable'
 
 function rarityBorderClass(rarity: ItemRarity): string {
   switch (rarity) {
@@ -236,7 +237,7 @@ function ItemCard({
 
 export function ShopModal({ open, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const [activeTab, setActiveTab] = useState<ShopTab>('weapon')
+  const [activeTab, setActiveTab] = useState<ShopTab>('equipment')
   const [justPurchased, setJustPurchased] = useState<string | null>(null)
 
   const coins = usePlayerStore((s) => s.coins)
@@ -271,7 +272,7 @@ export function ShopModal({ open, onClose }: Props) {
 
   if (!open) return null
 
-  const tabItems = getItemsByCategory(activeTab as ItemCategory)
+  const tabItems = activeTab !== 'equipment' ? getItemsByCategory(activeTab as ItemCategory) : []
 
   function handlePurchase(itemId: string, qty: number) {
     if (qty === 1) {
@@ -303,6 +304,7 @@ export function ShopModal({ open, onClose }: Props) {
   }
 
   const tabs: { id: ShopTab; label: string }[] = [
+    { id: 'equipment', label: 'Equipment' },
     { id: 'weapon', label: 'Weapons' },
     { id: 'armor', label: 'Armor' },
     { id: 'consumable', label: 'Consumables' },
@@ -348,24 +350,28 @@ export function ShopModal({ open, onClose }: Props) {
           ))}
         </div>
 
-        {/* Scrollable item grid */}
+        {/* Content area */}
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {tabItems.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                coins={coins}
-                ownedItems={ownedItems}
-                equippedWeapon={equippedWeapon}
-                equippedArmor={equippedArmor}
-                consumableInventory={consumableInventory}
-                justPurchased={justPurchased}
-                onPurchase={handlePurchase}
-                onEquip={handleEquip}
-              />
-            ))}
-          </div>
+          {activeTab === 'equipment' ? (
+            <EquipmentPanel />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {tabItems.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  coins={coins}
+                  ownedItems={ownedItems}
+                  equippedWeapon={equippedWeapon}
+                  equippedArmor={equippedArmor}
+                  consumableInventory={consumableInventory}
+                  justPurchased={justPurchased}
+                  onPurchase={handlePurchase}
+                  onEquip={handleEquip}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
