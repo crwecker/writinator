@@ -107,3 +107,61 @@ export interface RecentFile {
   name: string
   lastOpenedAt: number
 }
+
+// RPG / Timed Quests types
+
+export type QuestDifficulty = 'easy' | 'medium' | 'hard' | 'epic'
+export type QuestResult = 'success' | 'failure' | 'abandoned'
+
+export interface TimedQuest {
+  id: string
+  wordGoal: number
+  timeMinutes: number
+  wordsWritten: number
+  startedAt: string
+  completedAt?: string
+  pausedDuration: number
+  result?: QuestResult
+}
+
+export type ItemCategory = 'weapon' | 'armor' | 'consumable'
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary'
+
+export interface BaseItem {
+  id: string
+  name: string
+  description: string
+  category: ItemCategory
+  rarity: ItemRarity
+  price: number
+  icon: string
+}
+
+export interface WeaponItem extends BaseItem {
+  category: 'weapon'
+  wordMultiplier: number
+}
+
+export interface ArmorItem extends BaseItem {
+  category: 'armor'
+  timeBonus: number
+}
+
+export interface ConsumableItem extends BaseItem {
+  category: 'consumable'
+  effect: string
+  effectValue: number
+}
+
+export type Item = WeaponItem | ArmorItem | ConsumableItem
+
+export interface EquipmentSlots {
+  weapon: string
+  armor: string
+}
+
+export interface PlayerStats {
+  totalCompleted: number
+  totalWords: number
+  totalCoins: number
+}
