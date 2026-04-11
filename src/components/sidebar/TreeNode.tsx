@@ -2,8 +2,7 @@ import { createElement, useState, useRef, useEffect } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
 import { getIconComponent } from '../../lib/icons'
-import { IconPicker } from './IconPicker'
-import { ColorPicker } from './ColorPicker'
+import { AppearancePicker } from './AppearancePicker'
 import { useDocumentStore } from '../../stores/documentStore'
 import type { Document } from '../../types'
 
@@ -49,10 +48,8 @@ export function TreeNode({
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
-  const [showIconPicker, setShowIconPicker] = useState(false)
-  const [iconPickerRect, setIconPickerRect] = useState({ top: 0, left: 0 })
-  const [showColorPicker, setShowColorPicker] = useState(false)
-  const [colorPickerRect, setColorPickerRect] = useState({ top: 0, left: 0 })
+  const [showAppearancePicker, setShowAppearancePicker] = useState(false)
+  const [appearancePickerRect, setAppearancePickerRect] = useState({ top: 0, left: 0 })
   const inputRef = useRef<HTMLInputElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
 
@@ -139,32 +136,26 @@ export function TreeNode({
     return ids.size - 1
   }
 
-  function openIconPickerAt(rect: { top: number; left: number }) {
-    setIconPickerRect(rect)
-    setShowIconPicker(true)
+  function openAppearancePicker(rect: { top: number; left: number }) {
+    setAppearancePickerRect(rect)
+    setShowAppearancePicker(true)
     setShowContextMenu(false)
   }
 
-  function openIconPickerFromIconButton(e: React.MouseEvent) {
+  function openAppearanceFromIconButton(e: React.MouseEvent) {
     e.stopPropagation()
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    openIconPickerAt({ top: r.bottom + 4, left: r.left })
+    openAppearancePicker({ top: r.bottom + 4, left: r.left })
   }
 
   function handleIconSelect(iconName: string | undefined) {
     useDocumentStore.getState().setDocumentIcon(doc.id, iconName)
-    setShowIconPicker(false)
-  }
-
-  function openColorPicker() {
-    setColorPickerRect({ top: contextMenuPos.y, left: contextMenuPos.x + 10 })
-    setShowColorPicker(true)
-    setShowContextMenu(false)
+    setShowAppearancePicker(false)
   }
 
   function handleColorSelect(color: string | undefined) {
     useDocumentStore.getState().setDocumentColor(doc.id, color)
-    setShowColorPicker(false)
+    setShowAppearancePicker(false)
   }
 
   const indicatorColor = dropIndicator === 'invalid' ? 'bg-red-500' : 'bg-blue-400'
@@ -218,7 +209,7 @@ export function TreeNode({
           type="button"
           className="shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-white"
           style={doc.color ? { color: doc.color } : undefined}
-          onClick={openIconPickerFromIconButton}
+          onClick={openAppearanceFromIconButton}
         >
           {createElement(getIconComponent(doc.icon ?? ''), { size: 16 })}
         </button>
@@ -328,19 +319,10 @@ export function TreeNode({
                   className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
                   onClick={(e) => {
                     e.stopPropagation()
-                    openIconPickerAt({ top: contextMenuPos.y, left: contextMenuPos.x + 10 })
+                    openAppearancePicker({ top: contextMenuPos.y, left: contextMenuPos.x + 10 })
                   }}
                 >
-                  Change Icon
-                </button>
-                <button
-                  className="w-full text-left px-3 py-1 text-sm text-gray-200 hover:bg-gray-700"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    openColorPicker()
-                  }}
-                >
-                  Change Color
+                  Appearance
                 </button>
                 <div className="border-t border-gray-700 my-1" />
                 <button
@@ -373,20 +355,13 @@ export function TreeNode({
         )}
       </div>
 
-      {/* Icon picker */}
-      <IconPicker
-        open={showIconPicker}
-        onClose={() => setShowIconPicker(false)}
-        onSelect={handleIconSelect}
-        anchorRect={iconPickerRect}
-      />
-
-      {/* Color picker */}
-      <ColorPicker
-        open={showColorPicker}
-        onClose={() => setShowColorPicker(false)}
-        onSelect={handleColorSelect}
-        anchorRect={colorPickerRect}
+      {/* Appearance picker (icon + color) */}
+      <AppearancePicker
+        open={showAppearancePicker}
+        onClose={() => setShowAppearancePicker(false)}
+        onSelectIcon={handleIconSelect}
+        onSelectColor={handleColorSelect}
+        anchorRect={appearancePickerRect}
         currentColor={doc.color}
       />
 
