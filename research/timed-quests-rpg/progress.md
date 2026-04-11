@@ -8,7 +8,7 @@
 | 2 | Timed Quest Store + Timer Utility | Complete | 2026-04-10 | 2026-04-10 |
 | 3 | Quest Creation UI — Timed Quest Tab | Complete | 2026-04-10 | 2026-04-10 |
 | 4 | Active Timed Quest Panel | Complete | 2026-04-10 | 2026-04-10 |
-| 4.5 | Quest Consolidation — Merge Timer into Image Quests | Not Started | — | — |
+| 4.5 | Quest Consolidation — Merge Timer into Image Quests | Complete | 2026-04-10 | 2026-04-10 |
 | 5 | Coin Display + Reward Toasts | Not Started | — | — |
 | 6 | RPG Shop — Item Cards + Purchase Flow | Not Started | — | — |
 | 7 | Equipment Panel + Consumable Inventory | Not Started | — | — |
@@ -69,20 +69,20 @@ TimedQuestPanel at fixed bottom-12 left-4 (opposite side from ImageRevealPanel).
 ---
 
 ## Phase 4.5: Quest Consolidation — Merge Timer into Image Quests
-- [ ] ImageRevealSession extended with optional timer fields
-- [ ] TimedQuest type deleted
-- [ ] calculateBaseReward + calculateQuestReward added
-- [ ] Timer logic merged into imageRevealStore (tick, pause, consumables, fail)
-- [ ] Weapon multiplier applied to ALL quests (not just timed)
-- [ ] timedQuestStore.ts deleted
-- [ ] documentStore word delta simplified (single store dispatch)
-- [ ] TimedQuestPanel merged into ImageRevealPanel
-- [ ] TimedQuestPanel.tsx deleted
-- [ ] QuestPicker tabs removed, single flow with "Add Timer" toggle
-- [ ] Visual QA screenshot → screenshots/phase-4.5.png
+- [x] ImageRevealSession extended with optional timer fields
+- [x] TimedQuest type deleted
+- [x] calculateBaseReward + calculateQuestReward added
+- [x] Timer logic merged into imageRevealStore (tick, pause, consumables, fail)
+- [x] Weapon multiplier applied to ALL quests (not just timed)
+- [x] timedQuestStore.ts deleted
+- [x] documentStore word delta simplified (single store dispatch)
+- [x] TimedQuestPanel merged into ImageRevealPanel
+- [x] TimedQuestPanel.tsx deleted
+- [x] QuestPicker tabs removed, single flow with "Add Timer" toggle
+- [x] Visual QA screenshot → screenshots/phase-4.5.png
 
 ### Notes
-_(filled after completion)_
+Major architectural consolidation. Eliminated the separate timed quest system entirely — image quests are now the single quest type with an optional timer modifier. Key changes: (1) ImageRevealSession gains timeMinutes?, pausedDuration?, result?, coinsEarned?; TimedQuest interface deleted. (2) imageRevealStore absorbs all timer logic (tick, pause, resume, fail, consumable effects) + now applies weapon multiplier to ALL quests. (3) calculateBaseReward + calculateQuestReward provide unified reward API — untimed quests earn ~10% of word goal × weapon multiplier; timed quests earn base + difficulty bonus. (4) QuestPicker is a single flow with "Add Timer" toggle instead of tabs. (5) timedQuestStore.ts and TimedQuestPanel.tsx deleted; documentStore simplified to single store dispatch. Persistence version bumped to v2 with migration. ESLint, tsc, vite build all pass. Visual QA confirms no tabs, Add Timer toggle, equipment display, coin estimate.
 
 ---
 

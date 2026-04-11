@@ -1,14 +1,14 @@
 # Timed Quests + RPG Reward System — Cross-Phase State
 
 ## Current Phase
-Phase 5 (not started) — Phase 4 complete
+Phase 5 (not started) — Phase 4.5 complete
 
 ## Key Existing File Paths
 - `src/types/index.ts` — shared TypeScript types
 - `src/stores/imageRevealStore.ts` — existing quest store (image reveal)
 - `src/stores/documentStore.ts` — document store, word delta pipeline (updateDocumentContent line ~436)
 - `src/stores/playerStore.ts` — player RPG store (coins, inventory, equipment)
-- `src/stores/timedQuestStore.ts` — timed quest lifecycle store
+- `src/stores/timedQuestStore.ts` — DELETED in Phase 4.5 (merged into imageRevealStore)
 - `src/components/quests/QuestPicker.tsx` — quest creation modal
 - `src/components/quests/ImageRevealPanel.tsx` — floating quest panel
 - `src/components/quests/QuestReminder.tsx` — no-quest nudge toast
@@ -26,11 +26,12 @@ Phase 5 (not started) — Phase 4 complete
 - Phase 1: (none — data-only phase)
 - Phase 2: (none — data-only phase)
 - Phase 3: (none — refactored existing QuestPicker.tsx with tabs + timed quest form)
-- Phase 4: `src/components/quests/TimedQuestPanel.tsx`
+- Phase 4: `src/components/quests/TimedQuestPanel.tsx` — DELETED in Phase 4.5 (merged into ImageRevealPanel)
 
 ## New Stores and Persistence Keys
 - Phase 1: `usePlayerStore` → `writinator-player` (v1)
-- Phase 2: `useTimedQuestStore` → `writinator-timed-quest` (v1)
+- Phase 2: `useTimedQuestStore` → `writinator-timed-quest` (v1) — DELETED in Phase 4.5
+- Phase 4.5: `useImageRevealStore` bumped to v2 (absorbs timer state: isPaused, pauseStartedAt, activeEffects)
 
 ## Architecture Decisions (Locked)
 - Single quest type: image reveal quests with optional timer (no separate timed quest type)
@@ -54,4 +55,4 @@ Phase 5 (not started) — Phase 4 complete
 - localforageStorage adapter is copy-pasted across stores (not extracted, acceptable)
 
 ## Latest Screenshot
-Phase 4: screenshots/phase-4.png (expanded panel with active quest, word count updating)
+Phase 4.5: screenshots/phase-4.5.png (unified QuestPicker with no tabs, Add Timer toggle, equipment + coin estimate)

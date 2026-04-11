@@ -27,6 +27,16 @@ export interface UnsplashImage {
   downloadLocationUrl: string
 }
 
+// RPG / Quest types — declared before ImageRevealSession because it references them
+
+export type QuestDifficulty = 'easy' | 'medium' | 'hard' | 'epic'
+export type QuestResult = 'success' | 'failure' | 'abandoned'
+
+export interface ActiveEffect {
+  type: string
+  remainingValue: number
+}
+
 export interface ImageRevealSession {
   id: string
   unsplashId?: string
@@ -41,6 +51,11 @@ export interface ImageRevealSession {
   startedAt: string
   photographer?: string
   photographerUrl?: string
+  // Optional timer modifier — when set, quest is timed
+  timeMinutes?: number
+  pausedDuration?: number   // default 0, only for timed quests
+  result?: QuestResult      // success/failure/abandoned — only for timed quests
+  coinsEarned?: number      // recorded at completion
 }
 
 export interface Snapshot {
@@ -106,22 +121,6 @@ export interface RecentFile {
   handle: FileSystemFileHandle
   name: string
   lastOpenedAt: number
-}
-
-// RPG / Timed Quests types
-
-export type QuestDifficulty = 'easy' | 'medium' | 'hard' | 'epic'
-export type QuestResult = 'success' | 'failure' | 'abandoned'
-
-export interface TimedQuest {
-  id: string
-  wordGoal: number
-  timeMinutes: number
-  wordsWritten: number
-  startedAt: string
-  completedAt?: string
-  pausedDuration: number
-  result?: QuestResult
 }
 
 export type ItemCategory = 'weapon' | 'armor' | 'consumable'

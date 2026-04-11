@@ -1,22 +1,55 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useImageRevealStore, PIXEL_LEVELS } from '../../stores/imageRevealStore'
+import { usePlayerStore } from '../../stores/playerStore'
 import { drawPixelated, animateReveal } from '../../lib/pixelate'
 import { loadImage } from '../../lib/unsplash'
-import type { ImageRevealSession } from '../../types'
+import { getTimerState } from '../../lib/timer'
+import {
+  CONSUMABLES,
+  getItemById,
+  getWeaponMultiplier,
+  getArmorTimeBonus,
+} from '../../lib/items'
+import {
+  calculateQuestReward,
+  calculateDifficulty,
+  getDifficultyColor,
+  getDifficultyLabel,
+  calculateBaseReward,
+} from '../../lib/questRewards'
+import type { ImageRevealSession, QuestResult } from '../../types'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/**
- * The user-controlled panel state: collapsed, looking at the session list,
- * or drilling into a single session.  Celebration is handled separately via
- * a queue so it doesn't interfere with navigation intent.
- */
 type UserView = 'collapsed' | 'expanded'
 
 interface LoadedImages {
   [sessionId: string]: HTMLImageElement
+}
+
+// Snapshot captured when a timed session resolves, for the result overlay
+interface TimedResultSnapshot {
+  sessionId: string
+  result: QuestResult
+  wordsWritten: number
+  wordGoal: number
+  coinsEarned: number
+  imageUrl: string
+  photographer?: string
+  photographerUrl?: string
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatTime(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds))
+  const mm = Math.floor(s / 60)
+  const ss = s % 60
+  return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
 }
 
 // ---------------------------------------------------------------------------
@@ -40,7 +73,6 @@ function DetailCanvas({ session, image }: DetailCanvasProps) {
     const canvas = canvasRef.current
     const gridSize = PIXEL_LEVELS[session.currentLevel]
 
-    // Reset prev level when session changes
     if (prevSessionId.current !== session.id) {
       prevSessionId.current = session.id
       prevLevelRef.current = -1
@@ -226,19 +258,269 @@ function CollapsedThumbnail({ session, image }: CollapsedThumbnailProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Timer display for a single session
+// ---------------------------------------------------------------------------
+
+interface SessionTimerProps {
+  session: ImageRevealSession
+  isPaused: boolean
+  pauseStartedAt: number | null
+  compact?: boolean
+}
+
+function SessionTimer({ session, isPaused, pauseStartedAt, compact = false }: SessionTimerProps) {
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 500)
+    return () => clearInterval(id)
+  }, [])
+
+  if (!session.timeMinutes) return null
+
+  const totalSeconds = session.timeMinutes * 60
+  const startedAtMs = Date.parse(session.startedAt)
+  const timerState = getTimerState(
+    startedAtMs,
+    totalSeconds,
+    session.pausedDuration ?? 0,
+    isPaused && pauseStartedAt !== null ? pauseStartedAt : undefined,
+  )
+
+  const pct = timerState.percentRemaining
+  const timerColor =
+    pct > 50
+      ? 'text-white'
+      : pct > 25
+        ? 'text-amber-400'
+        : pct > 10
+          ? 'text-orange-400'
+          : 'text-red-400'
+  const pulse = pct <= 10 ? 'animate-pulse' : ''
+
+  if (compact) {
+    return (
+      <span className={`text-xs font-mono font-semibold tabular-nums ${timerColor} ${pulse}`}>
+        {isPaused ? 'PAUSED' : formatTime(timerState.remainingSeconds)}
+      </span>
+    )
+  }
+
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-[10px] text-gray-500">Time remaining</span>
+      <span className={`text-sm font-mono font-semibold tabular-nums ${timerColor} ${pulse}`}>
+        {isPaused ? <span className="text-amber-400">PAUSED</span> : formatTime(timerState.remainingSeconds)}
+      </span>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Consumable buttons (shown for timed sessions)
+// ---------------------------------------------------------------------------
+
+interface ConsumableButtonsProps {
+  inventory: Record<string, number>
+  onUse: (itemId: string) => void
+}
+
+function ConsumableButtons({ inventory, onUse }: ConsumableButtonsProps) {
+  if (CONSUMABLES.length === 0) return null
+  return (
+    <div>
+      <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-1.5">Consumables</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        {CONSUMABLES.map((item) => {
+          const count = inventory[item.id] ?? 0
+          return (
+            <button
+              key={item.id}
+              onClick={() => onUse(item.id)}
+              disabled={count === 0}
+              title={`${item.name}: ${item.description}`}
+              className="relative bg-gray-700 hover:bg-gray-600 rounded p-1.5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <span className="text-base leading-none">{item.icon}</span>
+              {count > 0 && (
+                <span className="absolute -top-1 -right-1 bg-amber-600 text-white text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">
+                  {count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// RPG info row (weapon + coin estimate)
+// ---------------------------------------------------------------------------
+
+interface RpgInfoProps {
+  session: ImageRevealSession
+  weaponId: string
+}
+
+function RpgInfo({ session, weaponId }: RpgInfoProps) {
+  const weaponItem = getItemById(weaponId)
+  const multiplier = getWeaponMultiplier(weaponId)
+  const coinEstimate = calculateBaseReward(session.wordGoal, multiplier)
+
+  return (
+    <div className="flex items-center justify-between text-[10px] text-gray-500">
+      {weaponItem ? (
+        <span>{weaponItem.icon} {weaponItem.name} ({multiplier}x)</span>
+      ) : (
+        <span />
+      )}
+      <span className="text-amber-400">~{coinEstimate} coins</span>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Result overlay — timed success
+// ---------------------------------------------------------------------------
+
+interface TimedSuccessOverlayProps {
+  snapshot: TimedResultSnapshot
+  image: HTMLImageElement | undefined
+  onDone: () => void
+}
+
+function TimedSuccessOverlay({ snapshot, image, onDone }: TimedSuccessOverlayProps) {
+  // Fake session shape to render CelebrationCanvas
+  const fakeSession: ImageRevealSession = {
+    id: snapshot.sessionId,
+    imageUrl: snapshot.imageUrl,
+    imageWidth: 0,
+    imageHeight: 0,
+    wordGoal: snapshot.wordGoal,
+    wordsWritten: snapshot.wordsWritten,
+    currentLevel: PIXEL_LEVELS.length - 1,
+    completed: true,
+    startedAt: new Date().toISOString(),
+    photographer: snapshot.photographer,
+    photographerUrl: snapshot.photographerUrl,
+  }
+
+  return (
+    <div className="fixed bottom-12 right-4 z-40 animate-fade-in">
+      <div className="w-80 bg-gray-900 border border-gray-700 shadow-2xl rounded-lg overflow-hidden">
+        <div className="p-3 flex flex-col gap-3">
+          <div className="text-center">
+            <h3 className="text-lg font-bold text-emerald-400">Quest Complete!</h3>
+          </div>
+          <CelebrationCanvas session={fakeSession} image={image} />
+          {snapshot.photographer && (
+            <p className="text-center text-gray-500 text-[10px]">
+              Photo by{' '}
+              {snapshot.photographerUrl ? (
+                <a href={snapshot.photographerUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 underline">
+                  {snapshot.photographer}
+                </a>
+              ) : snapshot.photographer}{' '}
+              on Unsplash
+            </p>
+          )}
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-xl">&#x1FA99;</span>
+            <span className="text-emerald-400 font-medium text-sm">+{snapshot.coinsEarned} coins</span>
+          </div>
+        </div>
+        <button
+          onClick={onDone}
+          className="w-full py-2 text-xs text-gray-400 hover:text-gray-300 border-t border-gray-700 transition-colors"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Result overlay — timed failure
+// ---------------------------------------------------------------------------
+
+interface TimedFailureOverlayProps {
+  snapshot: TimedResultSnapshot
+  image: HTMLImageElement | undefined
+  onDone: () => void
+}
+
+function TimedFailureOverlay({ snapshot, image, onDone }: TimedFailureOverlayProps) {
+  return (
+    <div className="fixed bottom-12 right-4 z-40 animate-fade-in">
+      <div className="w-80 bg-gray-900 border border-gray-700 shadow-2xl rounded-lg overflow-hidden">
+        <div className="p-3 flex flex-col gap-3">
+          <div className="text-center">
+            <h3 className="text-lg font-bold text-orange-400">Time&rsquo;s Up!</h3>
+          </div>
+          {image && (
+            <img
+              src={snapshot.imageUrl}
+              alt="Partial quest image"
+              className="w-[280px] h-[280px] mx-auto rounded object-cover bg-gray-800 opacity-50"
+              crossOrigin="anonymous"
+            />
+          )}
+          <p className="text-center text-gray-400 text-xs">
+            {snapshot.wordsWritten.toLocaleString()} / {snapshot.wordGoal.toLocaleString()} words
+          </p>
+          {snapshot.coinsEarned > 0 && (
+            <div className="flex items-center justify-center gap-2">
+              <span className="text-xl">&#x1FA99;</span>
+              <span className="text-amber-400 font-medium text-sm">+{snapshot.coinsEarned} partial coins</span>
+            </div>
+          )}
+        </div>
+        <button
+          onClick={onDone}
+          className="w-full py-2 text-xs text-gray-400 hover:text-gray-300 border-t border-gray-700 transition-colors"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
 export function ImageRevealPanel() {
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
-  // userView: what the user has explicitly navigated to
+  const isPaused = useImageRevealStore((s) => s.isPaused)
+  const pauseStartedAt = useImageRevealStore((s) => s.pauseStartedAt)
+  const equippedWeapon = usePlayerStore((s) => s.equippedWeapon)
+  const equippedArmor = usePlayerStore((s) => s.equippedArmor)
+  const consumableInventory = usePlayerStore((s) => s.consumableInventory)
+
   const [userView, setUserView] = useState<UserView>('collapsed')
   const [loadedImages, setLoadedImages] = useState<LoadedImages>({})
-
-  // Celebration queue: FIFO list of completed sessions waiting to be shown
   const [celebrationQueue, setCelebrationQueue] = useState<ImageRevealSession[]>([])
+  const [timedResultQueue, setTimedResultQueue] = useState<TimedResultSnapshot[]>([])
+  const [abandonConfirmId, setAbandonConfirmId] = useState<string | null>(null)
 
   const loadingRef = useRef<Set<string>>(new Set())
+
+  const hasTimedSessions = activeSessions.some((s) => s.timeMinutes !== undefined)
+
+  // ------------------------------------------------------------------
+  // Timer tick for timed sessions
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (!hasTimedSessions) return
+    const id = setInterval(() => {
+      useImageRevealStore.getState().tickTimer()
+    }, 1000)
+    return () => clearInterval(id)
+  }, [hasTimedSessions])
 
   // ------------------------------------------------------------------
   // Load images for all active sessions
@@ -273,76 +555,135 @@ export function ImageRevealPanel() {
   // Subscribe to store for completion events (outside React render cycle)
   // ------------------------------------------------------------------
   useEffect(() => {
-    let prevCount = useImageRevealStore.getState().completedSessions.length
+    let prevCompleted = useImageRevealStore.getState().completedSessions.length
+    const weaponMultiplier = getWeaponMultiplier(usePlayerStore.getState().equippedWeapon)
 
     const unsub = useImageRevealStore.subscribe((state) => {
-      if (state.completedSessions.length <= prevCount) return
+      if (state.completedSessions.length <= prevCompleted) return
 
-      const newlyCompleted = state.completedSessions.slice(prevCount)
-      prevCount = state.completedSessions.length
+      const newlyCompleted = state.completedSessions.slice(prevCompleted)
+      prevCompleted = state.completedSessions.length
 
-      // Pre-load images for celebration
       for (const s of newlyCompleted) {
-        if (!loadingRef.current.has(s.id)) {
+        // Pre-load image
+        if (!loadingRef.current.has(s.id) && !loadedImages[s.id]) {
           loadingRef.current.add(s.id)
           loadImage(s.imageUrl)
             .then((img) => {
               setLoadedImages((prev) => ({ ...prev, [s.id]: img }))
             })
             .catch((err) => {
-              console.warn('[ImageRevealPanel] Failed to load celebration image', s.id, err)
+              console.warn('[ImageRevealPanel] Failed to load completion image', s.id, err)
             })
             .finally(() => {
               loadingRef.current.delete(s.id)
             })
         }
-      }
 
-      setCelebrationQueue((prev) => [...prev, ...newlyCompleted])
+        if (s.timeMinutes !== undefined) {
+          // Timed session — show timed result overlay instead of generic celebration
+          if (s.result === 'abandoned') continue
+
+          const isSuccess = s.result === 'success' || (s.completed && !s.result)
+          const coinsEarned = s.coinsEarned ?? (() => {
+            if (isSuccess) {
+              const difficulty = calculateDifficulty(s.wordGoal, s.timeMinutes)
+              return calculateQuestReward({
+                wordGoal: s.wordGoal,
+                wordsWritten: s.wordsWritten,
+                weaponMultiplier,
+                timeMinutes: s.timeMinutes,
+                timeUsedSeconds: 0,
+                difficulty,
+              })
+            }
+            // partial failure reward
+            return Math.floor(calculateBaseReward(s.wordGoal, weaponMultiplier) * (s.wordsWritten / s.wordGoal) * 0.5)
+          })()
+
+          setTimedResultQueue((prev) => [
+            ...prev,
+            {
+              sessionId: s.id,
+              result: isSuccess ? 'success' : 'failure',
+              wordsWritten: s.wordsWritten,
+              wordGoal: s.wordGoal,
+              coinsEarned,
+              imageUrl: s.imageUrl,
+              photographer: s.photographer,
+              photographerUrl: s.photographerUrl,
+            },
+          ])
+        } else {
+          // Non-timed — standard celebration
+          setCelebrationQueue((prev) => [...prev, s])
+        }
+      }
     })
 
     return unsub
-  }, [])
+  }, [loadedImages])
 
   // ------------------------------------------------------------------
   // Derive effective panel state from user intent + data
   // ------------------------------------------------------------------
-
-  const resolvedUserView: UserView = userView
-
-  // Nothing to show at all
   const hasAnything =
-    activeSessions.length > 0 || celebrationQueue.length > 0
+    activeSessions.length > 0 ||
+    celebrationQueue.length > 0 ||
+    timedResultQueue.length > 0
 
   if (!hasAnything) return null
 
-  // If user is looking at something (not collapsed) and there is a celebration
-  // pending, surface it immediately (the celebration takes over the panel).
   const showingCelebration =
-    resolvedUserView !== 'collapsed' && celebrationQueue.length > 0
+    userView !== 'collapsed' && celebrationQueue.length > 0
+
+  const showingTimedResult =
+    userView !== 'collapsed' && timedResultQueue.length > 0
 
   const effectiveUserView: UserView =
-    activeSessions.length === 0 && !showingCelebration
+    activeSessions.length === 0 && !showingCelebration && !showingTimedResult
       ? 'collapsed'
-      : resolvedUserView
+      : userView
 
   // ------------------------------------------------------------------
   // Helpers
   // ------------------------------------------------------------------
-
   const collapse = () => setUserView('collapsed')
-
   const expand = () => setUserView('expanded')
 
   const dismissCelebration = () => {
-    // Pop head of queue
     setCelebrationQueue((prev) => prev.slice(1))
-    // Return to appropriate view
     if (activeSessions.length > 0) {
       setUserView('expanded')
     } else {
       setUserView('collapsed')
     }
+  }
+
+  const dismissTimedResult = () => {
+    setTimedResultQueue((prev) => prev.slice(1))
+    if (activeSessions.length > 0) {
+      setUserView('expanded')
+    } else {
+      setUserView('collapsed')
+    }
+  }
+
+  const handleAbandon = (sessionId: string) => {
+    useImageRevealStore.getState().abandonSession(sessionId)
+    setAbandonConfirmId(null)
+  }
+
+  const handlePauseResume = () => {
+    if (isPaused) {
+      useImageRevealStore.getState().resumeTimer()
+    } else {
+      useImageRevealStore.getState().pauseTimer()
+    }
+  }
+
+  const handleUseConsumable = (itemId: string) => {
+    useImageRevealStore.getState().useConsumable(itemId)
   }
 
   const overallProgress =
@@ -352,6 +693,31 @@ export function ImageRevealPanel() {
           (sum, s) => sum + Math.min(s.wordsWritten / s.wordGoal, 1),
           0,
         ) / activeSessions.length
+
+  // ------------------------------------------------------------------
+  // TIMED RESULT (intercepts expanded view — check before celebration)
+  // ------------------------------------------------------------------
+  if (showingTimedResult && timedResultQueue.length > 0) {
+    const snapshot = timedResultQueue[0]
+    const image = loadedImages[snapshot.sessionId]
+    if (snapshot.result === 'success') {
+      return (
+        <TimedSuccessOverlay
+          snapshot={snapshot}
+          image={image}
+          onDone={dismissTimedResult}
+        />
+      )
+    } else {
+      return (
+        <TimedFailureOverlay
+          snapshot={snapshot}
+          image={image}
+          onDone={dismissTimedResult}
+        />
+      )
+    }
+  }
 
   // ==================================================================
   // CELEBRATION (intercepts any expanded view)
@@ -372,6 +738,12 @@ export function ImageRevealPanel() {
             </div>
             <CelebrationCanvas session={session} image={image} />
             <PhotographerCredit session={session} />
+            {session.coinsEarned !== undefined && session.coinsEarned > 0 && (
+              <div className="flex items-center justify-center gap-2 mt-2">
+                <span className="text-xl">&#x1FA99;</span>
+                <span className="text-amber-400 font-medium text-sm">+{session.coinsEarned} coins</span>
+              </div>
+            )}
           </div>
           <button
             onClick={dismissCelebration}
@@ -390,6 +762,7 @@ export function ImageRevealPanel() {
   if (effectiveUserView === 'collapsed') {
     const firstSession = activeSessions[0]
     const firstImage = firstSession ? loadedImages[firstSession.id] : undefined
+    const firstTimedSession = activeSessions.find((s) => s.timeMinutes !== undefined)
 
     return (
       <div className="fixed bottom-12 right-4 z-40">
@@ -413,10 +786,18 @@ export function ImageRevealPanel() {
             <span className="text-xs text-gray-400 tabular-nums group-hover:text-gray-300">
               {Math.round(overallProgress * 100)}%
             </span>
+            {firstTimedSession && (
+              <SessionTimer
+                session={firstTimedSession}
+                isPaused={isPaused}
+                pauseStartedAt={pauseStartedAt}
+                compact
+              />
+            )}
           </div>
 
           {/* Dot when celebrations are waiting */}
-          {celebrationQueue.length > 0 && (
+          {(celebrationQueue.length > 0 || timedResultQueue.length > 0) && (
             <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 border-2 border-gray-900" />
           )}
         </button>
@@ -439,6 +820,14 @@ export function ImageRevealPanel() {
           {activeSessions.map((session) => {
             const image = loadedImages[session.id]
             const remaining = Math.max(session.wordGoal - session.wordsWritten, 0)
+            const isTimed = session.timeMinutes !== undefined
+            const isAbandonConfirm = abandonConfirmId === session.id
+
+            // For timed sessions, calculate difficulty and reward preview
+            const difficulty = isTimed
+              ? calculateDifficulty(session.wordGoal, session.timeMinutes!)
+              : null
+            const difficultyColorClass = difficulty ? getDifficultyColor(difficulty) : ''
 
             return (
               <div
@@ -449,9 +838,10 @@ export function ImageRevealPanel() {
                   <DetailCanvas session={session} image={image} />
                 </div>
 
-                <div className="px-3 py-2">
+                <div className="px-3 py-2 space-y-2">
+                  {/* Word progress */}
                   <ProgressBar session={session} showText={false} />
-                  <div className="flex items-center justify-between text-[10px] text-gray-500 tabular-nums mt-1">
+                  <div className="flex items-center justify-between text-[10px] text-gray-500 tabular-nums">
                     <span>
                       {session.wordsWritten.toLocaleString()} / {session.wordGoal.toLocaleString()}
                     </span>
@@ -459,6 +849,114 @@ export function ImageRevealPanel() {
                       {remaining.toLocaleString()} left
                     </span>
                   </div>
+
+                  {/* RPG info — always shown */}
+                  <RpgInfo session={session} weaponId={equippedWeapon} />
+
+                  {/* Timer section — only for timed sessions */}
+                  {isTimed && (
+                    <div className="space-y-2 pt-1 border-t border-gray-800">
+                      {/* Difficulty badge */}
+                      {difficulty && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-gray-500">Difficulty</span>
+                          <span className={`text-[10px] font-medium ${difficultyColorClass}`}>
+                            {getDifficultyLabel(difficulty)}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Timer display */}
+                      <SessionTimer
+                        session={session}
+                        isPaused={isPaused}
+                        pauseStartedAt={pauseStartedAt}
+                      />
+
+                      {/* Armor time bonus info if equipped */}
+                      {(() => {
+                        const bonus = getArmorTimeBonus(equippedArmor)
+                        const armorItem = getItemById(equippedArmor)
+                        if (bonus <= 0 || !armorItem) return null
+                        return (
+                          <p className="text-[10px] text-gray-600">
+                            {armorItem.icon} {armorItem.name} (+{Math.round(bonus * 100)}% time)
+                          </p>
+                        )
+                      })()}
+
+                      {/* Consumables */}
+                      <ConsumableButtons
+                        inventory={consumableInventory}
+                        onUse={handleUseConsumable}
+                      />
+
+                      {/* Pause/Resume + Abandon */}
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          onClick={handlePauseResume}
+                          className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-2 py-1.5 transition-colors"
+                        >
+                          {isPaused ? '\u25B6 Resume' : '\u23F8 Pause'}
+                        </button>
+
+                        {!isAbandonConfirm ? (
+                          <button
+                            onClick={() => setAbandonConfirmId(session.id)}
+                            className="text-xs text-red-400 hover:text-red-300 transition-colors px-2 py-1.5"
+                          >
+                            Abandon
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-red-400">Abandon?</span>
+                            <button
+                              onClick={() => handleAbandon(session.id)}
+                              className="text-[10px] bg-red-900 hover:bg-red-800 text-red-300 rounded px-1.5 py-1 transition-colors"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              onClick={() => setAbandonConfirmId(null)}
+                              className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-400 rounded px-1.5 py-1 transition-colors"
+                            >
+                              No
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Abandon button for non-timed sessions */}
+                  {!isTimed && (
+                    <div className="flex justify-end pt-1">
+                      {!isAbandonConfirm ? (
+                        <button
+                          onClick={() => setAbandonConfirmId(session.id)}
+                          className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+                        >
+                          Abandon
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-red-400">Abandon?</span>
+                          <button
+                            onClick={() => handleAbandon(session.id)}
+                            className="text-[10px] bg-red-900 hover:bg-red-800 text-red-300 rounded px-1.5 py-1 transition-colors"
+                          >
+                            Yes
+                          </button>
+                          <button
+                            onClick={() => setAbandonConfirmId(null)}
+                            className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-400 rounded px-1.5 py-1 transition-colors"
+                          >
+                            No
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )
