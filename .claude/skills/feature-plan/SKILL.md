@@ -90,9 +90,29 @@ Every phase uses a tiered team of agents per the model rules above. The project 
 **Visual QA Step — required details (include in Team Workflow):**
 Every phase must end with a real visual verification, not just a type-check. The main Opus agent performs this step itself — it has the context to judge whether the screen looks right:
 - Start the dev server in the background: `npm run dev` via `Bash` with `run_in_background: true`. Wait for the server to report it's listening by polling the background output (do not `sleep`).
-- Navigate to the local dev URL (default `http://localhost:5173`) using whichever browser automation tool is available in the session (Playwright MCP, Chrome DevTools MCP, Puppeteer, etc.). If none is available, fall back to `screencapture -x` against a manually opened browser window and note that in `progress.md`.
-- Drive the UI just enough to exercise this phase's changes (open the new modal, click the new button, trigger the new editor extension, etc.) and confirm the result matches the phase's goal.
-- Take exactly **one** screenshot of the most representative state and save it to `research/{feature-name}/screenshots/phase-N.png` (create the `screenshots/` subfolder if it doesn't exist). One screenshot per phase — not a gallery.
+- Use **Puppeteer** to drive the browser and take screenshots. Write a short Node.js script inline via `Bash` that:
+  1. Launches a headless Chromium browser via `puppeteer.launch()`
+  2. Navigates to the local dev URL (default `http://localhost:5173`)
+  3. Waits for the page to fully load (`waitForSelector` or `waitForNetworkIdle`)
+  4. Drives the UI just enough to exercise this phase's changes (click buttons, open modals, trigger editor extensions, etc.)
+  5. Takes a screenshot and saves it to `research/{feature-name}/screenshots/phase-N.png` (create the `screenshots/` subfolder if it doesn't exist)
+  6. Closes the browser
+- Example Puppeteer script pattern:
+  ```js
+  const puppeteer = require('puppeteer');
+  (async () => {
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.goto('http://localhost:5173', { waitUntil: 'networkidle0' });
+    // Drive UI: await page.click('button[data-testid="..."]'); etc.
+    await page.screenshot({ path: 'research/{feature-name}/screenshots/phase-N.png', fullPage: false });
+    await browser.close();
+  })();
+  ```
+- If Puppeteer is not installed, install it first: `npm install --save-dev puppeteer`
+- Read the screenshot file with the `Read` tool to visually verify the result matches the phase's goal.
+- One screenshot per phase — not a gallery.
 - Stop the background dev server before finishing the phase.
 - If the visual QA reveals a problem, fix it in the same session (spawn a follow-up Sonnet agent if needed), re-run static QA, re-capture the screenshot, then commit.
 
@@ -145,10 +165,10 @@ STEP 3 - STATIC QA: npx eslint ., npx tsc -b --noEmit, npx vite build. Fix any f
 
 STEP 4 - VISUAL QA (Opus, main agent does this itself):
 - Launch dev server: `npm run dev` in the background, wait for it to report ready.
-- Open http://localhost:5173 with the available browser automation tool.
+- Use Puppeteer to drive a headless browser to http://localhost:5173.
 - Drive the UI to exercise this phase's changes: {what specifically to click/type/open}.
-- Confirm the result matches the goal.
-- Save exactly one screenshot to research/{feature-name}/screenshots/phase-N.png.
+- Take a screenshot and save to research/{feature-name}/screenshots/phase-N.png.
+- Read the screenshot file to visually confirm the result matches the goal.
 - Stop the background dev server.
 - If anything looks wrong, fix it (spawn a follow-up Sonnet agent if needed),
   re-run STEP 3, re-capture the screenshot, then continue.
