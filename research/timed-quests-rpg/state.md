@@ -1,7 +1,7 @@
 # Timed Quests + RPG Reward System — Cross-Phase State
 
 ## Current Phase
-Phase 5 (not started) — Phase 4.5 complete
+Phase 6 (not started) — Phase 5 complete
 
 ## Key Existing File Paths
 - `src/types/index.ts` — shared TypeScript types
@@ -21,12 +21,14 @@ Phase 5 (not started) — Phase 4.5 complete
 ## New Files Created Per Phase
 - Phase 1: `src/lib/items.ts`, `src/lib/questRewards.ts`, `src/stores/playerStore.ts`
 - Phase 2: `src/lib/timer.ts`, `src/stores/timedQuestStore.ts`
+- Phase 5: `src/components/quests/RewardToast.tsx`, `src/components/quests/rewardToastStore.ts`, `src/components/quests/useRewardToast.ts`
 
 ## New Components Per Phase
 - Phase 1: (none — data-only phase)
 - Phase 2: (none — data-only phase)
 - Phase 3: (none — refactored existing QuestPicker.tsx with tabs + timed quest form)
 - Phase 4: `src/components/quests/TimedQuestPanel.tsx` — DELETED in Phase 4.5 (merged into ImageRevealPanel)
+- Phase 5: `RewardToast` (fixed overlay toast system), coin display added to AppShell bottom bar
 
 ## New Stores and Persistence Keys
 - Phase 1: `usePlayerStore` → `writinator-player` (v1)
@@ -55,4 +57,4 @@ Phase 5 (not started) — Phase 4.5 complete
 - localforageStorage adapter is copy-pasted across stores (not extracted, acceptable)
 
 ## Latest Screenshot
-Phase 4.5: screenshots/phase-4.5.png (unified QuestPicker with no tabs, Add Timer toggle, equipment + coin estimate)
+Phase 5: screenshots/phase-5.png (coin display in bottom bar, reward toast system)

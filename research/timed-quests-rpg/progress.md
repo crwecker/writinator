@@ -9,7 +9,7 @@
 | 3 | Quest Creation UI — Timed Quest Tab | Complete | 2026-04-10 | 2026-04-10 |
 | 4 | Active Timed Quest Panel | Complete | 2026-04-10 | 2026-04-10 |
 | 4.5 | Quest Consolidation — Merge Timer into Image Quests | Complete | 2026-04-10 | 2026-04-10 |
-| 5 | Coin Display + Reward Toasts | Not Started | — | — |
+| 5 | Coin Display + Reward Toasts | Complete | 2026-04-10 | 2026-04-10 |
 | 6 | RPG Shop — Item Cards + Purchase Flow | Not Started | — | — |
 | 7 | Equipment Panel + Consumable Inventory | Not Started | — | — |
 | 8 | Polish + Quest Reminder Integration | Not Started | — | — |
@@ -87,14 +87,13 @@ Major architectural consolidation. Eliminated the separate timed quest system en
 ---
 
 ## Phase 5: Coin Display + Reward Toasts
-- [ ] Coin balance in AppShell bottom bar
-- [ ] RewardToast component with animation
-- [ ] Image reveal completion grants 100 coins
-- [ ] Retroactive coin grant for existing completions
-- [ ] Visual QA screenshot captured → screenshots/phase-5.png
+- [x] Coin balance in AppShell bottom bar
+- [x] RewardToast component with animation + toast queue
+- [x] Retroactive coin grant for existing completions
+- [x] Visual QA screenshot captured → screenshots/phase-5.png
 
 ### Notes
-_(filled after completion)_
+Coin display in bottom bar left of Quest button — amber-400 Coins icon + balance with tabular-nums, CSS keyframe pulse animation on change. RewardToast is a fixed bottom-center overlay with slide-up entrance, 3s auto-dismiss with fade-out exit, supports queued toasts via module-level store + useSyncExternalStore. Retroactive grant runs once on mount: counts completedSessions with result==='success', grants 100 coins each, sets retroactiveGrantApplied flag (persisted in playerStore). Note: image reveal completion already calls addCoins from Phase 4.5 — no changes needed to imageRevealStore. ESLint, tsc, vite build all pass. Commit: 98f4289.
 
 ---
 
