@@ -3,8 +3,10 @@ import type {
   Book,
   Character,
   CharacterState,
+  ConsistencyIssue,
   Document,
   EquippedItem,
+  HistorySample,
   StatDefinition,
   StatDelta,
   StatDeltaOp,
@@ -373,4 +375,219 @@ export function computeStateAt(
   }
 
   return { state, effective: computeEffective(state, character.stats) }
+}
+
+/** Approximate word-count in a slice of text. Used for history X-axis hints. */
+function countWords(text: string): number {
+  if (!text) return 0
+  // Strip stat/statblock HTML comments to avoid counting marker tokens.
+  const cleaned = text.replace(/<!--[\s\S]*?-->/g, ' ')
+  const trimmed = cleaned.trim()
+  if (!trimmed) return 0
+  return trimmed.split(/\s+/).length
+}
+
+/**
+ * Walk the whole book in tree order and sample `character`'s effective state
+ * at the start of the book, then after each applied marker. Sample 0 is the
+ * character's base state anchored at the first document (offset 0).
+ * Pure. No React, no side effects.
+ */
+export function computeHistory(
+  character: Character,
+  book: Book,
+  markers: Record<string, StatDelta[]>
+): HistorySample[] {
+  const order = getDocumentTreeOrder(book)
+  const samples: HistorySample[] = []
+
+  let state: CharacterState = {
+    base: cloneBase(character.baseValues),
+    equipped: {},
+    activeBuffs: [],
+  }
+
+  const firstDoc = order[0]
+  const baseSample: HistorySample = {
+    markerIndex: 0,
+    offset: 0,
+    documentId: firstDoc?.id ?? '',
+    documentName: firstDoc?.name ?? '',
+    effective: computeEffective(state, character.stats),
+    wordIndex: 0,
+  }
+  samples.push(baseSample)
+
+  let markerIndex = 0
+  let cumulativeWords = 0
+
+  for (const doc of order) {
+    const content = doc.content ?? ''
+    const extracted = extractMarkers(content)
+
+    let prevOffset = 0
+    for (const marker of extracted) {
+      if (marker.kind !== 'delta') continue
+      const deltas = markers[marker.id]
+      if (!deltas || deltas.length === 0) continue
+      const applicable = deltas.filter((d) => d.characterId === character.id)
+      if (applicable.length === 0) continue
+
+      // Count words from prevOffset up to this marker's offset.
+      cumulativeWords += countWords(content.slice(prevOffset, marker.offset))
+      prevOffset = marker.offset
+
+      for (const delta of applicable) {
+        state = applyDeltaOpWithDefs(state, delta.op, character.stats)
+      }
+      state = tickBuffs(state)
+      markerIndex += 1
+      samples.push({
+        markerIndex,
+        offset: marker.offset,
+        documentId: doc.id,
+        documentName: doc.name,
+        effective: computeEffective(state, character.stats),
+        wordIndex: cumulativeWords,
+      })
+    }
+    // Add trailing words of this doc so cross-doc word counts progress.
+    cumulativeWords += countWords(content.slice(prevOffset))
+  }
+
+  return samples
+}
+
+/**
+ * Scan the book + store for inconsistencies. Pure.
+ *
+ * - orphanMarker: UUID found in text but missing from `markers` store.
+ * - inverseOrphan: store entry whose UUID appears in no document.
+ * - impossibleValue: computed effective value violates invariants (e.g.,
+ *   numberWithMax `value > max`, HP/MP-like `value < 0`).
+ * - missingSlot: equip op references a slot not declared on the character.
+ * - unequipEmpty: unequip op references a slot that is currently empty.
+ */
+export function checkConsistency(
+  book: Book,
+  characters: Character[],
+  markers: Record<string, StatDelta[]>
+): ConsistencyIssue[] {
+  const issues: ConsistencyIssue[] = []
+  const order = getDocumentTreeOrder(book)
+  const charactersById = new Map(characters.map((c) => [c.id, c]))
+  const seenMarkerIds = new Set<string>()
+
+  // Pass 1: walk each document, collect orphanMarker + run per-character
+  // simulations to detect impossibleValue / missingSlot / unequipEmpty.
+  const simStates = new Map<string, CharacterState>()
+  for (const c of characters) {
+    simStates.set(c.id, {
+      base: cloneBase(c.baseValues),
+      equipped: {},
+      activeBuffs: [],
+    })
+  }
+
+  const checkImpossible = (
+    c: Character,
+    state: CharacterState,
+    documentId: string,
+    offset: number
+  ) => {
+    const eff = computeEffective(state, c.stats)
+    for (const def of c.stats) {
+      const v = eff[def.id]
+      if (!v) continue
+      if (v.kind === 'numberWithMax') {
+        if (v.value > v.max) {
+          issues.push({
+            kind: 'impossibleValue',
+            characterId: c.id,
+            statId: def.id,
+            reason: `${def.name} ${v.value}/${v.max} — current exceeds max`,
+            documentId,
+            offset,
+          })
+        }
+        if (v.value < 0) {
+          issues.push({
+            kind: 'impossibleValue',
+            characterId: c.id,
+            statId: def.id,
+            reason: `${def.name} ${v.value}/${v.max} — negative value`,
+            documentId,
+            offset,
+          })
+        }
+      }
+    }
+  }
+
+  for (const doc of order) {
+    const content = doc.content ?? ''
+    const extracted = extractMarkers(content)
+    for (const marker of extracted) {
+      if (marker.kind !== 'delta') continue
+      seenMarkerIds.add(marker.id)
+      const deltas = markers[marker.id]
+      if (!deltas) {
+        issues.push({
+          kind: 'orphanMarker',
+          markerId: marker.id,
+          documentId: doc.id,
+          offset: marker.offset,
+        })
+        continue
+      }
+      for (const delta of deltas) {
+        const c = charactersById.get(delta.characterId)
+        if (!c) continue
+        const state = simStates.get(c.id)
+        if (!state) continue
+        const op = delta.op
+        if (op.kind === 'equip') {
+          if (!c.equipmentSlots.includes(op.slot)) {
+            issues.push({
+              kind: 'missingSlot',
+              characterId: c.id,
+              slot: op.slot,
+              markerId: marker.id,
+            })
+          }
+        } else if (op.kind === 'unequip') {
+          if (!state.equipped[op.slot]) {
+            issues.push({
+              kind: 'unequipEmpty',
+              characterId: c.id,
+              slot: op.slot,
+              markerId: marker.id,
+            })
+          }
+        }
+        const nextState = applyDeltaOpWithDefs(state, op, c.stats)
+        simStates.set(c.id, nextState)
+      }
+      // After applying, tick buffs and check invariants for each affected char.
+      const touched = new Set<string>()
+      for (const delta of deltas) touched.add(delta.characterId)
+      for (const cid of touched) {
+        const c = charactersById.get(cid)
+        const state = simStates.get(cid)
+        if (!c || !state) continue
+        const ticked = tickBuffs(state)
+        simStates.set(cid, ticked)
+        checkImpossible(c, ticked, doc.id, marker.offset)
+      }
+    }
+  }
+
+  // Pass 2: inverse orphans — store entries with no text reference.
+  for (const id of Object.keys(markers)) {
+    if (!seenMarkerIds.has(id)) {
+      issues.push({ kind: 'inverseOrphan', markerId: id })
+    }
+  }
+
+  return issues
 }

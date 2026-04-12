@@ -3,14 +3,18 @@ import type { EditorView } from '@codemirror/view'
 import { useCharacterStore } from '../../stores/characterStore'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { computeStateAt } from '../../lib/characterState'
+import { checkConsistency, computeStateAt } from '../../lib/characterState'
+import { ProgressionGraph } from './ProgressionGraph'
 import type {
   Character,
   CharacterState,
+  ConsistencyIssue,
   StatDefinition,
   StatModifier,
   StatValue,
 } from '../../types'
+
+type PanelTab = 'stats' | 'graph' | 'issues'
 
 interface Props {
   open: boolean
@@ -342,13 +346,24 @@ function CharacterSection({ character, computed }: SectionProps) {
   )
 }
 
-export function CharacterPanel({ open, onClose, onOpenCharacterSheet }: Props) {
+export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   const characters = useCharacterStore((s) => s.characters)
   const markers = useCharacterStore((s) => s.markers)
+  const removeMarkerFromStore = useCharacterStore((s) => s.removeMarker)
+  const setMarker = useCharacterStore((s) => s.setMarker)
+  const setEquipmentSlots = useCharacterStore((s) => s.setEquipmentSlots)
   const cursorOffset = useEditorStore((s) => s.cursorOffset)
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
+  const setActiveDocument = useDocumentStore((s) => s.setActiveDocument)
   const book = useDocumentStore((s) => s.book)
+  const [tab, setTab] = useState<PanelTab>('stats')
+  const [graphCharacterIdRaw, setGraphCharacterId] = useState<string>('')
+  const graphCharacterId = useMemo(() => {
+    if (characters.length === 0) return ''
+    if (characters.find((c) => c.id === graphCharacterIdRaw)) return graphCharacterIdRaw
+    return characters[0].id
+  }, [characters, graphCharacterIdRaw])
 
   // Close on Escape
   useEffect(() => {
@@ -383,6 +398,11 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet }: Props) {
     }
   }, [open, onClose])
 
+  const issues = useMemo<ConsistencyIssue[]>(() => {
+    if (!book) return []
+    return checkConsistency(book, characters, markers)
+  }, [book, characters, markers])
+
   const computedPerCharacter = useMemo(() => {
     if (!book) return new Map<string, { state: CharacterState; effective: Record<string, StatValue> }>()
     const stopAt = activeDocumentId
@@ -414,6 +434,24 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet }: Props) {
         </button>
       </div>
 
+      {/* Tabs */}
+      <div className="flex border-b border-gray-700 bg-gray-900/60">
+        <TabButton active={tab === 'stats'} onClick={() => setTab('stats')} testId="character-panel-tab-stats">
+          Stats
+        </TabButton>
+        <TabButton active={tab === 'graph'} onClick={() => setTab('graph')} testId="character-panel-tab-graph">
+          Graph
+        </TabButton>
+        <TabButton
+          active={tab === 'issues'}
+          onClick={() => setTab('issues')}
+          testId="character-panel-tab-issues"
+          badgeCount={issues.length}
+        >
+          Issues
+        </TabButton>
+      </div>
+
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
         {characters.length === 0 ? (
@@ -431,20 +469,355 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet }: Props) {
               </button>
             )}
           </div>
-        ) : !book || !activeDocumentId ? (
-          <div className="text-center text-xs text-gray-500 py-8">
-            Open a document to see live-computed state.
-          </div>
+        ) : tab === 'stats' ? (
+          !book || !activeDocumentId ? (
+            <div className="text-center text-xs text-gray-500 py-8">
+              Open a document to see live-computed state.
+            </div>
+          ) : (
+            characters.map((c) => {
+              const computed = computedPerCharacter.get(c.id)
+              if (!computed) return null
+              return (
+                <CharacterSection key={c.id} character={c} computed={computed} />
+              )
+            })
+          )
+        ) : tab === 'graph' ? (
+          <GraphTab
+            characters={characters}
+            graphCharacterId={graphCharacterId}
+            setGraphCharacterId={setGraphCharacterId}
+          />
         ) : (
-          characters.map((c) => {
-            const computed = computedPerCharacter.get(c.id)
-            if (!computed) return null
-            return (
-              <CharacterSection key={c.id} character={c} computed={computed} />
-            )
-          })
+          <IssuesTab
+            issues={issues}
+            characters={characters}
+            book={book}
+            editorView={editorView}
+            onJumpToMarker={(docId, offset) => {
+              if (!editorView) return
+              if (docId !== activeDocumentId) {
+                setActiveDocument(docId)
+                // Defer selection dispatch to let the editor swap docs.
+                setTimeout(() => {
+                  const v = editorView
+                  if (!v) return
+                  const len = v.state.doc.length
+                  const pos = Math.min(offset, len)
+                  v.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+                  v.focus()
+                }, 30)
+              } else {
+                const len = editorView.state.doc.length
+                const pos = Math.min(offset, len)
+                editorView.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+                editorView.focus()
+              }
+            }}
+            onRemoveOrphanFromText={(markerId, documentId) => {
+              if (!book || !editorView) return
+              const d = book.documents.find((x) => x.id === documentId)
+              if (!d) return
+              const content = d.content ?? ''
+              const escaped = markerId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              const re = new RegExp(`<!--\\s*stat:${escaped}\\s*-->`)
+              const match = content.match(re)
+              if (!match || typeof match.index !== 'number') return
+              const doRemove = () => {
+                const view = editorView
+                if (!view) return
+                view.dispatch({
+                  changes: {
+                    from: match.index as number,
+                    to: (match.index as number) + match[0].length,
+                    insert: '',
+                  },
+                })
+              }
+              if (documentId === activeDocumentId) {
+                doRemove()
+              } else {
+                setActiveDocument(documentId)
+                setTimeout(doRemove, 30)
+              }
+            }}
+            onCreateEmptyDelta={(markerId) => {
+              setMarker(markerId, [])
+            }}
+            onDeleteInverseOrphan={(markerId) => {
+              removeMarkerFromStore(markerId)
+            }}
+            onAddSlot={(characterId, slot) => {
+              const character = characters.find((c) => c.id === characterId)
+              if (!character) return
+              if (character.equipmentSlots.includes(slot)) return
+              setEquipmentSlots(characterId, [...character.equipmentSlots, slot])
+            }}
+          />
         )}
       </div>
     </div>
+  )
+}
+
+interface TabButtonProps {
+  active: boolean
+  onClick: () => void
+  testId: string
+  badgeCount?: number
+  children: React.ReactNode
+}
+
+function TabButton({ active, onClick, testId, badgeCount, children }: TabButtonProps) {
+  return (
+    <button
+      data-testid={testId}
+      onClick={onClick}
+      className={`flex-1 px-3 py-2 text-xs flex items-center justify-center gap-1.5 transition-colors ${
+        active
+          ? 'text-gray-100 bg-gray-800/70 border-b-2 border-blue-400'
+          : 'text-gray-500 hover:text-gray-300 border-b-2 border-transparent'
+      }`}
+    >
+      <span>{children}</span>
+      {badgeCount !== undefined && badgeCount > 0 && (
+        <span
+          data-testid={`${testId}-badge`}
+          className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-red-500/80 text-[9px] text-white font-semibold tabular-nums"
+        >
+          {badgeCount}
+        </span>
+      )}
+    </button>
+  )
+}
+
+interface GraphTabProps {
+  characters: Character[]
+  graphCharacterId: string
+  setGraphCharacterId: (id: string) => void
+}
+
+function GraphTab({ characters, graphCharacterId, setGraphCharacterId }: GraphTabProps) {
+  if (characters.length === 0) {
+    return (
+      <div className="text-center text-xs text-gray-500 py-8">No characters yet.</div>
+    )
+  }
+  const activeId = characters.find((c) => c.id === graphCharacterId)
+    ? graphCharacterId
+    : characters[0].id
+  return (
+    <div className="space-y-3">
+      {characters.length > 1 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wide text-gray-500">
+            Character
+          </span>
+          <select
+            data-testid="character-panel-graph-character-select"
+            value={activeId}
+            onChange={(e) => setGraphCharacterId(e.target.value)}
+            className="flex-1 bg-gray-800 text-gray-200 text-xs border border-gray-700 rounded px-2 py-1"
+          >
+            {characters.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <ProgressionGraph characterId={activeId} />
+    </div>
+  )
+}
+
+interface IssuesTabProps {
+  issues: ConsistencyIssue[]
+  characters: Character[]
+  book: import('../../types').Book | null
+  editorView: EditorView | null
+  onJumpToMarker: (documentId: string, offset: number) => void
+  onRemoveOrphanFromText: (markerId: string, documentId: string) => void
+  onCreateEmptyDelta: (markerId: string) => void
+  onDeleteInverseOrphan: (markerId: string) => void
+  onAddSlot: (characterId: string, slot: string) => void
+}
+
+function groupIssues(issues: ConsistencyIssue[]): Record<ConsistencyIssue['kind'], ConsistencyIssue[]> {
+  const groups: Record<ConsistencyIssue['kind'], ConsistencyIssue[]> = {
+    orphanMarker: [],
+    inverseOrphan: [],
+    impossibleValue: [],
+    missingSlot: [],
+    unequipEmpty: [],
+  }
+  for (const i of issues) {
+    groups[i.kind].push(i)
+  }
+  return groups
+}
+
+const KIND_LABELS: Record<ConsistencyIssue['kind'], string> = {
+  orphanMarker: 'Orphan Markers',
+  inverseOrphan: 'Inverse Orphans',
+  impossibleValue: 'Impossible Values',
+  missingSlot: 'Missing Slots',
+  unequipEmpty: 'Unequip of Empty Slot',
+}
+
+function IssuesTab({
+  issues,
+  characters,
+  book,
+  onJumpToMarker,
+  onRemoveOrphanFromText,
+  onCreateEmptyDelta,
+  onDeleteInverseOrphan,
+  onAddSlot,
+}: IssuesTabProps) {
+  if (!book) {
+    return <div className="text-center text-xs text-gray-500 py-8">No active book.</div>
+  }
+  if (issues.length === 0) {
+    return (
+      <div
+        data-testid="character-panel-issues-empty"
+        className="text-center text-xs text-gray-500 py-8"
+      >
+        All clear — no consistency issues.
+      </div>
+    )
+  }
+  const groups = groupIssues(issues)
+  const characterName = (id: string) =>
+    characters.find((c) => c.id === id)?.name ?? 'Unknown'
+  const docName = (id: string | undefined) =>
+    id ? book.documents.find((d) => d.id === id)?.name ?? '(unknown doc)' : '(unknown doc)'
+
+  return (
+    <div className="space-y-3" data-testid="character-panel-issues">
+      {(Object.keys(groups) as ConsistencyIssue['kind'][]).map((kind) => {
+        const list = groups[kind]
+        if (list.length === 0) return null
+        return (
+          <div key={kind} className="border border-gray-800 rounded overflow-hidden">
+            <div className="px-2 py-1.5 bg-gray-800/60 text-[11px] text-gray-300 flex justify-between items-center">
+              <span>{KIND_LABELS[kind]}</span>
+              <span className="text-gray-500">{list.length}</span>
+            </div>
+            <ul className="divide-y divide-gray-800/60">
+              {list.map((issue, i) => (
+                <li
+                  key={`${kind}-${i}`}
+                  data-testid={`character-panel-issue-${kind}`}
+                  className="px-2 py-2 text-[11px] text-gray-300 space-y-1"
+                >
+                  {issue.kind === 'orphanMarker' && (
+                    <>
+                      <div>
+                        <span className="text-gray-500">Marker </span>
+                        <code className="text-gray-400">{issue.markerId.slice(0, 8)}…</code>
+                        <span className="text-gray-500"> in </span>
+                        <span className="text-gray-300">{docName(issue.documentId)}</span>
+                      </div>
+                      <div className="flex gap-1.5 flex-wrap">
+                        <IssueButton onClick={() => onRemoveOrphanFromText(issue.markerId, issue.documentId)}>
+                          Remove from text
+                        </IssueButton>
+                        <IssueButton onClick={() => onCreateEmptyDelta(issue.markerId)}>
+                          Create empty entry
+                        </IssueButton>
+                        <IssueButton onClick={() => onJumpToMarker(issue.documentId, issue.offset)}>
+                          Jump
+                        </IssueButton>
+                      </div>
+                    </>
+                  )}
+                  {issue.kind === 'inverseOrphan' && (
+                    <>
+                      <div>
+                        <span className="text-gray-500">Store entry </span>
+                        <code className="text-gray-400">{issue.markerId.slice(0, 8)}…</code>
+                        <span className="text-gray-500"> has no text reference.</span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <IssueButton onClick={() => onDeleteInverseOrphan(issue.markerId)}>
+                          Delete store entry
+                        </IssueButton>
+                      </div>
+                    </>
+                  )}
+                  {issue.kind === 'impossibleValue' && (
+                    <>
+                      <div>
+                        <span className="text-gray-300">{characterName(issue.characterId)}</span>
+                        <span className="text-gray-500"> — </span>
+                        <span className="text-gray-300">{issue.reason}</span>
+                      </div>
+                      {issue.documentId && typeof issue.offset === 'number' && (
+                        <div className="flex gap-1.5">
+                          <IssueButton
+                            onClick={() =>
+                              onJumpToMarker(issue.documentId as string, issue.offset as number)
+                            }
+                          >
+                            Jump to marker
+                          </IssueButton>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {issue.kind === 'missingSlot' && (
+                    <>
+                      <div>
+                        <span className="text-gray-300">{characterName(issue.characterId)}</span>
+                        <span className="text-gray-500"> has no slot </span>
+                        <span className="text-gray-300">"{issue.slot}"</span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <IssueButton
+                          onClick={() => onAddSlot(issue.characterId, issue.slot)}
+                        >
+                          Add slot
+                        </IssueButton>
+                      </div>
+                    </>
+                  )}
+                  {issue.kind === 'unequipEmpty' && (
+                    <>
+                      <div>
+                        <span className="text-gray-300">{characterName(issue.characterId)}</span>
+                        <span className="text-gray-500"> — unequip of empty </span>
+                        <span className="text-gray-300">"{issue.slot}"</span>
+                      </div>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function IssueButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-2 py-0.5 text-[10px] text-gray-300 border border-gray-700 hover:border-gray-500 hover:bg-gray-800 rounded transition-colors"
+    >
+      {children}
+    </button>
   )
 }

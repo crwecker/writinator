@@ -275,6 +275,58 @@ export interface StatblockMarkerRef {
 
 export type ExtractedMarker = DeltaMarkerRef | StatblockMarkerRef
 
+// ---------------------------------------------------------------------------
+// Phase 8 — History sampling + consistency checking
+// ---------------------------------------------------------------------------
+
+/** A single sample of a character's effective state at a point in the book. */
+export interface HistorySample {
+  /** Marker index within the walk (0 = base/initial sample). */
+  markerIndex: number
+  /** Offset inside the document where the marker lives. 0 for the base sample. */
+  offset: number
+  /** Document id where the marker lives (first document for the base sample). */
+  documentId: string
+  /** Document display name (denormalized for rendering). */
+  documentName: string
+  /** Effective stat values at this point. */
+  effective: Record<string, StatValue>
+  /** Word index (approximate) within the book tree prefix. */
+  wordIndex: number
+}
+
+export type ConsistencyIssue =
+  | {
+      kind: 'orphanMarker'
+      markerId: string
+      documentId: string
+      offset: number
+    }
+  | {
+      kind: 'inverseOrphan'
+      markerId: string
+    }
+  | {
+      kind: 'impossibleValue'
+      characterId: string
+      statId: string
+      reason: string
+      documentId?: string
+      offset?: number
+    }
+  | {
+      kind: 'missingSlot'
+      characterId: string
+      slot: string
+      markerId: string
+    }
+  | {
+      kind: 'unequipEmpty'
+      characterId: string
+      slot: string
+      markerId: string
+    }
+
 export interface RecentFile {
   handle: FileSystemFileHandle
   name: string
