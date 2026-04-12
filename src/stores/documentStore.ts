@@ -6,6 +6,7 @@ import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotS
 import { clearFileHandle } from '../lib/fileSystem'
 import { useImageRevealStore } from './imageRevealStore'
 import { useWriteathonStore } from './writeathonStore'
+import { useCharacterStore } from './characterStore'
 import { countWords } from '../lib/words'
 
 interface DocumentState {
@@ -152,6 +153,10 @@ export const useDocumentStore = create<DocumentState>()(
           activeDocumentId: file.book.documents[0]?.id ?? null,
         })
         loadSnapshotsFromFile(file.snapshots)
+        useCharacterStore.getState().loadFromFile(
+          file.characters ?? [],
+          file.markers ?? {}
+        )
       },
 
       renameBook: (title: string) => {
@@ -172,6 +177,7 @@ export const useDocumentStore = create<DocumentState>()(
           imageRevealState.pauseTimer()
         }
         clearFileHandle()
+        useCharacterStore.getState().reset()
         set({ book: null, activeDocumentId: null })
       },
 
