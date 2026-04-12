@@ -21,6 +21,7 @@ import { ShopModal } from '../quests/ShopModal'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
 import { CharacterSheetModal } from '../characters/CharacterSheetModal'
+import { CharacterPanel } from '../characters/CharacterPanel'
 import { DeltaEditorModal } from '../characters/DeltaEditorModal'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { SubDocumentLinks } from '../editor/SubDocumentLinks'
@@ -40,6 +41,7 @@ export function AppShell() {
   const [shopOpen, setShopOpen] = useState(false)
   const [boardOpen, setBoardOpen] = useState(false)
   const [characterSheetOpen, setCharacterSheetOpen] = useState(false)
+  const [characterPanelOpen, setCharacterPanelOpen] = useState(false)
   const [deltaEditorState, setDeltaEditorState] = useState<{
     open: boolean
     markerId: string | null
@@ -354,6 +356,15 @@ export function AppShell() {
             open={characterSheetOpen}
             onClose={() => setCharacterSheetOpen(false)}
           />
+          <CharacterPanel
+            open={characterPanelOpen}
+            onClose={() => setCharacterPanelOpen(false)}
+            editorView={editorView}
+            onOpenCharacterSheet={() => {
+              setCharacterPanelOpen(false)
+              setCharacterSheetOpen(true)
+            }}
+          />
           <DeltaEditorModal
             open={deltaEditorState.open}
             onClose={closeDeltaEditor}
@@ -386,6 +397,14 @@ export function AppShell() {
             title="Characters"
           >
             Characters
+          </button>
+          <button
+            data-testid="character-panel-button"
+            onClick={() => setCharacterPanelOpen((p) => !p)}
+            className="text-gray-500 hover:text-gray-300 transition-colors"
+            title="Character stats panel"
+          >
+            Stats
           </button>
           <button
             onClick={toggleRenderMode}

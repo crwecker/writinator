@@ -676,6 +676,11 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
               updateContent(text)
             })
           }
+          if (update.selectionSet || update.docChanged) {
+            const head = update.state.selection.main.head
+            // setCursorOffset short-circuits if the value hasn't changed.
+            useEditorStore.getState().setCursorOffset(head)
+          }
         }),
       ],
     })
