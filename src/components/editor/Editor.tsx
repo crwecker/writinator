@@ -13,6 +13,10 @@ import {
   statMarkerExtension,
   dispatchCharacterSnapshot,
 } from './statMarkerExtension'
+import {
+  statblockMarkerExtension,
+  dispatchStatblockActiveDocument,
+} from './statblockMarkerExtension'
 import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
 import './editor.css'
@@ -569,6 +573,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         renderModeField,
         markdownDecorationPlugin,
         statMarkerExtension(),
+        statblockMarkerExtension(),
         placeholder('Start writing...'),
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
@@ -733,6 +738,10 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
 
   useEffect(() => {
     loadDocument()
+    const view = viewRef.current
+    if (view) {
+      dispatchStatblockActiveDocument(view, activeDocumentId ?? '')
+    }
   }, [activeDocumentId, loadDocument])
 
   // Update font family
@@ -788,6 +797,15 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (import.meta.env.DEV) {
       ;(window as unknown as { __characterStore?: typeof useCharacterStore }).__characterStore =
         useCharacterStore
+      ;(window as unknown as { __documentStore?: typeof useDocumentStore }).__documentStore =
+        useDocumentStore
+      // Expose an in-memory markdown renderer so QA can inspect export output
+      // without triggering a file download.
+      import('../../lib/export').then((mod) => {
+        ;(window as unknown as {
+          __renderBookAsMarkdown?: typeof mod.renderBookAsMarkdown
+        }).__renderBookAsMarkdown = mod.renderBookAsMarkdown
+      })
     }
     return unsubscribe
   }, [])
