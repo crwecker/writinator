@@ -4,11 +4,13 @@ import * as localforage from 'localforage'
 import type { WriteathonConfig, WriteathonMilestone, BoardQuest } from '../types'
 import { calculateDailyTarget, createMilestones } from '../lib/writeathon'
 import { usePlayerStore } from './playerStore'
+import { useImageRevealStore } from './imageRevealStore'
 
 interface WriteathonState {
   config: WriteathonConfig | null
   milestones: WriteathonMilestone[]
   villagerQuests: BoardQuest[]
+  activeBoardQuests: BoardQuest[]
   dailyQuestAccepted: boolean
   _hasHydrated: boolean
 
@@ -18,6 +20,8 @@ interface WriteathonState {
   completeDailyQuest: (sessionId: string) => void
   addVillagerQuest: (quest: BoardQuest) => void
   removeVillagerQuest: (questId: string) => void
+  acceptBoardQuest: (quest: BoardQuest, sessionId: string) => void
+  completeBoardQuest: (questId: string) => void
   resetWriteathon: () => void
 
   getCurrentBlock: () => number
@@ -45,6 +49,7 @@ export const useWriteathonStore = create<WriteathonState>()(
       config: null,
       milestones: [],
       villagerQuests: [],
+      activeBoardQuests: [],
       dailyQuestAccepted: false,
       _hasHydrated: false,
 
@@ -119,8 +124,37 @@ export const useWriteathonStore = create<WriteathonState>()(
         }))
       },
 
+      acceptBoardQuest: (quest: BoardQuest, sessionId: string) => {
+        const accepted: BoardQuest = {
+          ...quest,
+          accepted: true,
+          acceptedAt: new Date().toISOString(),
+          imageRevealSessionId: sessionId,
+        }
+        set((state) => ({
+          activeBoardQuests: [
+            ...state.activeBoardQuests.filter((q) => q.id !== quest.id),
+            accepted,
+          ],
+        }))
+      },
+
+      completeBoardQuest: (questId: string) => {
+        const { activeBoardQuests } = get()
+        const quest = activeBoardQuests.find((q) => q.id === questId)
+        if (!quest) return
+
+        set((state) => ({
+          activeBoardQuests: state.activeBoardQuests.filter((q) => q.id !== questId),
+        }))
+
+        const reward = quest.coinReward + (quest.bonusCoins ?? 0)
+        usePlayerStore.getState().addCoins(reward)
+        console.info(`[writeathonStore] Board quest completed: "${quest.title}" (+${reward} coins)`)
+      },
+
       resetWriteathon: () => {
-        set({ config: null, milestones: [], villagerQuests: [], dailyQuestAccepted: false })
+        set({ config: null, milestones: [], villagerQuests: [], activeBoardQuests: [], dailyQuestAccepted: false })
       },
 
       getCurrentBlock: () => {
@@ -162,6 +196,7 @@ export const useWriteathonStore = create<WriteathonState>()(
           config: state.config,
           milestones: state.milestones,
           villagerQuests: state.villagerQuests,
+          activeBoardQuests: state.activeBoardQuests,
           dailyQuestAccepted: state.dailyQuestAccepted,
         }) as unknown as WriteathonState,
       onRehydrateStorage: () => (state, error) => {
@@ -175,3 +210,17 @@ export const useWriteathonStore = create<WriteathonState>()(
     }
   )
 )
+
+// Auto-complete board quests when their linked image reveal session completes
+useImageRevealStore.subscribe((state, prevState) => {
+  const prevActiveIds = new Set(prevState.activeSessions.map((s) => s.id))
+  const currCompletedIds = new Set(state.completedSessions.map((s) => s.id))
+  const justCompleted = [...currCompletedIds].filter((id) => prevActiveIds.has(id))
+  if (justCompleted.length === 0) return
+
+  const { activeBoardQuests, completeBoardQuest } = useWriteathonStore.getState()
+  for (const sessionId of justCompleted) {
+    const quest = activeBoardQuests.find((q) => q.imageRevealSessionId === sessionId)
+    if (quest) completeBoardQuest(quest.id)
+  }
+})

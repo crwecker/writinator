@@ -28,6 +28,7 @@ interface ImageRevealState {
   pauseStartedAt: number | null
   activeEffects: ActiveEffect[]
 
+  // Returns the new session ID, or empty string if the session could not be started (e.g., capacity limit reached).
   startSession: (
     imageUrl: string,
     imageWidth: number,
@@ -37,7 +38,7 @@ interface ImageRevealState {
     photographerUrl?: string,
     unsplashId?: string,
     timeMinutes?: number,
-  ) => void
+  ) => string
   addWords: (count: number) => void
   tickTimer: () => void
   pauseTimer: () => void
@@ -86,11 +87,11 @@ export const useImageRevealStore = create<ImageRevealState>()(
         timeMinutes?: number,
       ) => {
         const { activeSessions } = get()
-        if (activeSessions.length >= 25) return
+        if (activeSessions.length >= 25) return ''
 
         // Reject if a timed session already exists and we're trying to add another
         if (timeMinutes !== undefined && activeSessions.some((s) => s.timeMinutes !== undefined)) {
-          return
+          return ''
         }
 
         let adjustedTimeMinutes: number | undefined
@@ -100,8 +101,9 @@ export const useImageRevealStore = create<ImageRevealState>()(
           adjustedTimeMinutes = timeMinutes * (1 + armorTimeBonus)
         }
 
+        const id = crypto.randomUUID()
         const newSession: ImageRevealSession = {
-          id: crypto.randomUUID(),
+          id,
           unsplashId,
           imageUrl,
           imageWidth,
@@ -117,6 +119,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
             : {}),
         }
         set({ activeSessions: [...activeSessions, newSession] })
+        return id
       },
 
       addWords: (count: number) => {

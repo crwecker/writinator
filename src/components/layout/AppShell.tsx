@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins, Shield } from 'lucide-react'
+import { Coins, ScrollText } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -16,6 +16,7 @@ import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
 import { StyleEditor } from '../editor/StyleEditor'
 import { QuestPicker } from '../quests/QuestPicker'
+import { QuestBoard } from '../quests/QuestBoard'
 import { ShopModal } from '../quests/ShopModal'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
@@ -24,6 +25,8 @@ import { SubDocumentLinks } from '../editor/SubDocumentLinks'
 import { LandingPage } from './LandingPage'
 import { RewardToast } from '../quests/RewardToast'
 import { usePlayerStore } from '../../stores/playerStore'
+import { useWriteathonStore } from '../../stores/writeathonStore'
+import { countWords } from '../../lib/words'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -33,8 +36,11 @@ export function AppShell() {
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
   const [shopOpen, setShopOpen] = useState(false)
+  const [boardOpen, setBoardOpen] = useState(false)
   const [coinPulsing, setCoinPulsing] = useState(false)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
+  const writeathonConfig = useWriteathonStore((s) => s.config)
+  const activeBoardQuests = useWriteathonStore((s) => s.activeBoardQuests)
   const coins = usePlayerStore((s) => s.coins)
   const retroactiveGrantApplied = usePlayerStore((s) => s.retroactiveGrantApplied)
   const prevCoinsRef = useRef(coins)
@@ -42,6 +48,12 @@ export function AppShell() {
   const book = useDocumentStore((s) => s.book)
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
   const hasHydrated = useDocumentStore((s) => s.hasHydrated)
+  const renameBook = useDocumentStore((s) => s.renameBook)
+  const renameDocument = useDocumentStore((s) => s.renameDocument)
+  const bookWordCount = useMemo(
+    () => book?.documents.reduce((sum, doc) => sum + countWords(doc.content), 0) ?? 0,
+    [book?.documents],
+  )
   const distractionFree = useEditorStore((s) => s.distractionFree)
   const toggleDistractionFree = useEditorStore((s) => s.toggleDistractionFree)
   const renderMode = useEditorStore((s) => s.renderMode)
@@ -50,6 +62,37 @@ export function AppShell() {
   const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
 
   const activeDocument = book?.documents?.find((doc) => doc.id === activeDocumentId)
+
+  const [editingBookTitle, setEditingBookTitle] = useState(false)
+  const [bookTitleValue, setBookTitleValue] = useState('')
+  const [editingDocTitle, setEditingDocTitle] = useState(false)
+  const [docTitleValue, setDocTitleValue] = useState('')
+
+  const startEditingBookTitle = useCallback(() => {
+    if (!book) return
+    setBookTitleValue(book.title)
+    setEditingBookTitle(true)
+  }, [book])
+
+  const commitBookTitle = useCallback(() => {
+    const trimmed = bookTitleValue.trim()
+    if (trimmed && trimmed !== book?.title) renameBook(trimmed)
+    setEditingBookTitle(false)
+  }, [bookTitleValue, book?.title, renameBook])
+
+  const startEditingDocTitle = useCallback(() => {
+    if (!activeDocument) return
+    setDocTitleValue(activeDocument.name)
+    setEditingDocTitle(true)
+  }, [activeDocument])
+
+  const commitDocTitle = useCallback(() => {
+    const trimmed = docTitleValue.trim()
+    if (trimmed && activeDocumentId && trimmed !== activeDocument?.name) {
+      renameDocument(activeDocumentId, trimmed)
+    }
+    setEditingDocTitle(false)
+  }, [docTitleValue, activeDocumentId, activeDocument?.name, renameDocument])
 
   const handleWordCountChange = useCallback((c: number) => setWordCount(c), [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
@@ -155,10 +198,6 @@ export function AppShell() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const titleText = book
-    ? `${book.title}${activeDocument ? ` - ${activeDocument.name}` : ''}`
-    : 'Writinator'
-
   const showSidebar = sidebarOpen && !distractionFree
 
   if (!hasHydrated) return null
@@ -171,14 +210,62 @@ export function AppShell() {
       {/* Top bar — hidden in distraction-free mode */}
       {!distractionFree && (
         <div className="flex items-center justify-between border-b border-gray-700 bg-bg-dark px-4 py-1.5 text-sm shrink-0">
-          <button
-            onClick={toggleSidebar}
-            className="text-gray-200 hover:text-white font-medium truncate max-w-md text-left"
-            title="Toggle sidebar (Ctrl+B)"
-          >
-            {titleText}
-            <span className="ml-1.5 text-gray-500 text-xs">{sidebarOpen ? '\u25C0' : '\u25B6'}</span>
-          </button>
+          <div className="flex items-center gap-1.5 min-w-0 max-w-md">
+            <button
+              onClick={toggleSidebar}
+              className={`text-gray-400 text-xs transition-transform shrink-0 ${sidebarOpen ? 'rotate-90' : ''}`}
+              title="Toggle sidebar (Ctrl+B)"
+            >
+              &#9657;
+            </button>
+            {editingBookTitle ? (
+              <input
+                autoFocus
+                className="bg-gray-800 border border-blue-300 rounded px-1 py-0 text-sm text-white font-semibold outline-none"
+                value={bookTitleValue}
+                onChange={(e) => setBookTitleValue(e.target.value)}
+                onBlur={commitBookTitle}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitBookTitle()
+                  if (e.key === 'Escape') setEditingBookTitle(false)
+                }}
+              />
+            ) : (
+              <span
+                className="text-gray-200 font-semibold truncate cursor-default"
+                onDoubleClick={startEditingBookTitle}
+                title="Double-click to rename book"
+              >
+                {book?.title ?? 'Writinator'}
+              </span>
+            )}
+            {activeDocument && (
+              <>
+                <span className="text-gray-600 shrink-0">—</span>
+                {editingDocTitle ? (
+                  <input
+                    autoFocus
+                    className="bg-gray-800 border border-blue-300 rounded px-1 py-0 text-sm text-white font-medium outline-none"
+                    value={docTitleValue}
+                    onChange={(e) => setDocTitleValue(e.target.value)}
+                    onBlur={commitDocTitle}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitDocTitle()
+                      if (e.key === 'Escape') setEditingDocTitle(false)
+                    }}
+                  />
+                ) : (
+                  <span
+                    className="text-gray-400 font-medium truncate cursor-default"
+                    onDoubleClick={startEditingDocTitle}
+                    title="Double-click to rename document"
+                  >
+                    {activeDocument.name}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
 
           <div className="flex items-center gap-1">
             <ExportMenu />
@@ -224,6 +311,10 @@ export function AppShell() {
             open={shopOpen}
             onClose={() => setShopOpen(false)}
           />
+          <QuestBoard
+            open={boardOpen}
+            onClose={() => setBoardOpen(false)}
+          />
         </div>
       </div>
 
@@ -231,6 +322,8 @@ export function AppShell() {
       <div className={`flex items-center justify-between border-t border-gray-700 bg-bg-dark px-4 py-1 text-xs shrink-0 ${distractionFree ? 'opacity-20 hover:opacity-60 transition-opacity' : ''}`}>
         <span className="text-gray-500 tabular-nums">
           {wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}
+          <span className="mx-1.5 text-gray-600">|</span>
+          {bookWordCount.toLocaleString()} book
         </span>
         <div className="flex items-center gap-3">
           <button
@@ -247,9 +340,10 @@ export function AppShell() {
           >
             {renderMode === 'source' ? 'Source' : 'Rendered'}
           </button>
-          <span
-            className="flex items-center gap-1 text-amber-400 tabular-nums"
-            title="Coin balance"
+          <button
+            onClick={() => setShopOpen(true)}
+            className="flex items-center gap-1 text-amber-400 hover:text-amber-300 tabular-nums transition-colors"
+            title="Shop"
           >
             <Coins
               size={12}
@@ -258,13 +352,18 @@ export function AppShell() {
             <span className={`tabular-nums${coinPulsing ? ' animate-coin-pulse' : ''}`}>
               {coins.toLocaleString()}
             </span>
-          </span>
+          </button>
           <button
-            onClick={() => setShopOpen(true)}
-            className="text-gray-500 hover:text-gray-300 transition-colors"
-            title="Shop"
+            onClick={() => setBoardOpen(true)}
+            className={`flex items-center gap-1 transition-colors ${
+              writeathonConfig?.active || activeBoardQuests.length > 0
+                ? 'text-amber-500 hover:text-amber-400'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+            title="Quest Board"
           >
-            <Shield size={14} />
+            <ScrollText size={12} />
+            Board
           </button>
           <button
             onClick={() => setQuestPickerOpen(true)}
