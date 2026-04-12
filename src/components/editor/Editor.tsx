@@ -462,6 +462,69 @@ function kjExitInsertMode(): Extension {
   })
 }
 
+// Extract opening+closing tag from HTML markup string.
+// Given `<span class="System Message">anything</span>`, returns { open, close }.
+function extractTagWrap(markup: string): { open: string; close: string } | null {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(markup, 'text/html')
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
+  while (walker.nextNode()) {
+    const el = walker.currentNode as Element
+    if (el.getAttribute('class') || el.getAttribute('style')) {
+      const tag = el.tagName.toLowerCase()
+      const attrs = Array.from(el.attributes)
+        .map((a) => `${a.name}="${a.value}"`)
+        .join(' ')
+      return { open: `<${tag} ${attrs}>`, close: `</${tag}>` }
+    }
+  }
+  return null
+}
+
+// Paste Style: read clipboard, extract the wrapping tag(s),
+// and apply them around the current selection.
+async function pasteStyle(view: EditorView): Promise<boolean> {
+  try {
+    const clipText = await navigator.clipboard.readText()
+
+    // First try: treat the clipboard plain text itself as HTML markup
+    // (covers copying `<span class="X">text</span>` from the editor)
+    const tagMatch = clipText.match(/^<[a-z][^>]*(?:class|style)=[^>]*>/i)
+    let wrap: { open: string; close: string } | null = null
+
+    if (tagMatch) {
+      wrap = extractTagWrap(clipText)
+    }
+
+    // Fallback: check the text/html clipboard representation
+    if (!wrap) {
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        if (item.types.includes('text/html')) {
+          const blob = await item.getType('text/html')
+          const html = await blob.text()
+          wrap = extractTagWrap(html)
+          break
+        }
+      }
+    }
+
+    if (!wrap) return false
+
+    const { from, to } = view.state.selection.main
+    const selected = view.state.sliceDoc(from, to)
+    const wrapped = `${wrap.open}${selected}${wrap.close}`
+
+    view.dispatch({
+      changes: { from, to, insert: wrapped },
+      selection: { anchor: from + wrapped.length },
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
 // Typewriter mode: scrolls cursor line to vertical center on every update
 function typewriterScroll(): Extension {
   return EditorView.updateListener.of((update) => {
@@ -558,7 +621,12 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         drawSelection(),
         kjExitInsertMode(),
         history(),
-        keymap.of([...defaultKeymap, ...historyKeymap]),
+        keymap.of([
+          { key: 'Ctrl-Shift-v', run: (view) => { void pasteStyle(view); return true }, preventDefault: true },
+          { key: 'Meta-Shift-v', run: (view) => { void pasteStyle(view); return true }, preventDefault: true },
+          ...defaultKeymap,
+          ...historyKeymap,
+        ]),
         markdown(),
         oneDark,
         renderModeField,
