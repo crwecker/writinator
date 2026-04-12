@@ -90,6 +90,28 @@
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* Stat-marker dot widget (rendered in place of `<!-- stat:uuid -->`) */
+.cm-stat-marker-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin: 0 2px;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35) inset;
+}
+
+.cm-stat-marker-dot:hover {
+  outline: 2px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 1px;
+}
+
+.cm-stat-marker-dot:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
 /* Typewriter mode */
 .typewriter-mode .cm-scroller {
   /* Padding to allow cursor to center when near top/bottom of document */

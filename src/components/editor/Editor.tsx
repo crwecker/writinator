@@ -7,7 +7,12 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import { vim, getCM as getVimCM, Vim } from '@replit/codemirror-vim'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useEditorStore } from '../../stores/editorStore'
+import { useCharacterStore } from '../../stores/characterStore'
 import { htmlToMarkdownWithStyles } from '../../lib/richPaste'
+import {
+  statMarkerExtension,
+  dispatchCharacterSnapshot,
+} from './statMarkerExtension'
 import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
 import './editor.css'
@@ -563,6 +568,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         oneDark,
         renderModeField,
         markdownDecorationPlugin,
+        statMarkerExtension(),
         placeholder('Start writing...'),
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
@@ -743,6 +749,40 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (!view) return
     view.dispatch({ effects: setRenderModeEffect.of(renderMode) })
   }, [renderMode])
+
+  // Sync character store → CM6 snapshot so stat-marker dots refresh on store
+  // changes. Dispatches once on mount + any time `characters` or `markers`
+  // reference-changes in the Zustand store.
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const initial = useCharacterStore.getState()
+    dispatchCharacterSnapshot(view, {
+      characters: initial.characters,
+      markers: initial.markers,
+    })
+    const unsubscribe = useCharacterStore.subscribe((state, prev) => {
+      if (
+        state.characters === prev.characters &&
+        state.markers === prev.markers
+      ) {
+        return
+      }
+      const v = viewRef.current
+      if (!v) return
+      dispatchCharacterSnapshot(v, {
+        characters: state.characters,
+        markers: state.markers,
+      })
+    })
+    // Dev-only: expose the character store on window so Puppeteer QA can seed
+    // markers without shipping a public API.
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __characterStore?: typeof useCharacterStore }).__characterStore =
+        useCharacterStore
+    }
+    return unsubscribe
+  }, [])
 
   // Toggle typewriter mode
   useEffect(() => {
