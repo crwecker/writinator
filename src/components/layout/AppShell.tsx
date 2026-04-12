@@ -20,6 +20,7 @@ import { QuestBoard } from '../quests/QuestBoard'
 import { ShopModal } from '../quests/ShopModal'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
+import { CharacterSheetModal } from '../characters/CharacterSheetModal'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { SubDocumentLinks } from '../editor/SubDocumentLinks'
 import { LandingPage } from './LandingPage'
@@ -37,6 +38,7 @@ export function AppShell() {
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
   const [shopOpen, setShopOpen] = useState(false)
   const [boardOpen, setBoardOpen] = useState(false)
+  const [characterSheetOpen, setCharacterSheetOpen] = useState(false)
   const [coinPulsing, setCoinPulsing] = useState(false)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
   const writeathonConfig = useWriteathonStore((s) => s.config)
@@ -315,6 +317,10 @@ export function AppShell() {
             open={boardOpen}
             onClose={() => setBoardOpen(false)}
           />
+          <CharacterSheetModal
+            open={characterSheetOpen}
+            onClose={() => setCharacterSheetOpen(false)}
+          />
         </div>
       </div>
 
@@ -332,6 +338,14 @@ export function AppShell() {
             title="Document styles"
           >
             Styles
+          </button>
+          <button
+            data-testid="characters-button"
+            onClick={() => setCharacterSheetOpen((p) => !p)}
+            className="text-gray-500 hover:text-gray-300 transition-colors"
+            title="Characters"
+          >
+            Characters
           </button>
           <button
             onClick={toggleRenderMode}
