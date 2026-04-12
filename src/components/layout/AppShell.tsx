@@ -28,6 +28,7 @@ import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords } from '../../lib/words'
 import { JourneyBar } from './JourneyBar'
+import { DailyTarget } from './DailyTarget'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -328,6 +329,8 @@ export function AppShell() {
           <span className="mx-1.5 text-gray-600">|</span>
           {bookWordCount.toLocaleString()} book
         </span>
+        <span className="mx-1.5 text-gray-600">|</span>
+        <DailyTarget bookWordCount={bookWordCount} />
         <div className="flex items-center gap-3">
           <button
             onClick={() => setStyleEditorOpen((p) => !p)}
