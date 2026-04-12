@@ -27,6 +27,7 @@ import { RewardToast } from '../quests/RewardToast'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords } from '../../lib/words'
+import { JourneyBar } from './JourneyBar'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -317,6 +318,8 @@ export function AppShell() {
           />
         </div>
       </div>
+
+      <JourneyBar bookWordCount={bookWordCount} />
 
       {/* Bottom bar — minimal in distraction-free mode */}
       <div className={`flex items-center justify-between border-t border-gray-700 bg-bg-dark px-4 py-1 text-xs shrink-0 ${distractionFree ? 'opacity-20 hover:opacity-60 transition-opacity' : ''}`}>
