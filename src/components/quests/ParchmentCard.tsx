@@ -29,7 +29,7 @@ export function ParchmentCard({
     variant === 'daily'
       ? 'bg-amber-50 text-amber-900 border-4 border-amber-500 shadow-amber-500/30 shadow-lg w-full'
       : variant === 'villager'
-        ? 'bg-yellow-50 text-amber-900 border-dashed border-amber-700'
+        ? 'bg-amber-100/70 text-amber-950 border-dashed border-amber-900/50 opacity-90 shadow-inner'
         : 'bg-amber-50 text-amber-900 border-amber-700'
 
   const hoverClass =

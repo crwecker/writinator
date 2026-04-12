@@ -4,13 +4,14 @@ import { usePlayerStore } from '../../stores/playerStore'
 import { getItemsByCategory } from '../../lib/items'
 import type { Item, WeaponItem, ArmorItem, ConsumableItem, ItemCategory, ItemRarity } from '../../types'
 import { EquipmentPanel } from './EquipmentPanel'
+import PostRequestTab from './PostRequestTab'
 
 interface Props {
   open: boolean
   onClose: () => void
 }
 
-type ShopTab = 'equipment' | 'weapon' | 'armor' | 'consumable'
+type ShopTab = 'equipment' | 'weapon' | 'armor' | 'consumable' | 'request'
 
 function rarityBorderClass(rarity: ItemRarity): string {
   switch (rarity) {
@@ -308,6 +309,7 @@ export function ShopModal({ open, onClose }: Props) {
     { id: 'weapon', label: 'Weapons' },
     { id: 'armor', label: 'Armor' },
     { id: 'consumable', label: 'Consumables' },
+    { id: 'request', label: 'Post a Request' },
   ]
 
   return (
@@ -354,6 +356,8 @@ export function ShopModal({ open, onClose }: Props) {
         <div className="flex-1 overflow-y-auto p-4">
           {activeTab === 'equipment' ? (
             <EquipmentPanel />
+          ) : activeTab === 'request' ? (
+            <PostRequestTab />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {tabItems.map((item) => (
