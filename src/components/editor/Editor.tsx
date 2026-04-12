@@ -7,7 +7,16 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import { vim, getCM as getVimCM, Vim } from '@replit/codemirror-vim'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useEditorStore } from '../../stores/editorStore'
+import { useCharacterStore } from '../../stores/characterStore'
 import { htmlToMarkdownWithStyles } from '../../lib/richPaste'
+import {
+  statMarkerExtension,
+  dispatchCharacterSnapshot,
+} from './statMarkerExtension'
+import {
+  statblockMarkerExtension,
+  dispatchStatblockActiveDocument,
+} from './statblockMarkerExtension'
 import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
 import './editor.css'
@@ -631,6 +640,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         oneDark,
         renderModeField,
         markdownDecorationPlugin,
+        statMarkerExtension(),
+        statblockMarkerExtension(),
         placeholder('Start writing...'),
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
@@ -738,6 +749,11 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
               updateContent(text)
             })
           }
+          if (update.selectionSet || update.docChanged) {
+            const head = update.state.selection.main.head
+            // setCursorOffset short-circuits if the value hasn't changed.
+            useEditorStore.getState().setCursorOffset(head)
+          }
         }),
       ],
     })
@@ -745,6 +761,9 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const view = new EditorView({ state, parent: containerRef.current })
     viewRef.current = view
     callbacksRef.current.onEditorView?.(view)
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __editorView?: EditorView }).__editorView = view
+    }
 
     // Load initial document content
     const store = useDocumentStore.getState()
@@ -787,6 +806,10 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
 
   useEffect(() => {
     loadDocument()
+    const view = viewRef.current
+    if (view) {
+      dispatchStatblockActiveDocument(view, activeDocumentId ?? '')
+    }
   }, [activeDocumentId, loadDocument])
 
   // Update font family
@@ -811,6 +834,73 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (!view) return
     view.dispatch({ effects: setRenderModeEffect.of(renderMode) })
   }, [renderMode])
+
+  // Sync character store → CM6 snapshot so stat-marker dots refresh on store
+  // changes. Dispatches once on mount + any time `characters` or `markers`
+  // reference-changes in the Zustand store.
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const initial = useCharacterStore.getState()
+    dispatchCharacterSnapshot(view, {
+      characters: initial.characters,
+      markers: initial.markers,
+    })
+    const unsubscribe = useCharacterStore.subscribe((state, prev) => {
+      if (
+        state.characters === prev.characters &&
+        state.markers === prev.markers
+      ) {
+        return
+      }
+      const v = viewRef.current
+      if (!v) return
+      dispatchCharacterSnapshot(v, {
+        characters: state.characters,
+        markers: state.markers,
+      })
+    })
+    // Dev-only: expose the character store on window so Puppeteer QA can seed
+    // markers without shipping a public API.
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __characterStore?: typeof useCharacterStore }).__characterStore =
+        useCharacterStore
+      ;(window as unknown as { __documentStore?: typeof useDocumentStore }).__documentStore =
+        useDocumentStore
+      // Expose an in-memory markdown renderer so QA can inspect export output
+      // without triggering a file download.
+      import('../../lib/export').then((mod) => {
+        ;(window as unknown as {
+          __renderBookAsMarkdown?: typeof mod.renderBookAsMarkdown
+        }).__renderBookAsMarkdown = mod.renderBookAsMarkdown
+        ;(window as unknown as {
+          __exportSmokeTest?: () => {
+            ok: boolean
+            markerCount: number
+            statblockCount: number
+            length: number
+            preview: string
+          }
+        }).__exportSmokeTest = () => {
+          const book = useDocumentStore.getState().book
+          if (!book) {
+            return { ok: false, markerCount: 0, statblockCount: 0, length: 0, preview: '(no book)' }
+          }
+          const out = mod.renderBookAsMarkdown(book)
+          const markerCount = (out.match(/<!--\s*stat:/g) ?? []).length
+          const statblockCount = (out.match(/<!--\s*statblock:/g) ?? []).length
+          return {
+            ok: markerCount === 0,
+            markerCount,
+            statblockCount,
+            length: out.length,
+            preview: out.slice(0, 400),
+          }
+        }
+      })
+    }
+    return unsubscribe
+  }, [])
 
   // Toggle typewriter mode
   useEffect(() => {

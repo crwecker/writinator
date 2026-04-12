@@ -2,6 +2,7 @@ import type { Book, GlobalSettings, WritinatorFile } from '../types'
 import { migrateFile } from './migration'
 import { getAllSnapshots } from '../stores/snapshotStore'
 import { useRecentFilesStore } from '../stores/recentFilesStore'
+import { useCharacterStore } from '../stores/characterStore'
 
 const FILE_EXTENSION = '.writinator'
 const MIME_TYPE = 'application/json'
@@ -25,7 +26,15 @@ export async function saveFile(
   globalSettings: GlobalSettings
 ): Promise<void> {
   const snapshots = await getAllSnapshots()
-  const file: WritinatorFile = { version: 2, book, snapshots, globalSettings }
+  const { characters, markers } = useCharacterStore.getState()
+  const file: WritinatorFile = {
+    version: 3,
+    book,
+    snapshots,
+    globalSettings,
+    characters,
+    markers,
+  }
   const json = JSON.stringify(file, null, 2)
 
   if (supportsFileSystemAccess()) {
@@ -42,7 +51,15 @@ export async function quickSave(
   if (!storedFileHandle) return false
 
   const snapshots = await getAllSnapshots()
-  const file: WritinatorFile = { version: 2, book, snapshots, globalSettings }
+  const { characters, markers } = useCharacterStore.getState()
+  const file: WritinatorFile = {
+    version: 3,
+    book,
+    snapshots,
+    globalSettings,
+    characters,
+    markers,
+  }
   const json = JSON.stringify(file, null, 2)
 
   const writable = await storedFileHandle.createWritable()

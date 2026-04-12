@@ -1,7 +1,23 @@
-import type { Book, Document } from '../types'
+import type {
+  ActiveBuff,
+  Book,
+  Character,
+  CharacterState,
+  Document,
+  EquippedItem,
+  StatDelta,
+  StatDefinition,
+  StatValue,
+} from '../types'
 import type { Root, Content, PhrasingContent } from 'mdast'
 import JSZip from 'jszip'
 import { parseMarkdown } from './ast'
+import { useCharacterStore } from '../stores/characterStore'
+import { computeStateAt } from './characterState'
+import {
+  STAT_MARKER_REGEX,
+  STATBLOCK_MARKER_REGEX,
+} from './markerUtils'
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -14,6 +30,230 @@ function sanitizeFilename(name: string): string {
  *  them to styled elements. */
 function stripPasteArtifacts(content: string): string {
   return content.replace(/\{align:(\w+)\}\s*/g, '<!--align:$1-->')
+}
+
+// ─── Character marker processing ────────────────────────
+
+export type StatblockExportFormat = 'markdown' | 'html' | 'docx' | 'epub' | 'plain'
+
+function parseStatblockOptions(raw: string | undefined): Record<string, string> {
+  if (!raw) return {}
+  const out: Record<string, string> = {}
+  for (const pair of raw.split(',')) {
+    const trimmed = pair.trim()
+    if (!trimmed) continue
+    const eq = trimmed.indexOf('=')
+    if (eq === -1) {
+      out[trimmed] = ''
+    } else {
+      out[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+    }
+  }
+  return out
+}
+
+function formatStatValueForExport(v: StatValue): string {
+  switch (v.kind) {
+    case 'number':
+      return String(v.value)
+    case 'numberWithMax':
+      return `${v.value}/${v.max}`
+    case 'text':
+      return v.value || '—'
+    case 'list':
+      return v.items.length === 0 ? '(none)' : v.items.join(', ')
+    case 'attributeSet':
+      return Object.entries(v.values)
+        .map(([k, n]) => `${k} ${n}`)
+        .join(' • ')
+    case 'rank':
+      return v.tier
+  }
+}
+
+const DEFAULT_STATBLOCK_FIELD_KEYS = ['hp', 'mp', 'level', 'xp', 'attributes']
+
+function resolveStatblockDefinitions(
+  character: Character,
+  fields: string[] | undefined
+): StatDefinition[] {
+  const wanted = fields && fields.length > 0 ? fields : DEFAULT_STATBLOCK_FIELD_KEYS
+  const byId = new Map(character.stats.map((s) => [s.id, s]))
+  const byName = new Map(character.stats.map((s) => [s.name.toLowerCase(), s]))
+  const resolved: StatDefinition[] = []
+  const seen = new Set<string>()
+  for (const key of wanted) {
+    const def = byId.get(key) ?? byName.get(key.toLowerCase())
+    if (def && !seen.has(def.id)) {
+      resolved.push(def)
+      seen.add(def.id)
+    }
+  }
+  if (resolved.length === 0) {
+    for (const def of character.stats) {
+      if (!seen.has(def.id)) {
+        resolved.push(def)
+        seen.add(def.id)
+      }
+    }
+  }
+  return resolved
+}
+
+/**
+ * Render a statblock as format-appropriate text. Returns the rendered text
+ * that will replace the `<!-- statblock:... -->` marker in document content.
+ */
+export function renderStatblockText(
+  character: Character,
+  state: CharacterState,
+  effective: Record<string, StatValue>,
+  fields: string[] | undefined,
+  format: StatblockExportFormat
+): string {
+  const defs = resolveStatblockDefinitions(character, fields)
+  const lines: Array<{ label: string; value: string }> = []
+  for (const def of defs) {
+    const v = effective[def.id]
+    if (!v) continue
+    lines.push({ label: def.name, value: formatStatValueForExport(v) })
+  }
+  const equippedEntries: [string, EquippedItem][] = Object.entries(state.equipped)
+  const buffs: ActiveBuff[] = state.activeBuffs
+
+  if (format === 'markdown' || format === 'plain') {
+    const parts: string[] = []
+    parts.push(`> **${character.name} — Status**`)
+    for (const l of lines) {
+      parts.push(`> ${l.label}: ${l.value}`)
+    }
+    if (equippedEntries.length > 0) {
+      parts.push(
+        `> Equipped: ${equippedEntries
+          .map(([slot, it]) => `${slot}: ${it.itemName ?? it.itemId}`)
+          .join('; ')}`
+      )
+    }
+    if (buffs.length > 0) {
+      parts.push(
+        `> Buffs: ${buffs.map((b) => b.buffName ?? b.buffId).join(', ')}`
+      )
+    }
+    return parts.join('\n')
+  }
+
+  // HTML / DOCX / EPUB — render as a styled <div>. DOCX/EPUB may strip styles
+  // but the plain text will still be readable.
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const rowsHtml = lines
+    .map(
+      (l) =>
+        `<div><span style="color:#888;text-transform:uppercase;font-size:11px;letter-spacing:0.05em;">${esc(
+          l.label
+        )}:</span> <span style="font-family:monospace;">${esc(l.value)}</span></div>`
+    )
+    .join('')
+  const equippedHtml =
+    equippedEntries.length > 0
+      ? `<div style="margin-top:6px;font-size:12px;color:#888;">Equipped: ${equippedEntries
+          .map(([slot, it]) => esc(`${slot}: ${it.itemName ?? it.itemId}`))
+          .join('; ')}</div>`
+      : ''
+  const buffsHtml =
+    buffs.length > 0
+      ? `<div style="margin-top:4px;font-size:12px;color:#888;">Buffs: ${buffs
+          .map((b) => esc(b.buffName ?? b.buffId))
+          .join(', ')}</div>`
+      : ''
+  return `<div class="writinator-statblock" style="border:1px solid #444;border-radius:6px;padding:10px 14px;margin:12px 0;background:#f5f5f5;"><div style="font-weight:600;margin-bottom:6px;">${esc(
+    character.name
+  )} — Status</div>${rowsHtml}${equippedHtml}${buffsHtml}</div>`
+}
+
+interface CharacterMarkerContext {
+  book: Book
+  documentId: string
+  characters: Character[]
+  markers: Record<string, StatDelta[]>
+}
+
+function getCharacterMarkerContext(
+  book: Book,
+  documentId: string
+): CharacterMarkerContext {
+  const store = useCharacterStore.getState()
+  return {
+    book,
+    documentId,
+    characters: store.characters,
+    markers: store.markers,
+  }
+}
+
+/**
+ * Remove stat-delta markers (`<!-- stat:uuid -->`) and replace statblock
+ * markers (`<!-- statblock:characterId[:fields=...] -->`) with format-specific
+ * rendered text. Operates on raw document content before any markdown parsing.
+ */
+function processCharacterMarkers(
+  content: string,
+  ctx: CharacterMarkerContext,
+  format: StatblockExportFormat,
+  options?: { preserveStatMarkers?: boolean }
+): string {
+  if (!content) return content
+  let out = content
+
+  // 1) Strip stat-delta markers (unless MD preserve flag is set).
+  if (!options?.preserveStatMarkers) {
+    out = out.replace(new RegExp(STAT_MARKER_REGEX.source, 'g'), '')
+  }
+
+  // 2) Replace statblock markers with rendered blocks.
+  out = out.replace(
+    new RegExp(STATBLOCK_MARKER_REGEX.source, 'g'),
+    (_match, charId: string, rawOptions: string | undefined, matchOffset: number) => {
+      // matchOffset from replace is the 3rd param when using a regex with groups,
+      // but the signature is (match, ...groups, offset, string). To be safe,
+      // rely on index lookup via the original content. Use indexOf fallback.
+      const actualOffset = typeof matchOffset === 'number' ? matchOffset : out.indexOf(_match)
+      const character = ctx.characters.find((c) => c.id === charId)
+      if (!character) {
+        if (format === 'markdown' || format === 'plain') {
+          return `> *[missing character: ${charId}]*`
+        }
+        return `<div class="writinator-statblock-missing">[missing character: ${charId}]</div>`
+      }
+      const opts = parseStatblockOptions(rawOptions)
+      const fieldsRaw = opts.fields
+      const fields = fieldsRaw
+        ? fieldsRaw
+            .split('|')
+            .flatMap((s) => s.split(','))
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined
+      const computed = computeStateAt(character, ctx.book, ctx.markers, {
+        documentId: ctx.documentId,
+        offset: actualOffset,
+      })
+      const rendered = renderStatblockText(
+        character,
+        computed.state,
+        computed.effective,
+        fields,
+        format
+      )
+      // Bracket with blank lines so it becomes its own block in markdown/html.
+      if (format === 'markdown' || format === 'plain') {
+        return `\n\n${rendered}\n\n`
+      }
+      return `\n\n${rendered}\n\n`
+    }
+  )
+
+  return out
 }
 
 /** Preprocess content for EPUB: convert styled HTML spans to semantic markup,
@@ -67,14 +307,20 @@ function getDepth(document: Document, documents: Document[]): number {
 }
 
 /** Get the full book as a single markdown string with document headings */
-function bookToMarkdown(book: Book): string {
+function bookToMarkdown(
+  book: Book,
+  options?: { preserveStatMarkers?: boolean }
+): string {
   const parts: string[] = [`# ${book.title}\n`]
   for (const doc of book.documents) {
     const depth = getDepth(doc, book.documents)
     const hashes = '#'.repeat(Math.min(depth + 2, 6))
     parts.push(`${hashes} ${doc.name}\n`)
     if (doc.content) {
-      parts.push(doc.content)
+      const ctx = getCharacterMarkerContext(book, doc.id)
+      parts.push(
+        processCharacterMarkers(doc.content, ctx, 'markdown', options)
+      )
     }
     parts.push('')
   }
@@ -106,8 +352,23 @@ function hasStringValue(node: unknown): node is { value: string } {
 
 // ─── Markdown Export ────────────────────────────────────
 
-export function exportAsMarkdown(book: Book): void {
-  download(bookToMarkdown(book), `${sanitizeFilename(book.title)}.md`, 'text/markdown')
+export function exportAsMarkdown(
+  book: Book,
+  options?: { preserveStatMarkers?: boolean }
+): void {
+  download(
+    bookToMarkdown(book, options),
+    `${sanitizeFilename(book.title)}.md`,
+    'text/markdown'
+  )
+}
+
+/** In-memory variant: returns the Markdown string instead of triggering a download. */
+export function renderBookAsMarkdown(
+  book: Book,
+  options?: { preserveStatMarkers?: boolean }
+): string {
+  return bookToMarkdown(book, options)
 }
 
 // ─── Plain Text Export ──────────────────────────────────
@@ -168,7 +429,9 @@ export function exportAsPlainText(book: Book): void {
     parts.push(`${indent}${doc.name}`)
     parts.push('')
     if (doc.content) {
-      parts.push(astToPlainText(parseMarkdown(stripPasteArtifacts(doc.content))))
+      const ctx = getCharacterMarkerContext(book, doc.id)
+      const processed = processCharacterMarkers(doc.content, ctx, 'plain')
+      parts.push(astToPlainText(parseMarkdown(stripPasteArtifacts(processed))))
     }
   }
   download(parts.join('\n'), `${sanitizeFilename(book.title)}.txt`, 'text/plain')
@@ -234,7 +497,13 @@ export function exportAsHtml(book: Book): void {
       const depth = getDepth(doc, book.documents)
       const level = Math.min(depth + 2, 6)
       const heading = `<h${level}>${escapeHtml(doc.name)}</h${level}>`
-      const content = doc.content ? applyAlignmentMarkers(astToHtml(parseMarkdown(stripPasteArtifacts(doc.content)))) : ''
+      const ctx = getCharacterMarkerContext(book, doc.id)
+      const processed = doc.content
+        ? processCharacterMarkers(doc.content, ctx, 'html')
+        : ''
+      const content = processed
+        ? applyAlignmentMarkers(astToHtml(parseMarkdown(stripPasteArtifacts(processed))))
+        : ''
       return `${heading}\n${content}`
     })
     .join('\n\n')
@@ -347,7 +616,9 @@ export function exportAsRtf(book: Book): void {
     }
     body += `{\\pard\\fs${size}\\b ${rtfEscape(doc.name)}\\b0\\par}\n\\par\n`
     if (doc.content) {
-      body += astToRtf(parseMarkdown(stripPasteArtifacts(doc.content))) + '\n\\par\n'
+      const ctx = getCharacterMarkerContext(book, doc.id)
+      const processed = processCharacterMarkers(doc.content, ctx, 'plain')
+      body += astToRtf(parseMarkdown(stripPasteArtifacts(processed))) + '\n\\par\n'
     }
   }
 
@@ -490,7 +761,9 @@ export async function exportAsDocx(book: Book): Promise<void> {
 
     // Document content
     if (doc.content) {
-      sectionChildren.push(...astToDocxChildren(parseMarkdown(stripPasteArtifacts(doc.content))))
+      const ctx = getCharacterMarkerContext(book, doc.id)
+      const processed = processCharacterMarkers(doc.content, ctx, 'docx')
+      sectionChildren.push(...astToDocxChildren(parseMarkdown(stripPasteArtifacts(processed))))
     }
   }
 
@@ -692,7 +965,9 @@ export async function exportAsPdf(book: Book): Promise<void> {
 
     // Document content
     if (doc.content) {
-      content.push(...astToPdfContent(parseMarkdown(stripPasteArtifacts(doc.content))))
+      const ctx = getCharacterMarkerContext(book, doc.id)
+      const processed = processCharacterMarkers(doc.content, ctx, 'plain')
+      content.push(...astToPdfContent(parseMarkdown(stripPasteArtifacts(processed))))
     }
   }
 
@@ -760,7 +1035,9 @@ export async function exportAsEpub(book: Book): Promise<void> {
 
   function contentToXhtml(doc: Document): string {
     if (!doc.content) return ''
-    const cleaned = preprocessForEpub(doc.content)
+    const ctx = getCharacterMarkerContext(book, doc.id)
+    const processed = processCharacterMarkers(doc.content, ctx, 'epub')
+    const cleaned = preprocessForEpub(processed)
     const tree = parseMarkdown(cleaned)
     // Use standard HTML converters but escape any remaining html AST nodes
     // by temporarily replacing the html passthrough
@@ -912,6 +1189,7 @@ export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Pr
   const rootFolder = zip.folder(sanitizeFilename(book.title))!
 
   const ext = format === 'md' ? '.md' : format === 'txt' ? '.txt' : '.html'
+  const zipFormat: StatblockExportFormat = format === 'md' ? 'markdown' : format === 'txt' ? 'plain' : 'html'
 
   function addDocuments(parentId: string | undefined, folder: JSZip) {
     const children = book.documents.filter(d => d.parentId === parentId)
@@ -923,7 +1201,12 @@ export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Pr
       usedNames.set(name, count + 1)
       if (count > 0) name = `${name} (${count + 1})`
 
-      const content = formatDocumentContent(doc, format)
+      const ctx = getCharacterMarkerContext(book, doc.id)
+      const processedDoc: Document = {
+        ...doc,
+        content: doc.content ? processCharacterMarkers(doc.content, ctx, zipFormat) : '',
+      }
+      const content = formatDocumentContent(processedDoc, format)
       folder.file(name + ext, content)
 
       const hasChildren = book.documents.some(d => d.parentId === doc.id)

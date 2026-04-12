@@ -1,10 +1,47 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useDocumentStore } from '../../stores/documentStore'
+import { useCharacterStore } from '../../stores/characterStore'
 import type { TextStyle, HeadingStyle, NamedStyle } from '../../types'
 
 interface BubbleToolbarProps {
   editorView: EditorView | null
+  onInsertMarker?: (markerId: string) => void
+}
+
+function insertStatMarkerAtSelection(
+  view: EditorView,
+  onInsert: (markerId: string) => void
+) {
+  const { to } = view.state.selection.main
+  const markerId = crypto.randomUUID()
+  const insert = `<!-- stat:${markerId} -->`
+  view.dispatch({ changes: { from: to, to: to, insert } })
+  onInsert(markerId)
+}
+
+/**
+ * Insert a statblock marker on its own line at the end of the current line,
+ * bracketed by newlines so block widgets render cleanly.
+ */
+function insertStatblockMarkerInline(
+  view: EditorView,
+  characterId: string,
+  fields: string[] | undefined
+) {
+  const { from } = view.state.selection.main
+  const line = view.state.doc.lineAt(from)
+  const insertAt = line.to
+  const fieldsSuffix =
+    fields && fields.length > 0 ? `:fields=${fields.join(',')}` : ''
+  const marker = `<!-- statblock:${characterId}${fieldsSuffix} -->`
+  // Ensure newlines bracket the marker so the block widget sits on its own line.
+  const insert = `\n${marker}\n`
+  view.dispatch({
+    changes: { from: insertAt, to: insertAt, insert },
+    selection: { anchor: insertAt + insert.length },
+  })
+  view.focus()
 }
 
 function ToolbarButton({
@@ -398,10 +435,15 @@ function wrapWithSpanClass(view: EditorView, className: string) {
   view.focus()
 }
 
-export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
+export default function BubbleToolbar({ editorView, onInsertMarker }: BubbleToolbarProps) {
   const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
   const namedStyles = documentStyles?.namedStyles
+  const characters = useCharacterStore((s) => s.characters)
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
+  const [statblockPickerOpen, setStatblockPickerOpen] = useState(false)
+  const [pickerCharacterId, setPickerCharacterId] = useState<string>('')
+  const [pickerFields, setPickerFields] = useState<string>('')
+  const pickerRef = useRef<HTMLDivElement | null>(null)
 
   const updatePosition = useCallback(() => {
     if (!editorView) {
@@ -639,6 +681,111 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
           </>
         )
       })()}
+
+      {onInsertMarker && (
+        <>
+          <div className="mx-1 h-5 w-px bg-gray-700" />
+          <button
+            data-testid="bubble-stat-change"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              insertStatMarkerAtSelection(editorView, onInsertMarker)
+            }}
+            title="Insert stat change marker after selection"
+            className="rounded px-2 py-1 text-xs font-medium transition-colors text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+          >
+            Stat Change
+          </button>
+          <button
+            data-testid="bubble-statblock-insert"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setPickerCharacterId((prev) => prev || characters[0]?.id || '')
+              setStatblockPickerOpen((v) => !v)
+            }}
+            title="Insert status block"
+            className="rounded px-2 py-1 text-xs font-medium transition-colors text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+          >
+            Status Block
+          </button>
+        </>
+      )}
+
+      {statblockPickerOpen && (
+        <div
+          ref={pickerRef}
+          data-testid="bubble-statblock-picker"
+          className="absolute top-full right-0 mt-1 w-72 rounded-md border border-gray-700 bg-gray-900 p-3 shadow-xl"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {characters.length === 0 ? (
+            <div className="text-xs text-gray-400">
+              No characters yet. Open the Characters panel to create one.
+            </div>
+          ) : (
+            <>
+              <label className="mb-1 block text-[11px] uppercase tracking-wider text-gray-400">
+                Character
+              </label>
+              <select
+                data-testid="bubble-statblock-picker-character"
+                value={pickerCharacterId}
+                onChange={(e) => setPickerCharacterId(e.target.value)}
+                className="mb-2 w-full rounded bg-gray-800 px-2 py-1 text-sm text-gray-100 outline-none"
+              >
+                {characters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <label className="mb-1 block text-[11px] uppercase tracking-wider text-gray-400">
+                Fields (optional, comma-separated)
+              </label>
+              <input
+                data-testid="bubble-statblock-picker-fields"
+                type="text"
+                value={pickerFields}
+                placeholder="hp,mp,level"
+                onChange={(e) => setPickerFields(e.target.value)}
+                className="mb-3 w-full rounded bg-gray-800 px-2 py-1 text-sm text-gray-100 outline-none"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setStatblockPickerOpen(false)
+                  }}
+                  className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  data-testid="bubble-statblock-picker-confirm"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    if (!pickerCharacterId) return
+                    const fields = pickerFields
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                    insertStatblockMarkerInline(
+                      editorView,
+                      pickerCharacterId,
+                      fields.length > 0 ? fields : undefined
+                    )
+                    setStatblockPickerOpen(false)
+                    setPickerFields('')
+                  }}
+                  className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-500"
+                >
+                  Insert
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

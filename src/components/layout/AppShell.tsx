@@ -20,6 +20,9 @@ import { QuestBoard } from '../quests/QuestBoard'
 import { ShopModal } from '../quests/ShopModal'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
+import { CharacterSheetModal } from '../characters/CharacterSheetModal'
+import { CharacterPanel } from '../characters/CharacterPanel'
+import { DeltaEditorModal } from '../characters/DeltaEditorModal'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { SubDocumentLinks } from '../editor/SubDocumentLinks'
 import { LandingPage } from './LandingPage'
@@ -41,6 +44,13 @@ export function AppShell() {
   const [questPickerOpen, setQuestPickerOpen] = useState(false)
   const [shopOpen, setShopOpen] = useState(false)
   const [boardOpen, setBoardOpen] = useState(false)
+  const [characterSheetOpen, setCharacterSheetOpen] = useState(false)
+  const [characterPanelOpen, setCharacterPanelOpen] = useState(false)
+  const [deltaEditorState, setDeltaEditorState] = useState<{
+    open: boolean
+    markerId: string | null
+    mode: 'create' | 'edit'
+  }>({ open: false, markerId: null, mode: 'create' })
   const [coinPulsing, setCoinPulsing] = useState(false)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
   const writeathonConfig = useWriteathonStore((s) => s.config)
@@ -102,6 +112,33 @@ export function AppShell() {
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
   const handleEditorView = useCallback((v: EditorView | null) => setEditorView(v), [])
 
+  const handleInsertMarker = useCallback((markerId: string) => {
+    setDeltaEditorState({ open: true, markerId, mode: 'create' })
+  }, [])
+
+  const closeDeltaEditor = useCallback(() => {
+    setDeltaEditorState((prev) => ({ ...prev, open: false }))
+  }, [])
+
+  // Delegated click listener for stat-marker dots.
+  useEffect(() => {
+    if (!editorView) return
+    const contentDOM = editorView.contentDOM
+    function onClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const dot = target.closest('[data-marker-id]') as HTMLElement | null
+      if (!dot) return
+      const markerId = dot.getAttribute('data-marker-id')
+      if (!markerId) return
+      e.preventDefault()
+      e.stopPropagation()
+      setDeltaEditorState({ open: true, markerId, mode: 'edit' })
+    }
+    contentDOM.addEventListener('click', onClick)
+    return () => contentDOM.removeEventListener('click', onClick)
+  }, [editorView])
+
   const handleRestoreSnapshot = useCallback((content: string) => {
     if (!editorView) return
     editorView.dispatch({
@@ -156,6 +193,11 @@ export function AppShell() {
       if (matchesEvent(km.closeBook, e)) {
         e.preventDefault()
         void useDocumentStore.getState().closeBook()
+        return
+      }
+      if (km.toggleCharacterPanel && matchesEvent(km.toggleCharacterPanel, e)) {
+        e.preventDefault()
+        setCharacterPanelOpen((p) => !p)
         return
       }
     }
@@ -295,7 +337,7 @@ export function AppShell() {
             onEditorView={handleEditorView}
           />
           <SubDocumentLinks />
-          <BubbleToolbar editorView={editorView} />
+          <BubbleToolbar editorView={editorView} onInsertMarker={handleInsertMarker} />
           <SnapshotBrowser
             open={snapshotsOpen}
             onClose={() => setSnapshotsOpen(false)}
@@ -321,6 +363,26 @@ export function AppShell() {
             open={boardOpen}
             onClose={() => setBoardOpen(false)}
           />
+          <CharacterSheetModal
+            open={characterSheetOpen}
+            onClose={() => setCharacterSheetOpen(false)}
+          />
+          <CharacterPanel
+            open={characterPanelOpen}
+            onClose={() => setCharacterPanelOpen(false)}
+            editorView={editorView}
+            onOpenCharacterSheet={() => {
+              setCharacterPanelOpen(false)
+              setCharacterSheetOpen(true)
+            }}
+          />
+          <DeltaEditorModal
+            open={deltaEditorState.open}
+            onClose={closeDeltaEditor}
+            markerId={deltaEditorState.markerId}
+            mode={deltaEditorState.mode}
+            editorView={editorView}
+          />
         </div>
       </div>
 
@@ -342,6 +404,22 @@ export function AppShell() {
             title="Document styles"
           >
             Styles
+          </button>
+          <button
+            data-testid="characters-button"
+            onClick={() => setCharacterSheetOpen((p) => !p)}
+            className="text-gray-500 hover:text-gray-300 transition-colors"
+            title="Characters"
+          >
+            Characters
+          </button>
+          <button
+            data-testid="character-panel-button"
+            onClick={() => setCharacterPanelOpen((p) => !p)}
+            className="text-gray-500 hover:text-gray-300 transition-colors"
+            title="Character stats panel (Ctrl+Shift+C)"
+          >
+            Stats
           </button>
           <button
             onClick={toggleRenderMode}

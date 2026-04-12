@@ -4,6 +4,8 @@ import * as localforage from 'localforage'
 import type { EditorPreferences } from '../types'
 
 interface EditorState extends EditorPreferences {
+  /** Transient: current CodeMirror main-selection head offset. Not persisted. */
+  cursorOffset: number
   setVimMode: (enabled: boolean) => void
   toggleVimMode: () => void
   setFontFamily: (family: EditorPreferences['fontFamily']) => void
@@ -15,6 +17,7 @@ interface EditorState extends EditorPreferences {
   toggleSidebar: () => void
   toggleDocumentCollapsed: (id: string) => void
   setCollapsedDocumentIds: (ids: string[]) => void
+  setCursorOffset: (offset: number) => void
 }
 
 const localforageStorage = createJSONStorage<EditorState>(() => ({
@@ -41,6 +44,7 @@ export const useEditorStore = create<EditorState>()(
       renderMode: 'source',
       sidebarOpen: true,
       collapsedDocumentIds: [],
+      cursorOffset: 0,
 
       setVimMode: (enabled: boolean) => set({ vimMode: enabled }),
       toggleVimMode: () => set({ vimMode: !get().vimMode }),
@@ -63,10 +67,24 @@ export const useEditorStore = create<EditorState>()(
         })
       },
       setCollapsedDocumentIds: (ids: string[]) => set({ collapsedDocumentIds: ids }),
+      setCursorOffset: (offset: number) => {
+        if (get().cursorOffset === offset) return
+        set({ cursorOffset: offset })
+      },
     }),
     {
       name: 'writinator-editor',
       storage: localforageStorage,
+      partialize: (state) =>
+        ({
+          vimMode: state.vimMode,
+          fontFamily: state.fontFamily,
+          fontSize: state.fontSize,
+          distractionFree: state.distractionFree,
+          renderMode: state.renderMode,
+          sidebarOpen: state.sidebarOpen,
+          collapsedDocumentIds: state.collapsedDocumentIds,
+        }) as unknown as EditorState,
     }
   )
 )

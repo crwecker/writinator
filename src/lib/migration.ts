@@ -1,4 +1,13 @@
-import type { Book, Document, Snapshot, WritinatorFile, GlobalSettings, DocumentStyles } from '../types'
+import type {
+  Book,
+  Character,
+  Document,
+  DocumentStyles,
+  GlobalSettings,
+  Snapshot,
+  StatDelta,
+  WritinatorFile,
+} from '../types'
 
 // Shape of the old format (pre-v2): a plain Book with `chapters` instead of `documents`
 interface OldChapter {
@@ -32,9 +41,19 @@ function isOldFormat(data: Record<string, unknown>): data is Record<string, unkn
   )
 }
 
-function isWritinatorFile(data: Record<string, unknown>): data is Record<string, unknown> & WritinatorFile {
+function isV2File(data: Record<string, unknown>): boolean {
   return (
     data.version === 2 &&
+    isRecord(data.book) &&
+    typeof (data.book as Record<string, unknown>).id === 'string' &&
+    typeof (data.book as Record<string, unknown>).title === 'string' &&
+    Array.isArray((data.book as Record<string, unknown>).documents)
+  )
+}
+
+function isV3File(data: Record<string, unknown>): boolean {
+  return (
+    data.version === 3 &&
     isRecord(data.book) &&
     typeof (data.book as Record<string, unknown>).id === 'string' &&
     typeof (data.book as Record<string, unknown>).title === 'string' &&
@@ -66,30 +85,44 @@ function migrateOldBook(old: OldBook): WritinatorFile {
   }
 
   return {
-    version: 2,
+    version: 3,
     book,
     snapshots: {},
     globalSettings,
+    characters: [],
+    markers: {},
   }
 }
 
 /**
- * Migrate any file data (old or new format) into a WritinatorFile.
- * - Old format: plain Book JSON with `chapters` array, no `version` field
- * - New format: WritinatorFile envelope with `version: 2`
+ * Migrate any file data (old/v2/v3) into a v3 WritinatorFile.
  */
 export function migrateFile(data: unknown): WritinatorFile {
   if (!isRecord(data)) {
     throw new Error('Invalid file: expected a JSON object')
   }
 
-  // Already v2 format
-  if (isWritinatorFile(data)) {
+  // v3 — already current
+  if (isV3File(data)) {
     return {
-      version: 2,
+      version: 3,
       book: data.book as Book,
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: (data.globalSettings ?? {}) as GlobalSettings,
+      characters: (data.characters ?? []) as Character[],
+      markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
+    }
+  }
+
+  // v2 → v3: add empty characters + markers
+  if (isV2File(data)) {
+    return {
+      version: 3,
+      book: data.book as Book,
+      snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
+      globalSettings: (data.globalSettings ?? {}) as GlobalSettings,
+      characters: [],
+      markers: {},
     }
   }
 
