@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import {
@@ -7,18 +7,15 @@ import {
   getMilestoneReward,
   createBoardQuest,
 } from '../../lib/writeathon'
+import { fetchRandomImage } from '../../lib/unsplash'
 import type { BoardQuest } from '../../types'
 import { ParchmentCard } from './ParchmentCard'
 import { WriteathonSetup } from './WriteathonSetup'
 
-interface QuestBoardProps {
-  open: boolean
-  onClose: () => void
-}
-
-export function QuestBoard({ open, onClose }: QuestBoardProps) {
-  const panelRef = useRef<HTMLDivElement>(null)
+export function QuestBoardPanel() {
   const [setupOpen, setSetupOpen] = useState(false)
+  const [acceptingId, setAcceptingId] = useState<string | null>(null)
+  const [acceptError, setAcceptError] = useState<string | null>(null)
 
   const config = useWriteathonStore((s) => s.config)
   const milestones = useWriteathonStore((s) => s.milestones)
@@ -29,43 +26,32 @@ export function QuestBoard({ open, onClose }: QuestBoardProps) {
   const currentBlock = useWriteathonStore((s) => s.getCurrentBlock())
   const dailyTarget = useWriteathonStore((s) => s.getDailyTarget())
 
-  // Escape key
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.preventDefault(); onClose() }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  // Click outside
-  useEffect(() => {
-    if (!open) return
-    function onMouseDown(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose()
+  async function handleAccept(quest: BoardQuest) {
+    if (acceptingId) return
+    setAcceptingId(quest.id)
+    setAcceptError(null)
+    try {
+      const img = await fetchRandomImage()
+      const sessionId = useImageRevealStore.getState().startSession(
+        img.url,
+        img.width,
+        img.height,
+        quest.wordGoal,
+        img.photographer,
+        img.photographerUrl,
+        img.id,
+        quest.timeMinutes,
+      )
+      if (sessionId === '') {
+        setAcceptError('Quest capacity reached (25 active). Complete or abandon one first.')
+        return
       }
+      useWriteathonStore.getState().acceptBoardQuest(quest, sessionId)
+    } catch (err) {
+      setAcceptError(err instanceof Error ? err.message : 'Failed to fetch quest image.')
+    } finally {
+      setAcceptingId(null)
     }
-    document.addEventListener('mousedown', onMouseDown)
-    return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [open, onClose])
-
-  if (!open) return null
-
-  function handleAccept(quest: BoardQuest) {
-    const sessionId = useImageRevealStore.getState().startSession(
-      '',
-      800,
-      600,
-      quest.wordGoal,
-      undefined,
-      undefined,
-      undefined,
-      quest.timeMinutes,
-    )
-    if (sessionId === '') return // capacity reached
-    useWriteathonStore.getState().acceptBoardQuest(quest, sessionId)
   }
 
   function handleAcceptPermanent(pq: { wordGoal: number; title: string; coinReward: number }) {
@@ -73,43 +59,28 @@ export function QuestBoard({ open, onClose }: QuestBoardProps) {
       title: pq.title,
       coinReward: pq.coinReward,
     })
-    handleAccept(quest)
+    void handleAccept(quest)
   }
 
   const dailyCompleted = milestones[currentBlock - 1]?.completed ?? false
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center">
-      <div
-        ref={panelRef}
-        className="border-4 border-amber-950 rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-y-auto p-8 relative"
-        style={{
-          background: 'linear-gradient(180deg, #3d2817 0%, #2a1a0d 100%)',
-          backgroundImage:
-            'repeating-linear-gradient(90deg, rgba(0,0,0,0.1) 0px, transparent 2px, transparent 80px, rgba(0,0,0,0.1) 82px)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-amber-50 hover:text-amber-300 transition-colors text-xl font-bold w-8 h-8 flex items-center justify-center"
-          title="Close"
-        >
-          &#x2715;
-        </button>
-
-        {/* Title */}
-        <div className="text-center mb-8">
-          <h1 className="font-serif text-3xl font-bold text-amber-50">Quest Board</h1>
-          <p className="text-amber-300 text-sm mt-1">Adventurer's Guild</p>
+    <div className="p-6">
+        {/* Start Writeathon + errors */}
+        <div className="text-center mb-6">
           {!config?.active && (
             <button
               onClick={() => setSetupOpen(true)}
-              className="mt-4 font-serif font-semibold px-6 py-2 rounded-lg border-2 border-amber-700 text-amber-300 bg-amber-950/40 hover:bg-amber-900/50 hover:text-amber-200 hover:border-amber-600 transition-all text-sm tracking-wide shadow-md"
+              className="font-serif font-semibold px-6 py-2 rounded-lg border-2 border-amber-700 text-amber-300 bg-amber-950/40 hover:bg-amber-900/50 hover:text-amber-200 hover:border-amber-600 transition-all text-sm tracking-wide shadow-md"
             >
               &#x2694; Start Writeathon
             </button>
+          )}
+          {acceptingId && (
+            <p className="mt-3 text-amber-200 text-xs italic">Fetching quest image…</p>
+          )}
+          {acceptError && (
+            <p className="mt-3 text-red-300 text-xs">{acceptError}</p>
           )}
         </div>
 
@@ -185,7 +156,11 @@ export function QuestBoard({ open, onClose }: QuestBoardProps) {
                     bonusCoins={quest.bonusCoins}
                     accepted={isAccepted}
                     completed={isCompleted}
-                    onAccept={!isAccepted && !isCompleted ? () => handleAccept(quest) : undefined}
+                    onAccept={
+                      !isAccepted && !isCompleted
+                        ? () => { void handleAccept(quest) }
+                        : undefined
+                    }
                   />
                 )
               })}
@@ -217,7 +192,6 @@ export function QuestBoard({ open, onClose }: QuestBoardProps) {
             </div>
           </section>
         )}
-      </div>
 
       <WriteathonSetup open={setupOpen} onClose={() => setSetupOpen(false)} />
     </div>

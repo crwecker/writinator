@@ -1,11 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useImageRevealStore, PIXEL_LEVELS } from '../../stores/imageRevealStore'
 import type { ImageRevealSession } from '../../types'
-
-interface Props {
-  open: boolean
-  onClose: () => void
-}
 
 const MAX_LEVEL_INDEX = PIXEL_LEVELS.length - 1
 
@@ -112,62 +107,18 @@ function ActiveSessionCard({ session, onAbandon }: ActiveSessionCardProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Main QuestPicker
+// Panel — body-only, no modal shell (rendered inside AdventurersGuild tabs)
 // ---------------------------------------------------------------------------
 
-export function QuestPicker({ open, onClose }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null)
-
+export function QuestPickerPanel() {
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
   const completedSessions = useImageRevealStore((s) => s.completedSessions)
   const abandonSession = useImageRevealStore((s) => s.abandonSession)
 
-  // Completed gallery
   const [viewingImage, setViewingImage] = useState<string | null>(null)
 
-  // Escape key
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.preventDefault(); onClose() }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  // Click outside
-  useEffect(() => {
-    if (!open) return
-    function onMouseDown(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', onMouseDown)
-    return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [open, onClose])
-
-  if (!open) return null
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div
-        ref={panelRef}
-        className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-[520px] max-w-[92vw] max-h-[84vh] flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
-          <span className="text-sm font-medium text-gray-200">Your Quests</span>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-300 transition-colors text-xs"
-          >
-            Close
-          </button>
-        </div>
-
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-5">
+    <div className="p-4 space-y-5">
 
           {/* Active Sessions */}
           {activeSessions.length > 0 ? (
@@ -283,8 +234,6 @@ export function QuestPicker({ open, onClose }: Props) {
             </section>
           )}
 
-        </div>
-      </div>
     </div>
   )
 }

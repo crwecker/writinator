@@ -410,7 +410,10 @@ const markdownDecorationPlugin = ViewPlugin.fromClass(
       this.decorations = markdownDecorations(view)
     }
     update(update: ViewUpdate) {
-      if (update.docChanged || update.viewportChanged) {
+      const renderModeChanged = update.transactions.some((tr) =>
+        tr.effects.some((e) => e.is(setRenderModeEffect))
+      )
+      if (update.docChanged || update.viewportChanged || renderModeChanged) {
         this.decorations = markdownDecorations(update.view)
       } else if (update.view.state.field(renderModeField) === 'rendered' && update.selectionSet) {
         const oldLine = update.startState.doc.lineAt(update.startState.selection.main.head).number

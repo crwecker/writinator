@@ -1,15 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { Coins, Check } from 'lucide-react'
 import { usePlayerStore } from '../../stores/playerStore'
 import { getItemsByCategory } from '../../lib/items'
 import type { Item, WeaponItem, ArmorItem, ConsumableItem, ItemCategory, ItemRarity } from '../../types'
 import { EquipmentPanel } from './EquipmentPanel'
 import PostRequestTab from './PostRequestTab'
-
-interface Props {
-  open: boolean
-  onClose: () => void
-}
 
 type ShopTab = 'equipment' | 'weapon' | 'armor' | 'consumable' | 'request'
 
@@ -236,8 +231,7 @@ function ItemCard({
   )
 }
 
-export function ShopModal({ open, onClose }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null)
+export function ShopPanel() {
   const [activeTab, setActiveTab] = useState<ShopTab>('equipment')
   const [justPurchased, setJustPurchased] = useState<string | null>(null)
 
@@ -248,30 +242,6 @@ export function ShopModal({ open, onClose }: Props) {
   const consumableInventory = usePlayerStore((s) => s.consumableInventory)
   const purchaseItem = usePlayerStore((s) => s.purchaseItem)
   const equipItem = usePlayerStore((s) => s.equipItem)
-
-  // Escape key
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.preventDefault(); onClose() }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  // Click outside
-  useEffect(() => {
-    if (!open) return
-    function onMouseDown(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', onMouseDown)
-    return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [open, onClose])
-
-  if (!open) return null
 
   const tabItems = activeTab !== 'equipment' ? getItemsByCategory(activeTab as ItemCategory) : []
 
@@ -313,70 +283,48 @@ export function ShopModal({ open, onClose }: Props) {
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div
-        ref={panelRef}
-        className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-2xl max-w-[92vw] max-h-[84vh] flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
-          <span className="text-xl font-bold text-amber-300">Quest Shop</span>
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1 text-amber-400 tabular-nums text-sm">
-              <Coins size={14} />
-              {coins.toLocaleString()}
-            </span>
-            <button
-              onClick={onClose}
-              className="text-gray-500 hover:text-gray-300 transition-colors text-xs"
-            >
-              Close
-            </button>
+    <div className="flex flex-col h-full">
+      {/* Sub-tabs */}
+      <div className="flex shrink-0 border-b border-gray-700">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === tab.id
+                ? 'bg-gray-700 text-gray-200 border-b-2 border-amber-400'
+                : 'bg-gray-800/60 text-gray-500 hover:text-gray-300 border-b-2 border-transparent'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {activeTab === 'equipment' ? (
+          <EquipmentPanel />
+        ) : activeTab === 'request' ? (
+          <PostRequestTab />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {tabItems.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                coins={coins}
+                ownedItems={ownedItems}
+                equippedWeapon={equippedWeapon}
+                equippedArmor={equippedArmor}
+                consumableInventory={consumableInventory}
+                justPurchased={justPurchased}
+                onPurchase={handlePurchase}
+                onEquip={handleEquip}
+              />
+            ))}
           </div>
-        </div>
-
-        {/* Category tabs */}
-        <div className="flex shrink-0 border-b border-gray-700">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-5 py-2 text-sm font-medium transition-colors ${
-                activeTab === tab.id
-                  ? 'bg-gray-700 text-gray-200 border-b-2 border-amber-400'
-                  : 'bg-gray-800 text-gray-500 hover:text-gray-300 border-b-2 border-transparent'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Content area */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {activeTab === 'equipment' ? (
-            <EquipmentPanel />
-          ) : activeTab === 'request' ? (
-            <PostRequestTab />
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {tabItems.map((item) => (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  coins={coins}
-                  ownedItems={ownedItems}
-                  equippedWeapon={equippedWeapon}
-                  equippedArmor={equippedArmor}
-                  consumableInventory={consumableInventory}
-                  justPurchased={justPurchased}
-                  onPurchase={handlePurchase}
-                  onEquip={handleEquip}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   )

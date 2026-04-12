@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins, ScrollText } from 'lucide-react'
+import { Coins } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -15,9 +15,7 @@ import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
 import { StyleEditor } from '../editor/StyleEditor'
-import { QuestPicker } from '../quests/QuestPicker'
-import { QuestBoard } from '../quests/QuestBoard'
-import { ShopModal } from '../quests/ShopModal'
+import { AdventurersGuild, type GuildTab } from '../quests/AdventurersGuild'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
 import { CharacterSheetModal } from '../characters/CharacterSheetModal'
@@ -41,9 +39,8 @@ export function AppShell() {
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
-  const [questPickerOpen, setQuestPickerOpen] = useState(false)
-  const [shopOpen, setShopOpen] = useState(false)
-  const [boardOpen, setBoardOpen] = useState(false)
+  const [guildOpen, setGuildOpen] = useState(false)
+  const [guildTab, setGuildTab] = useState<GuildTab>('board')
   const [characterSheetOpen, setCharacterSheetOpen] = useState(false)
   const [characterPanelOpen, setCharacterPanelOpen] = useState(false)
   const [deltaEditorState, setDeltaEditorState] = useState<{
@@ -348,20 +345,19 @@ export function AppShell() {
           <ImageRevealPanel />
 
           {activeSessions.length === 0 && (
-            <QuestReminder onStartQuest={() => setQuestPickerOpen(true)} />
+            <QuestReminder
+              onStartQuest={() => {
+                setGuildTab('board')
+                setGuildOpen(true)
+              }}
+            />
           )}
 
-          <QuestPicker
-            open={questPickerOpen}
-            onClose={() => setQuestPickerOpen(false)}
-          />
-          <ShopModal
-            open={shopOpen}
-            onClose={() => setShopOpen(false)}
-          />
-          <QuestBoard
-            open={boardOpen}
-            onClose={() => setBoardOpen(false)}
+          <AdventurersGuild
+            open={guildOpen}
+            activeTab={guildTab}
+            onTabChange={setGuildTab}
+            onClose={() => setGuildOpen(false)}
           />
           <CharacterSheetModal
             open={characterSheetOpen}
@@ -429,9 +425,18 @@ export function AppShell() {
             {renderMode === 'source' ? 'Source' : 'Rendered'}
           </button>
           <button
-            onClick={() => setShopOpen(true)}
-            className="flex items-center gap-1 text-amber-400 hover:text-amber-300 tabular-nums transition-colors"
-            title="Shop"
+            onClick={() => {
+              setGuildTab('board')
+              setGuildOpen(true)
+            }}
+            className={`flex items-center gap-1 tabular-nums transition-colors ${
+              writeathonConfig?.active ||
+              activeBoardQuests.length > 0 ||
+              activeSessions.length > 0
+                ? 'text-amber-400 hover:text-amber-300'
+                : 'text-amber-500 hover:text-amber-400'
+            }`}
+            title="Adventurer's Guild"
           >
             <Coins
               size={12}
@@ -440,29 +445,6 @@ export function AppShell() {
             <span className={`tabular-nums${coinPulsing ? ' animate-coin-pulse' : ''}`}>
               {coins.toLocaleString()}
             </span>
-          </button>
-          <button
-            onClick={() => setBoardOpen(true)}
-            className={`flex items-center gap-1 transition-colors ${
-              writeathonConfig?.active || activeBoardQuests.length > 0
-                ? 'text-amber-500 hover:text-amber-400'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-            title="Quest Board"
-          >
-            <ScrollText size={12} />
-            Board
-          </button>
-          <button
-            onClick={() => setQuestPickerOpen(true)}
-            className={`transition-colors ${
-              activeSessions.length > 0
-                ? 'text-amber-500 hover:text-amber-400'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-            title="Quests"
-          >
-            Quest
           </button>
           <button
             onClick={() => setSnapshotsOpen((prev) => !prev)}
