@@ -5,6 +5,7 @@ import type { WriteathonConfig, WriteathonMilestone, BoardQuest } from '../types
 import { calculateDailyTarget, createMilestones } from '../lib/writeathon'
 import { usePlayerStore } from './playerStore'
 import { useImageRevealStore } from './imageRevealStore'
+import { addToast } from '../components/quests/rewardToastStore'
 
 interface WriteathonState {
   config: WriteathonConfig | null
@@ -23,6 +24,8 @@ interface WriteathonState {
   acceptBoardQuest: (quest: BoardQuest, sessionId: string) => void
   completeBoardQuest: (questId: string) => void
   resetWriteathon: () => void
+  pauseWriteathon: () => void
+  resumeWriteathon: () => void
 
   getCurrentBlock: () => number
   getDailyTarget: () => number
@@ -71,6 +74,7 @@ export const useWriteathonStore = create<WriteathonState>()(
       updateProgress: (currentBookWordCount: number) => {
         const { config, milestones } = get()
         if (!config || !config.active) return
+        if (config.paused) return
 
         let anyNewlyCompleted = false
         const playerStore = usePlayerStore.getState()
@@ -80,6 +84,8 @@ export const useWriteathonStore = create<WriteathonState>()(
           if (currentBookWordCount >= milestone.targetWordCount) {
             anyNewlyCompleted = true
             playerStore.addCoins(milestone.coinsAwarded)
+            const tierLabel = milestone.tier.charAt(0).toUpperCase() + milestone.tier.slice(1)
+            addToast(milestone.coinsAwarded, `Block ${milestone.blockNumber} — ${tierLabel}`)
             return {
               ...milestone,
               completed: true,
@@ -96,7 +102,7 @@ export const useWriteathonStore = create<WriteathonState>()(
             milestones: updatedMilestones,
             config: {
               ...config,
-              active: false,
+              active: true,
               completedAt: new Date().toISOString(),
             },
           })
@@ -151,10 +157,30 @@ export const useWriteathonStore = create<WriteathonState>()(
         const reward = quest.coinReward + (quest.bonusCoins ?? 0)
         usePlayerStore.getState().addCoins(reward)
         console.info(`[writeathonStore] Board quest completed: "${quest.title}" (+${reward} coins)`)
+
+        if (quest.type === 'daily') {
+          const bonus = Math.floor(get().getDailyTarget() * 0.15)
+          if (bonus > 0) {
+            usePlayerStore.getState().addCoins(bonus)
+            addToast(bonus, 'Daily Quest Bonus!')
+          }
+        }
       },
 
       resetWriteathon: () => {
         set({ config: null, milestones: [], villagerQuests: [], activeBoardQuests: [], dailyQuestAccepted: false })
+      },
+
+      pauseWriteathon: () => {
+        set((state) => ({
+          config: state.config ? { ...state.config, paused: true } : null,
+        }))
+      },
+
+      resumeWriteathon: () => {
+        set((state) => ({
+          config: state.config ? { ...state.config, paused: false } : null,
+        }))
       },
 
       getCurrentBlock: () => {
@@ -167,8 +193,10 @@ export const useWriteathonStore = create<WriteathonState>()(
       getDailyTarget: () => {
         const { config, milestones } = get()
         if (!config) return 0
+        if (config.paused) return 0
         const completedCount = milestones.filter((m) => m.completed).length
         const remainingBlocks = config.totalBlocks - completedCount
+        if (remainingBlocks === 0) return 0
         // currentWordCount is the target of the last completed milestone, or startingWordCount
         const lastCompleted = milestones.filter((m) => m.completed).at(-1)
         const currentWordCount = lastCompleted?.targetWordCount ?? config.startingWordCount

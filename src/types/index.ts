@@ -388,6 +388,7 @@ export interface WriteathonConfig {
   wordsPerBlock: number
   active: boolean
   completedAt?: string
+  paused?: boolean
 }
 
 export interface WriteathonMilestone {

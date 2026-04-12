@@ -30,6 +30,10 @@ import { RewardToast } from '../quests/RewardToast'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords } from '../../lib/words'
+import { JourneyBar } from './JourneyBar'
+import { DailyTarget } from './DailyTarget'
+import { MilestoneFlash } from './MilestoneFlash'
+import { WriteathonCompleteCelebration } from '../quests/WriteathonCompleteCelebration'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -248,6 +252,8 @@ export function AppShell() {
   return (
     <>
     <RewardToast />
+    <MilestoneFlash />
+    <WriteathonCompleteCelebration />
     <div className="flex flex-col h-screen w-screen bg-bg-darker text-gray-200 overflow-hidden">
       {/* Top bar — hidden in distraction-free mode */}
       {!distractionFree && (
@@ -380,6 +386,8 @@ export function AppShell() {
         </div>
       </div>
 
+      <JourneyBar bookWordCount={bookWordCount} />
+
       {/* Bottom bar — minimal in distraction-free mode */}
       <div className={`flex items-center justify-between border-t border-gray-700 bg-bg-dark px-4 py-1 text-xs shrink-0 ${distractionFree ? 'opacity-20 hover:opacity-60 transition-opacity' : ''}`}>
         <span className="text-gray-500 tabular-nums">
@@ -387,6 +395,8 @@ export function AppShell() {
           <span className="mx-1.5 text-gray-600">|</span>
           {bookWordCount.toLocaleString()} book
         </span>
+        <span className="mx-1.5 text-gray-600">|</span>
+        <DailyTarget bookWordCount={bookWordCount} />
         <div className="flex items-center gap-3">
           <button
             onClick={() => setStyleEditorOpen((p) => !p)}

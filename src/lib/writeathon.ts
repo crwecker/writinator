@@ -27,15 +27,21 @@ export function getMilestoneTier(blockNumber: number): MilestoneTier {
 export function getMilestoneReward(blockNumber: number): number {
   const tier = getMilestoneTier(blockNumber)
   const baseRewards: Record<MilestoneTier, number> = {
-    apprentice: 50,
-    journeyman: 100,
-    master: 200,
-    legendary: 400,
+    apprentice: 150,
+    journeyman: 250,
+    master: 400,
+    legendary: 600,
+  }
+  const bonusRewards: Record<MilestoneTier, number> = {
+    apprentice: 500,
+    journeyman: 1000,
+    master: 1500,
+    legendary: 2500,
   }
   const base = baseRewards[tier]
   // Bonus at tier boundaries (blocks 6, 12, 18, 24)
   const isBoundary = blockNumber % 6 === 0
-  return isBoundary ? base * 2 : base
+  return isBoundary ? base + bonusRewards[tier] : base
 }
 
 export function createMilestones(

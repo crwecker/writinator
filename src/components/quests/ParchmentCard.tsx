@@ -40,7 +40,7 @@ export function ParchmentCard({
       {/* Completed seal overlay */}
       {completed && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-          <div className="w-24 h-24 rounded-full bg-red-700 text-red-50 flex items-center justify-center font-bold text-xl rotate-[-15deg] shadow-xl border-4 border-red-900">
+          <div className="w-24 h-24 rounded-full bg-red-700 text-red-50 flex items-center justify-center font-bold text-xl shadow-xl border-4 border-red-900 wax-seal-stamp">
             DONE
           </div>
         </div>
