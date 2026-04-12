@@ -229,6 +229,52 @@ export interface MarkerEntry {
   deltas: StatDelta[]         // compound deltas allowed (e.g., level-up bundles)
 }
 
+// ---------------------------------------------------------------------------
+// Layered runtime state used by the state-computation engine (Phase 2+)
+// ---------------------------------------------------------------------------
+
+export interface EquippedItem {
+  itemId: string
+  itemName?: string
+  modifiers: StatModifier[]
+}
+
+export interface ActiveBuff {
+  buffId: string
+  buffName?: string
+  modifiers: StatModifier[]
+  /** Remaining number of markers before auto-expiry. Undefined = persistent. */
+  remaining?: number
+}
+
+/**
+ * Layered character state as computed by `computeStateAt`.
+ * `base` is mutated by most delta ops. Equipment and buffs are tracked
+ * separately so unequip / buff-expire do not need counter-deltas.
+ */
+export interface CharacterState {
+  base: Record<string, StatValue>
+  equipped: Record<string, EquippedItem>       // keyed by slot name
+  activeBuffs: ActiveBuff[]
+}
+
+/** Delta-marker reference discovered by extracting markers from document content. */
+export interface DeltaMarkerRef {
+  kind: 'delta'
+  id: string
+  offset: number
+}
+
+/** Statblock-marker reference discovered by extracting markers from document content. */
+export interface StatblockMarkerRef {
+  kind: 'statblock'
+  characterId: string
+  offset: number
+  options: Record<string, string>
+}
+
+export type ExtractedMarker = DeltaMarkerRef | StatblockMarkerRef
+
 export interface RecentFile {
   handle: FileSystemFileHandle
   name: string
