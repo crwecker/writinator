@@ -94,7 +94,6 @@ export function Sidebar() {
   const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
   const setActiveDocument = useDocumentStore((s) => s.setActiveDocument)
   const addDocument = useDocumentStore((s) => s.addDocument)
-  const renameBook = useDocumentStore((s) => s.renameBook)
   const renameDocument = useDocumentStore((s) => s.renameDocument)
   const deleteDocument = useDocumentStore((s) => s.deleteDocument)
   const moveDocument = useDocumentStore((s) => s.moveDocument)
@@ -102,9 +101,6 @@ export function Sidebar() {
   const collapsedDocumentIds = useEditorStore((s) => s.collapsedDocumentIds)
   const toggleDocumentCollapsed = useEditorStore((s) => s.toggleDocumentCollapsed)
 
-  const [isEditingTitle, setIsEditingTitle] = useState(false)
-  const [titleValue, setTitleValue] = useState('')
-  const [expanded, setExpanded] = useState(true)
   const [newlyCreatedId, setNewlyCreatedId] = useState<string | null>(null)
 
   const handleAddDocument = useCallback(
@@ -273,19 +269,6 @@ export function Sidebar() {
     setIsValidDrop(true)
   }
 
-  function startEditingTitle() {
-    setTitleValue(book!.title)
-    setIsEditingTitle(true)
-  }
-
-  function commitTitle() {
-    const trimmed = titleValue.trim()
-    if (trimmed && trimmed !== book!.title) {
-      renameBook(trimmed)
-    }
-    setIsEditingTitle(false)
-  }
-
   function getDropIndicator(docId: string): DropIndicator {
     if (!activeId || !overId || !dropIntent || docId !== overId) return null
     if (!isValidDrop) return 'invalid'
@@ -296,41 +279,8 @@ export function Sidebar() {
 
   return (
     <div className="flex flex-col bg-gray-900 border-r border-gray-700 h-full w-[260px] shrink-0 overflow-hidden">
-      {/* Book title / root node */}
-      <div
-        className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-700 cursor-pointer select-none"
-        onClick={() => setExpanded(!expanded)}
-        onDoubleClick={(e) => {
-          e.stopPropagation()
-          startEditingTitle()
-        }}
-      >
-        <span className={`text-gray-400 text-xs transition-transform ${expanded ? 'rotate-90' : ''}`}>
-          &#9657;
-        </span>
-        {isEditingTitle ? (
-          <input
-            autoFocus
-            className="flex-1 bg-gray-800 border border-blue-300 rounded px-1 py-0 text-sm text-white font-semibold outline-none"
-            value={titleValue}
-            onChange={(e) => setTitleValue(e.target.value)}
-            onBlur={commitTitle}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitTitle()
-              if (e.key === 'Escape') setIsEditingTitle(false)
-            }}
-            onClick={(e) => e.stopPropagation()}
-          />
-        ) : (
-          <span className="text-sm font-semibold text-gray-200 truncate">
-            {book.title}
-          </span>
-        )}
-      </div>
-
       {/* Document tree */}
-      {expanded && (
-        <DndContext
+      <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragStart={handleDragStart}
@@ -383,7 +333,6 @@ export function Sidebar() {
             ) : null}
           </DragOverlay>
         </DndContext>
-      )}
 
       {/* Add document button */}
       <button
