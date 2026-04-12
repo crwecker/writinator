@@ -5,6 +5,18 @@ import type { TextStyle, HeadingStyle, NamedStyle } from '../../types'
 
 interface BubbleToolbarProps {
   editorView: EditorView | null
+  onInsertMarker?: (markerId: string) => void
+}
+
+function insertStatMarkerAtSelection(
+  view: EditorView,
+  onInsert: (markerId: string) => void
+) {
+  const { to } = view.state.selection.main
+  const markerId = crypto.randomUUID()
+  const insert = `<!-- stat:${markerId} -->`
+  view.dispatch({ changes: { from: to, to: to, insert } })
+  onInsert(markerId)
 }
 
 function ToolbarButton({
@@ -398,7 +410,7 @@ function wrapWithSpanClass(view: EditorView, className: string) {
   view.focus()
 }
 
-export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
+export default function BubbleToolbar({ editorView, onInsertMarker }: BubbleToolbarProps) {
   const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
   const namedStyles = documentStyles?.namedStyles
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
@@ -639,6 +651,23 @@ export default function BubbleToolbar({ editorView }: BubbleToolbarProps) {
           </>
         )
       })()}
+
+      {onInsertMarker && (
+        <>
+          <div className="mx-1 h-5 w-px bg-gray-700" />
+          <button
+            data-testid="bubble-stat-change"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              insertStatMarkerAtSelection(editorView, onInsertMarker)
+            }}
+            title="Insert stat change marker after selection"
+            className="rounded px-2 py-1 text-xs font-medium transition-colors text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+          >
+            Stat Change
+          </button>
+        </>
+      )}
     </div>
   )
 }

@@ -21,6 +21,7 @@ import { ShopModal } from '../quests/ShopModal'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
 import { CharacterSheetModal } from '../characters/CharacterSheetModal'
+import { DeltaEditorModal } from '../characters/DeltaEditorModal'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { SubDocumentLinks } from '../editor/SubDocumentLinks'
 import { LandingPage } from './LandingPage'
@@ -39,6 +40,11 @@ export function AppShell() {
   const [shopOpen, setShopOpen] = useState(false)
   const [boardOpen, setBoardOpen] = useState(false)
   const [characterSheetOpen, setCharacterSheetOpen] = useState(false)
+  const [deltaEditorState, setDeltaEditorState] = useState<{
+    open: boolean
+    markerId: string | null
+    mode: 'create' | 'edit'
+  }>({ open: false, markerId: null, mode: 'create' })
   const [coinPulsing, setCoinPulsing] = useState(false)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
   const writeathonConfig = useWriteathonStore((s) => s.config)
@@ -99,6 +105,33 @@ export function AppShell() {
   const handleWordCountChange = useCallback((c: number) => setWordCount(c), [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
   const handleEditorView = useCallback((v: EditorView | null) => setEditorView(v), [])
+
+  const handleInsertMarker = useCallback((markerId: string) => {
+    setDeltaEditorState({ open: true, markerId, mode: 'create' })
+  }, [])
+
+  const closeDeltaEditor = useCallback(() => {
+    setDeltaEditorState((prev) => ({ ...prev, open: false }))
+  }, [])
+
+  // Delegated click listener for stat-marker dots.
+  useEffect(() => {
+    if (!editorView) return
+    const contentDOM = editorView.contentDOM
+    function onClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const dot = target.closest('[data-marker-id]') as HTMLElement | null
+      if (!dot) return
+      const markerId = dot.getAttribute('data-marker-id')
+      if (!markerId) return
+      e.preventDefault()
+      e.stopPropagation()
+      setDeltaEditorState({ open: true, markerId, mode: 'edit' })
+    }
+    contentDOM.addEventListener('click', onClick)
+    return () => contentDOM.removeEventListener('click', onClick)
+  }, [editorView])
 
   const handleRestoreSnapshot = useCallback((content: string) => {
     if (!editorView) return
@@ -291,7 +324,7 @@ export function AppShell() {
             onEditorView={handleEditorView}
           />
           <SubDocumentLinks />
-          <BubbleToolbar editorView={editorView} />
+          <BubbleToolbar editorView={editorView} onInsertMarker={handleInsertMarker} />
           <SnapshotBrowser
             open={snapshotsOpen}
             onClose={() => setSnapshotsOpen(false)}
@@ -320,6 +353,13 @@ export function AppShell() {
           <CharacterSheetModal
             open={characterSheetOpen}
             onClose={() => setCharacterSheetOpen(false)}
+          />
+          <DeltaEditorModal
+            open={deltaEditorState.open}
+            onClose={closeDeltaEditor}
+            markerId={deltaEditorState.markerId}
+            mode={deltaEditorState.mode}
+            editorView={editorView}
           />
         </div>
       </div>

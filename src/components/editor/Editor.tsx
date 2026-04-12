@@ -683,6 +683,9 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const view = new EditorView({ state, parent: containerRef.current })
     viewRef.current = view
     callbacksRef.current.onEditorView?.(view)
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __editorView?: EditorView }).__editorView = view
+    }
 
     // Load initial document content
     const store = useDocumentStore.getState()
