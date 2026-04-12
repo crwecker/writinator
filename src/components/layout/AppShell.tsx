@@ -191,6 +191,11 @@ export function AppShell() {
         void useDocumentStore.getState().closeBook()
         return
       }
+      if (km.toggleCharacterPanel && matchesEvent(km.toggleCharacterPanel, e)) {
+        e.preventDefault()
+        setCharacterPanelOpen((p) => !p)
+        return
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
@@ -402,7 +407,7 @@ export function AppShell() {
             data-testid="character-panel-button"
             onClick={() => setCharacterPanelOpen((p) => !p)}
             className="text-gray-500 hover:text-gray-300 transition-colors"
-            title="Character stats panel"
+            title="Character stats panel (Ctrl+Shift+C)"
           >
             Stats
           </button>

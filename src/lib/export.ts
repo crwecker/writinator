@@ -1189,6 +1189,7 @@ export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Pr
   const rootFolder = zip.folder(sanitizeFilename(book.title))!
 
   const ext = format === 'md' ? '.md' : format === 'txt' ? '.txt' : '.html'
+  const zipFormat: StatblockExportFormat = format === 'md' ? 'markdown' : format === 'txt' ? 'plain' : 'html'
 
   function addDocuments(parentId: string | undefined, folder: JSZip) {
     const children = book.documents.filter(d => d.parentId === parentId)
@@ -1200,7 +1201,12 @@ export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Pr
       usedNames.set(name, count + 1)
       if (count > 0) name = `${name} (${count + 1})`
 
-      const content = formatDocumentContent(doc, format)
+      const ctx = getCharacterMarkerContext(book, doc.id)
+      const processedDoc: Document = {
+        ...doc,
+        content: doc.content ? processCharacterMarkers(doc.content, ctx, zipFormat) : '',
+      }
+      const content = formatDocumentContent(processedDoc, format)
       folder.file(name + ext, content)
 
       const hasChildren = book.documents.some(d => d.parentId === doc.id)

@@ -805,6 +805,30 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         ;(window as unknown as {
           __renderBookAsMarkdown?: typeof mod.renderBookAsMarkdown
         }).__renderBookAsMarkdown = mod.renderBookAsMarkdown
+        ;(window as unknown as {
+          __exportSmokeTest?: () => {
+            ok: boolean
+            markerCount: number
+            statblockCount: number
+            length: number
+            preview: string
+          }
+        }).__exportSmokeTest = () => {
+          const book = useDocumentStore.getState().book
+          if (!book) {
+            return { ok: false, markerCount: 0, statblockCount: 0, length: 0, preview: '(no book)' }
+          }
+          const out = mod.renderBookAsMarkdown(book)
+          const markerCount = (out.match(/<!--\s*stat:/g) ?? []).length
+          const statblockCount = (out.match(/<!--\s*statblock:/g) ?? []).length
+          return {
+            ok: markerCount === 0,
+            markerCount,
+            statblockCount,
+            length: out.length,
+            preview: out.slice(0, 400),
+          }
+        }
       })
     }
     return unsubscribe

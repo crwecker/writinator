@@ -57,3 +57,13 @@ html {
 .animate-coin-pulse {
   animation: coin-pulse 0.4s ease-out;
 }
+
+@keyframes cm-value-flash {
+  0%   { color: var(--color-silk-100); text-shadow: 0 0 6px var(--color-silk-100); }
+  60%  { color: var(--color-silk-100); text-shadow: 0 0 2px rgba(250, 212, 192, 0.5); }
+  100% { color: inherit; text-shadow: none; }
+}
+
+.cm-value-flash {
+  animation: cm-value-flash 0.4s ease-out;
+}

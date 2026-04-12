@@ -91,6 +91,20 @@ interface StatRowProps {
 function StatRow({ character, def, base, effective, testId }: StatRowProps) {
   const [expanded, setExpanded] = useState(false)
   const differs = !valuesEqual(base, effective)
+  const valueRef = useRef<HTMLSpanElement>(null)
+  const prevEffectiveRef = useRef<StatValue | undefined>(effective)
+  useEffect(() => {
+    if (!valuesEqual(prevEffectiveRef.current, effective)) {
+      const el = valueRef.current
+      if (el) {
+        el.classList.remove('cm-value-flash')
+        // Force reflow so re-adding the class restarts the animation.
+        void el.offsetWidth
+        el.classList.add('cm-value-flash')
+      }
+    }
+    prevEffectiveRef.current = effective
+  }, [effective])
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex items-baseline justify-between gap-2">
@@ -99,6 +113,7 @@ function StatRow({ character, def, base, effective, testId }: StatRowProps) {
         </span>
         <div className="flex items-center gap-1.5 min-w-0">
           <span
+            ref={valueRef}
             data-testid={testId}
             className={`text-sm tabular-nums truncate ${
               differs ? 'text-blue-300' : 'text-gray-200'

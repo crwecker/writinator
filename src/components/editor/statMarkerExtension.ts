@@ -70,6 +70,41 @@ export function summarizeDeltas(
   return parts.join(', ')
 }
 
+/**
+ * Multi-line tooltip text describing a marker's full set of deltas plus any
+ * author note. Rendered as the native `title=` attribute on the dot widget —
+ * newlines separate deltas so compound markers read one-per-line.
+ */
+export function buildMarkerTooltip(
+  deltas: StatDelta[],
+  charactersById: Map<string, Character>
+): string {
+  if (deltas.length === 0) return 'Empty marker'
+  const firstCharacter = charactersById.get(deltas[0].characterId)
+  const headerName = firstCharacter?.name ?? 'Unknown'
+  const lines: string[] = [headerName]
+  const notes: string[] = []
+  for (const d of deltas) {
+    const character = charactersById.get(d.characterId)
+    const statName = (statId: string): string => {
+      if (!character) return statId
+      const def = character.stats.find((s) => s.id === statId)
+      return def?.name ?? statId
+    }
+    const summary = formatOp(d.op, statName)
+    // Prefix with character name when compound marker crosses characters.
+    if (character && character.id !== firstCharacter?.id) {
+      lines.push(`  [${character.name}] ${summary}`)
+    } else {
+      lines.push(`  ${summary}`)
+    }
+    const trimmedNote = d.note?.trim()
+    if (trimmedNote) notes.push(trimmedNote)
+  }
+  if (notes.length > 0) lines.push('', ...notes.map((n) => `"${n}"`))
+  return lines.join('\n')
+}
+
 function formatOp(
   op: StatDeltaOp,
   statName: (id: string) => string
@@ -188,8 +223,9 @@ function buildDecorations(view: EditorView): DecorationSet {
       const summary = deltas && deltas.length > 0
         ? summarizeDeltas(deltas, character)
         : 'Empty marker'
-      const nameLabel = character?.name ?? 'Unknown'
-      const tooltip = `${nameLabel}: ${summary}`
+      const tooltip = deltas && deltas.length > 0
+        ? buildMarkerTooltip(deltas, characterById)
+        : 'Empty marker'
       const ariaLabel = `Stat marker — ${summary}`
       builder.add(
         start,

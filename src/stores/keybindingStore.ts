@@ -9,6 +9,7 @@ export type ActionName =
   | 'closeBook'
   | 'snapshotHistory'
   | 'toggleRenderMode'
+  | 'toggleCharacterPanel'
 
 export interface KeyCombo {
   key: string  // e.g. 'f', 's', 'h'
@@ -28,6 +29,7 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   closeBook: 'Close Book',
   snapshotHistory: 'Snapshot history',
   toggleRenderMode: 'Toggle source/rendered',
+  toggleCharacterPanel: 'Toggle Character Panel',
 }
 
 export const DEFAULT_KEYMAP: KeyMap = {
@@ -37,6 +39,7 @@ export const DEFAULT_KEYMAP: KeyMap = {
   closeBook: { key: 'o', ctrl: true },
   snapshotHistory: { key: 'h', ctrl: true, shift: true },
   toggleRenderMode: { key: 'e', ctrl: true, shift: true },
+  toggleCharacterPanel: { key: 'c', ctrl: true, shift: true },
 }
 
 export function comboToString(combo: KeyCombo): string {
@@ -105,6 +108,15 @@ export const useKeybindingStore = create<KeybindingState>()(
       name: 'writinator-keybindings',
       storage: localforageStorage,
       partialize: (state) => ({ keymap: state.keymap }) as unknown as KeybindingState,
+      // Merge persisted keymap over defaults so new actions added in later
+      // versions receive their default bindings without requiring a reset.
+      merge: (persisted, current) => {
+        const p = persisted as Partial<KeybindingState> | undefined
+        return {
+          ...current,
+          keymap: { ...DEFAULT_KEYMAP, ...(p?.keymap ?? {}) },
+        }
+      },
     }
   )
 )
