@@ -24,6 +24,8 @@ interface WriteathonState {
   acceptBoardQuest: (quest: BoardQuest, sessionId: string) => void
   completeBoardQuest: (questId: string) => void
   resetWriteathon: () => void
+  pauseWriteathon: () => void
+  resumeWriteathon: () => void
 
   getCurrentBlock: () => number
   getDailyTarget: () => number
@@ -72,6 +74,7 @@ export const useWriteathonStore = create<WriteathonState>()(
       updateProgress: (currentBookWordCount: number) => {
         const { config, milestones } = get()
         if (!config || !config.active) return
+        if (config.paused) return
 
         let anyNewlyCompleted = false
         const playerStore = usePlayerStore.getState()
@@ -99,7 +102,7 @@ export const useWriteathonStore = create<WriteathonState>()(
             milestones: updatedMilestones,
             config: {
               ...config,
-              active: false,
+              active: true,
               completedAt: new Date().toISOString(),
             },
           })
@@ -168,6 +171,18 @@ export const useWriteathonStore = create<WriteathonState>()(
         set({ config: null, milestones: [], villagerQuests: [], activeBoardQuests: [], dailyQuestAccepted: false })
       },
 
+      pauseWriteathon: () => {
+        set((state) => ({
+          config: state.config ? { ...state.config, paused: true } : null,
+        }))
+      },
+
+      resumeWriteathon: () => {
+        set((state) => ({
+          config: state.config ? { ...state.config, paused: false } : null,
+        }))
+      },
+
       getCurrentBlock: () => {
         const { config, milestones } = get()
         if (!config) return 1
@@ -178,8 +193,10 @@ export const useWriteathonStore = create<WriteathonState>()(
       getDailyTarget: () => {
         const { config, milestones } = get()
         if (!config) return 0
+        if (config.paused) return 0
         const completedCount = milestones.filter((m) => m.completed).length
         const remainingBlocks = config.totalBlocks - completedCount
+        if (remainingBlocks === 0) return 0
         // currentWordCount is the target of the last completed milestone, or startingWordCount
         const lastCompleted = milestones.filter((m) => m.completed).at(-1)
         const currentWordCount = lastCompleted?.targetWordCount ?? config.startingWordCount

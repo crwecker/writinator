@@ -29,6 +29,8 @@ import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords } from '../../lib/words'
 import { JourneyBar } from './JourneyBar'
 import { DailyTarget } from './DailyTarget'
+import { MilestoneFlash } from './MilestoneFlash'
+import { WriteathonCompleteCelebration } from '../quests/WriteathonCompleteCelebration'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -208,6 +210,8 @@ export function AppShell() {
   return (
     <>
     <RewardToast />
+    <MilestoneFlash />
+    <WriteathonCompleteCelebration />
     <div className="flex flex-col h-screen w-screen bg-bg-darker text-gray-200 overflow-hidden">
       {/* Top bar — hidden in distraction-free mode */}
       {!distractionFree && (

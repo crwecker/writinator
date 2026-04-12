@@ -145,7 +145,7 @@ export function JourneyBar({ bookWordCount }: JourneyBarProps) {
           if (isCompleted) {
             sizeClass = 'w-2 h-2'
             fillClass = colorClass
-            animClass = isJustCompleted ? 'milestone-just-completed' : ''
+            animClass = isJustCompleted ? 'milestone-just-completed milestone-pop' : ''
           } else if (isCurrent) {
             sizeClass = 'w-2 h-2'
             fillClass = `bg-gray-900 border ${outlineClass} animate-pulse`

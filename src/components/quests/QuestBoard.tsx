@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import {
@@ -9,6 +9,7 @@ import {
 } from '../../lib/writeathon'
 import type { BoardQuest } from '../../types'
 import { ParchmentCard } from './ParchmentCard'
+import { WriteathonSetup } from './WriteathonSetup'
 
 interface QuestBoardProps {
   open: boolean
@@ -17,6 +18,7 @@ interface QuestBoardProps {
 
 export function QuestBoard({ open, onClose }: QuestBoardProps) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const [setupOpen, setSetupOpen] = useState(false)
 
   const config = useWriteathonStore((s) => s.config)
   const milestones = useWriteathonStore((s) => s.milestones)
@@ -101,12 +103,20 @@ export function QuestBoard({ open, onClose }: QuestBoardProps) {
         <div className="text-center mb-8">
           <h1 className="font-serif text-3xl font-bold text-amber-50">Quest Board</h1>
           <p className="text-amber-300 text-sm mt-1">Adventurer's Guild</p>
+          {!config?.active && (
+            <button
+              onClick={() => setSetupOpen(true)}
+              className="mt-4 font-serif font-semibold px-6 py-2 rounded-lg border-2 border-amber-700 text-amber-300 bg-amber-950/40 hover:bg-amber-900/50 hover:text-amber-200 hover:border-amber-600 transition-all text-sm tracking-wide shadow-md"
+            >
+              &#x2694; Start Writeathon
+            </button>
+          )}
         </div>
 
         {/* Daily Writeathon Quest */}
         <section className="mb-8">
           <h2 className="font-serif text-xl text-amber-200 mb-4">Today's Writeathon Quest</h2>
-          {config?.active ? (
+          {config?.active && !config?.completedAt ? (
             <ParchmentCard
               variant="daily"
               title={getDailyQuestTitle(currentBlock)}
@@ -208,6 +218,8 @@ export function QuestBoard({ open, onClose }: QuestBoardProps) {
           </section>
         )}
       </div>
+
+      <WriteathonSetup open={setupOpen} onClose={() => setSetupOpen(false)} />
     </div>
   )
 }
