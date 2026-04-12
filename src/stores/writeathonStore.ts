@@ -1,0 +1,177 @@
+import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import * as localforage from 'localforage'
+import type { WriteathonConfig, WriteathonMilestone, BoardQuest } from '../types'
+import { calculateDailyTarget, createMilestones } from '../lib/writeathon'
+import { usePlayerStore } from './playerStore'
+
+interface WriteathonState {
+  config: WriteathonConfig | null
+  milestones: WriteathonMilestone[]
+  villagerQuests: BoardQuest[]
+  dailyQuestAccepted: boolean
+  _hasHydrated: boolean
+
+  startWriteathon: (startingWordCount: number, targetWordCount: number, totalBlocks?: number) => void
+  updateProgress: (currentBookWordCount: number) => void
+  acceptDailyQuest: () => void
+  completeDailyQuest: (sessionId: string) => void
+  addVillagerQuest: (quest: BoardQuest) => void
+  removeVillagerQuest: (questId: string) => void
+  resetWriteathon: () => void
+
+  getCurrentBlock: () => number
+  getDailyTarget: () => number
+  getRemainingBlocks: () => number
+  getCompletedBlocks: () => number
+}
+
+const localforageStorage = createJSONStorage<WriteathonState>(() => ({
+  getItem: async (name: string) => {
+    const value = await localforage.getItem<string>(name)
+    return value
+  },
+  setItem: async (name: string, value: string) => {
+    await localforage.setItem(name, value)
+  },
+  removeItem: async (name: string) => {
+    await localforage.removeItem(name)
+  },
+}))
+
+export const useWriteathonStore = create<WriteathonState>()(
+  persist(
+    (set, get) => ({
+      config: null,
+      milestones: [],
+      villagerQuests: [],
+      dailyQuestAccepted: false,
+      _hasHydrated: false,
+
+      startWriteathon: (startingWordCount: number, targetWordCount: number, totalBlocks = 24) => {
+        const wordsPerBlock = Math.ceil((targetWordCount - startingWordCount) / totalBlocks)
+        const config: WriteathonConfig = {
+          id: crypto.randomUUID(),
+          startDate: new Date().toISOString(),
+          startingWordCount,
+          targetWordCount,
+          totalBlocks,
+          wordsPerBlock,
+          active: true,
+        }
+        const milestones = createMilestones(startingWordCount, wordsPerBlock, totalBlocks)
+        set({ config, milestones, villagerQuests: [], dailyQuestAccepted: false })
+      },
+
+      updateProgress: (currentBookWordCount: number) => {
+        const { config, milestones } = get()
+        if (!config || !config.active) return
+
+        let anyNewlyCompleted = false
+        const playerStore = usePlayerStore.getState()
+
+        const updatedMilestones = milestones.map((milestone) => {
+          if (milestone.completed) return milestone
+          if (currentBookWordCount >= milestone.targetWordCount) {
+            anyNewlyCompleted = true
+            playerStore.addCoins(milestone.coinsAwarded)
+            return {
+              ...milestone,
+              completed: true,
+              completedAt: new Date().toISOString(),
+            }
+          }
+          return milestone
+        })
+
+        const allComplete = updatedMilestones.every((m) => m.completed)
+
+        if (allComplete && anyNewlyCompleted) {
+          set({
+            milestones: updatedMilestones,
+            config: {
+              ...config,
+              active: false,
+              completedAt: new Date().toISOString(),
+            },
+          })
+        } else if (anyNewlyCompleted) {
+          set({ milestones: updatedMilestones })
+        }
+      },
+
+      acceptDailyQuest: () => {
+        set({ dailyQuestAccepted: true })
+      },
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      completeDailyQuest: (_sessionId: string) => {
+        // Phase 2 will flesh this out
+      },
+
+      addVillagerQuest: (quest: BoardQuest) => {
+        set((state) => ({ villagerQuests: [...state.villagerQuests, quest] }))
+      },
+
+      removeVillagerQuest: (questId: string) => {
+        set((state) => ({
+          villagerQuests: state.villagerQuests.filter((q) => q.id !== questId),
+        }))
+      },
+
+      resetWriteathon: () => {
+        set({ config: null, milestones: [], villagerQuests: [], dailyQuestAccepted: false })
+      },
+
+      getCurrentBlock: () => {
+        const { config, milestones } = get()
+        if (!config) return 1
+        const completedCount = milestones.filter((m) => m.completed).length
+        return Math.min(completedCount + 1, config.totalBlocks)
+      },
+
+      getDailyTarget: () => {
+        const { config, milestones } = get()
+        if (!config) return 0
+        const completedCount = milestones.filter((m) => m.completed).length
+        const remainingBlocks = config.totalBlocks - completedCount
+        // currentWordCount is the target of the last completed milestone, or startingWordCount
+        const lastCompleted = milestones.filter((m) => m.completed).at(-1)
+        const currentWordCount = lastCompleted?.targetWordCount ?? config.startingWordCount
+        return calculateDailyTarget(config.targetWordCount, currentWordCount, remainingBlocks)
+      },
+
+      getRemainingBlocks: () => {
+        const { config, milestones } = get()
+        if (!config) return 0
+        const completedCount = milestones.filter((m) => m.completed).length
+        return config.totalBlocks - completedCount
+      },
+
+      getCompletedBlocks: () => {
+        const { milestones } = get()
+        return milestones.filter((m) => m.completed).length
+      },
+    }),
+    {
+      name: 'writinator-writeathon',
+      storage: localforageStorage,
+      version: 1,
+      partialize: (state) =>
+        ({
+          config: state.config,
+          milestones: state.milestones,
+          villagerQuests: state.villagerQuests,
+          dailyQuestAccepted: state.dailyQuestAccepted,
+        }) as unknown as WriteathonState,
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('[writeathonStore] rehydration error:', error)
+        }
+        if (state) {
+          useWriteathonStore.setState({ _hasHydrated: true })
+        }
+      },
+    }
+  )
+)

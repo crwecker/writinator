@@ -5,6 +5,7 @@ import type { Book, Document, DocumentStyles, GlobalSettings, WritinatorFile } f
 import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
 import { useImageRevealStore } from './imageRevealStore'
+import { useWriteathonStore } from './writeathonStore'
 import { countWords } from '../lib/words'
 
 interface DocumentState {
@@ -449,6 +450,15 @@ export const useDocumentStore = create<DocumentState>()(
             _contentUpdateTimer: null,
             _pendingContent: null,
           })
+          // Update writeathon progress with new total book word count
+          const updatedBook = get().book
+          if (updatedBook) {
+            const totalBookWords = updatedBook.documents.reduce(
+              (sum, doc) => sum + countWords(doc.content),
+              0
+            )
+            useWriteathonStore.getState().updateProgress(totalBookWords)
+          }
         }, 1500)
         set({ _contentUpdateTimer: timer, _pendingContent: content })
       },

@@ -164,3 +164,43 @@ export interface PlayerStats {
   totalWords: number
   totalCoins: number
 }
+
+// Writeathon types
+export type BoardQuestType = 'permanent' | 'daily' | 'villager'
+export type MilestoneTier = 'apprentice' | 'journeyman' | 'master' | 'legendary'
+
+export interface WriteathonConfig {
+  id: string
+  startDate: string
+  startingWordCount: number
+  targetWordCount: number
+  totalBlocks: number
+  wordsPerBlock: number
+  active: boolean
+  completedAt?: string
+}
+
+export interface WriteathonMilestone {
+  blockNumber: number
+  targetWordCount: number
+  completed: boolean
+  completedAt?: string
+  coinsAwarded: number
+  tier: MilestoneTier
+}
+
+export interface BoardQuest {
+  id: string
+  type: BoardQuestType
+  wordGoal: number
+  timeMinutes?: number
+  title: string
+  description: string
+  coinReward: number
+  bonusCoins?: number
+  accepted: boolean
+  acceptedAt?: string
+  imageRevealSessionId?: string
+  createdAt: string
+  completedAt?: string
+}
