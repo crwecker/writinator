@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { countWords } from '../../lib/words'
 
@@ -16,14 +16,14 @@ export function QuestReminder({ onStartQuest }: QuestReminderProps) {
   // Ref for the timer so it can be cleaned up
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
-  const book = useDocumentStore((s) => s.book)
+  const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
+  const book = useStoryletStore((s) => s.book)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
 
   const currentWordCount = (() => {
-    if (!book || !activeDocumentId) return 0
-    const doc = book.documents.find((d) => d.id === activeDocumentId)
-    return countWords(doc?.content ?? null)
+    if (!book || !activeStoryletId) return 0
+    const storylet = book.storylets.find((d) => d.id === activeStoryletId)
+    return countWords(storylet?.content ?? null)
   })()
 
   // Keep a stable ref to the previous word count

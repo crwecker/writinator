@@ -1,5 +1,5 @@
 import { useRecentFilesStore } from '../../stores/recentFilesStore'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { openFile } from '../../lib/fileSystem'
 import type { WritinatorFile, RecentFile } from '../../types'
 
@@ -49,14 +49,14 @@ export function LandingPage() {
   const recentFiles = useRecentFilesStore((s) => s.recentFiles)
 
   async function handleCreateBook() {
-    useDocumentStore.getState().createBook('Untitled Book')
+    useStoryletStore.getState().createBook('Untitled Book')
   }
 
   async function handleOpenFile() {
     try {
       const result = await openFile()
       if (result !== null) {
-        useDocumentStore.getState().loadFile(result)
+        useStoryletStore.getState().loadFile(result)
       }
     } catch {
       // swallow user-cancel errors
@@ -74,7 +74,7 @@ export function LandingPage() {
       const fileData = await file.handle.getFile()
       const text = await fileData.text()
       const parsed = JSON.parse(text) as WritinatorFile
-      useDocumentStore.getState().loadFile(parsed)
+      useStoryletStore.getState().loadFile(parsed)
     } catch (err) {
       console.error('Failed to open recent file:', err)
       useRecentFilesStore.getState().removeRecent(file.name)

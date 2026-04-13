@@ -1,7 +1,7 @@
 import type {
   Book,
   Character,
-  Document,
+  Storylet,
   DocumentStyles,
   GlobalSettings,
   NamedStyle,
@@ -28,7 +28,7 @@ function flattenGlobalSettings(gs: GlobalSettings | undefined): GlobalSettings {
     : gs
 }
 
-// Shape of the old format (pre-v2): a plain Book with `chapters` instead of `documents`
+// Shape of the old format (pre-v2): a plain Book with `chapters` instead of `storylets`
 interface OldChapter {
   id: string
   name: string
@@ -43,6 +43,15 @@ interface OldBook {
   title: string
   chapters: OldChapter[]
   documentStyles?: DocumentStyles
+  createdAt: string
+  updatedAt: string
+}
+
+// v3 book shape (used `documents` instead of `storylets`)
+interface LegacyV3Book {
+  id: string
+  title: string
+  documents: Storylet[]
   createdAt: string
   updatedAt: string
 }
@@ -80,8 +89,28 @@ function isV3File(data: Record<string, unknown>): boolean {
   )
 }
 
+function isV4File(data: Record<string, unknown>): boolean {
+  return (
+    data.version === 4 &&
+    isRecord(data.book) &&
+    typeof (data.book as Record<string, unknown>).id === 'string' &&
+    typeof (data.book as Record<string, unknown>).title === 'string' &&
+    Array.isArray((data.book as Record<string, unknown>).storylets)
+  )
+}
+
+function v3BookToV4(book: LegacyV3Book): Book {
+  return {
+    id: book.id,
+    title: book.title,
+    storylets: book.documents,
+    createdAt: book.createdAt,
+    updatedAt: book.updatedAt,
+  }
+}
+
 function migrateOldBook(old: OldBook): WritinatorFile {
-  const documents: Document[] = old.chapters.map((ch) => ({
+  const storylets: Storylet[] = old.chapters.map((ch) => ({
     id: ch.id,
     name: ch.name,
     content: ch.content,
@@ -98,13 +127,13 @@ function migrateOldBook(old: OldBook): WritinatorFile {
   const book: Book = {
     id: old.id,
     title: old.title,
-    documents,
+    storylets,
     createdAt: old.createdAt,
     updatedAt: old.updatedAt,
   }
 
   return {
-    version: 3,
+    version: 4,
     book,
     snapshots: {},
     globalSettings,
@@ -114,17 +143,17 @@ function migrateOldBook(old: OldBook): WritinatorFile {
 }
 
 /**
- * Migrate any file data (old/v2/v3) into a v3 WritinatorFile.
+ * Migrate any file data (old/v2/v3/v4) into a v4 WritinatorFile.
  */
 export function migrateFile(data: unknown): WritinatorFile {
   if (!isRecord(data)) {
     throw new Error('Invalid file: expected a JSON object')
   }
 
-  // v3 — already current
-  if (isV3File(data)) {
+  // v4 — already current
+  if (isV4File(data)) {
     return {
-      version: 3,
+      version: 4,
       book: data.book as Book,
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
@@ -133,11 +162,25 @@ export function migrateFile(data: unknown): WritinatorFile {
     }
   }
 
-  // v2 → v3: add empty characters + markers
-  if (isV2File(data)) {
+  // v3 → v4: rename book.documents → book.storylets
+  if (isV3File(data)) {
+    const legacyBook = data.book as unknown as LegacyV3Book
     return {
-      version: 3,
-      book: data.book as Book,
+      version: 4,
+      book: v3BookToV4(legacyBook),
+      snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
+      globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
+      characters: (data.characters ?? []) as Character[],
+      markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
+    }
+  }
+
+  // v2 → v4: add empty characters + markers, rename documents → storylets
+  if (isV2File(data)) {
+    const legacyBook = data.book as unknown as LegacyV3Book
+    return {
+      version: 4,
+      book: v3BookToV4(legacyBook),
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: [],

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useCharacterStore } from '../../stores/characterStore'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { computeHistory } from '../../lib/characterState'
 import type { HistorySample, StatDefinition, StatValue } from '../../types'
 
@@ -41,7 +41,7 @@ export function ProgressionGraph({ characterId }: Props) {
     s.characters.find((c) => c.id === characterId)
   )
   const markers = useCharacterStore((s) => s.markers)
-  const book = useDocumentStore((s) => s.book)
+  const book = useStoryletStore((s) => s.book)
 
   const history: HistorySample[] = useMemo(() => {
     if (!character || !book) return []
@@ -90,8 +90,8 @@ export function ProgressionGraph({ characterId }: Props) {
         markerIndex: sample.markerIndex,
         value: n.value,
         max: n.max,
-        documentId: sample.documentId,
-        documentName: sample.documentName,
+        storyletId: sample.storyletId,
+        storyletName: sample.storyletName,
         offset: sample.offset,
       }
     })
@@ -154,11 +154,11 @@ export function ProgressionGraph({ characterId }: Props) {
     gridlines.push({ yPos: y(val), label: Math.round(val * 100) / 100 })
   }
 
-  // Document boundaries (vertical dashed lines) — where documentId changes
+  // Storylet boundaries (vertical dashed lines) — where storyletId changes
   const boundaries: { x: number; name: string }[] = []
   for (let i = 1; i < points.length; i++) {
-    if (points[i].documentId !== points[i - 1].documentId) {
-      boundaries.push({ x: x(i), name: points[i].documentName })
+    if (points[i].storyletId !== points[i - 1].storyletId) {
+      boundaries.push({ x: x(i), name: points[i].storyletName })
     }
   }
 
@@ -222,7 +222,7 @@ export function ProgressionGraph({ characterId }: Props) {
             </g>
           ))}
 
-          {/* Document boundaries */}
+          {/* Storylet boundaries */}
           {boundaries.map((b, i) => (
             <g key={`bnd-${i}`}>
               <line
@@ -293,7 +293,7 @@ export function ProgressionGraph({ characterId }: Props) {
                 data-marker-index={p.markerIndex}
                 data-value={p.value}
               >
-                <title>{`#${i} • ${selected.def.name} ${p.value}${p.max !== undefined ? '/' + p.max : ''} • ${p.documentName} @ ${p.offset}`}</title>
+                <title>{`#${i} • ${selected.def.name} ${p.value}${p.max !== undefined ? '/' + p.max : ''} • ${p.storyletName} @ ${p.offset}`}</title>
               </circle>
             </g>
           ))}

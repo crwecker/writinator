@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useWriteathonStore } from '../../stores/writeathonStore'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { countWords } from '../../lib/words'
 
 interface WriteathonSetupProps {
@@ -22,10 +22,10 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
 
   const config = useWriteathonStore((s) => s.config)
   const milestones = useWriteathonStore((s) => s.milestones)
-  const book = useDocumentStore((s) => s.book)
+  const book = useStoryletStore((s) => s.book)
 
   const startingWordCount =
-    book?.documents.reduce((sum, doc) => sum + countWords(doc.content), 0) ?? 0
+    book?.storylets.reduce((sum, storylet) => sum + countWords(storylet.content), 0) ?? 0
 
   const [targetWordCount, setTargetWordCount] = useState(79755)
   const [totalBlocks, setTotalBlocks] = useState(24)

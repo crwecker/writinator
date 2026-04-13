@@ -4,7 +4,7 @@ import type {
   Character,
   CharacterState,
   ConsistencyIssue,
-  Document,
+  Storylet,
   EquippedItem,
   HistorySample,
   StatDefinition,
@@ -337,27 +337,27 @@ export function computeEffective(
 }
 
 /**
- * Depth-first flatten of the book's document tree: parents precede children,
- * siblings preserve their array order in `book.documents`. Matches the
+ * Depth-first flatten of the book's storylet tree: parents precede children,
+ * siblings preserve their array order in `book.storylets`. Matches the
  * Sidebar's `flattenTree` minus collapse filtering (state computation must
- * consider every document).
+ * consider every storylet).
  */
-export function getDocumentTreeOrder(book: Book): Document[] {
-  const docs = book.documents ?? []
-  const childrenByParent = new Map<string | undefined, Document[]>()
-  for (const doc of docs) {
-    const key = doc.parentId
+export function getStoryletTreeOrder(book: Book): Storylet[] {
+  const storylets = book.storylets ?? []
+  const childrenByParent = new Map<string | undefined, Storylet[]>()
+  for (const storylet of storylets) {
+    const key = storylet.parentId
     const list = childrenByParent.get(key) ?? []
-    list.push(doc)
+    list.push(storylet)
     childrenByParent.set(key, list)
   }
-  const result: Document[] = []
+  const result: Storylet[] = []
   const walk = (parentId: string | undefined) => {
     const kids = childrenByParent.get(parentId)
     if (!kids) return
-    for (const doc of kids) {
-      result.push(doc)
-      walk(doc.id)
+    for (const storylet of kids) {
+      result.push(storylet)
+      walk(storylet.id)
     }
   }
   walk(undefined)
@@ -365,7 +365,7 @@ export function getDocumentTreeOrder(book: Book): Document[] {
 }
 
 export interface ComputeStopAt {
-  documentId: string
+  storyletId: string
   offset: number
 }
 
@@ -396,11 +396,11 @@ export function computeStateAt(
     activeBuffs: [],
   }
 
-  const order = getDocumentTreeOrder(book)
-  for (const doc of order) {
-    const content = doc.content ?? ''
+  const order = getStoryletTreeOrder(book)
+  for (const storylet of order) {
+    const content = storylet.content ?? ''
     const extracted = extractMarkers(content)
-    const isStopDoc = stopAt?.documentId === doc.id
+    const isStopDoc = stopAt?.storyletId === storylet.id
 
     for (const marker of extracted) {
       if (isStopDoc && marker.offset >= stopAt!.offset) {
@@ -450,7 +450,7 @@ export function computeHistory(
   book: Book,
   markers: Record<string, StatDelta[]>
 ): HistorySample[] {
-  const order = getDocumentTreeOrder(book)
+  const order = getStoryletTreeOrder(book)
   const samples: HistorySample[] = []
 
   let state: CharacterState = {
@@ -459,12 +459,12 @@ export function computeHistory(
     activeBuffs: [],
   }
 
-  const firstDoc = order[0]
+  const firstStorylet = order[0]
   const baseSample: HistorySample = {
     markerIndex: 0,
     offset: 0,
-    documentId: firstDoc?.id ?? '',
-    documentName: firstDoc?.name ?? '',
+    storyletId: firstStorylet?.id ?? '',
+    storyletName: firstStorylet?.name ?? '',
     effective: computeEffective(state, character.stats),
     wordIndex: 0,
   }
@@ -473,8 +473,8 @@ export function computeHistory(
   let markerIndex = 0
   let cumulativeWords = 0
 
-  for (const doc of order) {
-    const content = doc.content ?? ''
+  for (const storylet of order) {
+    const content = storylet.content ?? ''
     const extracted = extractMarkers(content)
 
     let prevOffset = 0
@@ -497,13 +497,13 @@ export function computeHistory(
       samples.push({
         markerIndex,
         offset: marker.offset,
-        documentId: doc.id,
-        documentName: doc.name,
+        storyletId: storylet.id,
+        storyletName: storylet.name,
         effective: computeEffective(state, character.stats),
         wordIndex: cumulativeWords,
       })
     }
-    // Add trailing words of this doc so cross-doc word counts progress.
+    // Add trailing words of this storylet so cross-storylet word counts progress.
     cumulativeWords += countWords(content.slice(prevOffset))
   }
 
@@ -526,7 +526,7 @@ export function checkConsistency(
   markers: Record<string, StatDelta[]>
 ): ConsistencyIssue[] {
   const issues: ConsistencyIssue[] = []
-  const order = getDocumentTreeOrder(book)
+  const order = getStoryletTreeOrder(book)
   const charactersById = new Map(characters.map((c) => [c.id, c]))
   const seenMarkerIds = new Set<string>()
 
@@ -544,7 +544,7 @@ export function checkConsistency(
   const checkImpossible = (
     c: Character,
     state: CharacterState,
-    documentId: string,
+    storyletId: string,
     offset: number
   ) => {
     const eff = computeEffective(state, c.stats)
@@ -558,7 +558,7 @@ export function checkConsistency(
             characterId: c.id,
             statId: def.id,
             reason: `${def.name} ${v.value}/${v.max} — current exceeds max`,
-            documentId,
+            storyletId,
             offset,
           })
         }
@@ -568,7 +568,7 @@ export function checkConsistency(
             characterId: c.id,
             statId: def.id,
             reason: `${def.name} ${v.value}/${v.max} — negative value`,
-            documentId,
+            storyletId,
             offset,
           })
         }
@@ -576,8 +576,8 @@ export function checkConsistency(
     }
   }
 
-  for (const doc of order) {
-    const content = doc.content ?? ''
+  for (const storylet of order) {
+    const content = storylet.content ?? ''
     const extracted = extractMarkers(content)
     for (const marker of extracted) {
       if (marker.kind !== 'delta') continue
@@ -587,7 +587,7 @@ export function checkConsistency(
         issues.push({
           kind: 'orphanMarker',
           markerId: marker.id,
-          documentId: doc.id,
+          storyletId: storylet.id,
           offset: marker.offset,
         })
         continue
@@ -629,7 +629,7 @@ export function checkConsistency(
         if (!c || !state) continue
         const ticked = tickBuffs(state)
         simStates.set(cid, ticked)
-        checkImpossible(c, ticked, doc.id, marker.offset)
+        checkImpossible(c, ticked, storylet.id, marker.offset)
       }
     }
   }

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { Book, Document, DocumentStyles, GlobalSettings, NamedStyle, WritinatorFile } from '../types'
+import type { Book, Storylet, DocumentStyles, GlobalSettings, NamedStyle, WritinatorFile } from '../types'
 
 function createDefaultDocumentStyles(): DocumentStyles {
   return {
@@ -32,9 +32,9 @@ import { useWriteathonStore } from './writeathonStore'
 import { useCharacterStore } from './characterStore'
 import { countWords } from '../lib/words'
 
-interface DocumentState {
+interface StoryletState {
   book: Book | null
-  activeDocumentId: string | null
+  activeStoryletId: string | null
   globalSettings: GlobalSettings
   hasHydrated: boolean
   _contentUpdateTimer: ReturnType<typeof setTimeout> | null
@@ -46,19 +46,19 @@ interface DocumentState {
   loadFile: (file: WritinatorFile) => void
   renameBook: (title: string) => void
 
-  // Document CRUD
-  addDocument: (name?: string, parentId?: string) => string
-  duplicateDocument: (id: string) => string
-  renameDocument: (id: string, name: string) => void
-  setDocumentIcon: (id: string, icon: string | undefined) => void
-  setDocumentColor: (id: string, color: string | undefined) => void
-  deleteDocument: (id: string) => void
-  reorderDocuments: (ids: string[]) => void
-  moveDocument: (id: string, newParentId: string | undefined, insertIndex: number) => void
-  setActiveDocument: (id: string | null) => void
+  // Storylet CRUD
+  addStorylet: (name?: string, parentId?: string) => string
+  duplicateStorylet: (id: string) => string
+  renameStorylet: (id: string, name: string) => void
+  setStoryletIcon: (id: string, icon: string | undefined) => void
+  setStoryletColor: (id: string, color: string | undefined) => void
+  deleteStorylet: (id: string) => void
+  reorderStorylets: (ids: string[]) => void
+  moveStorylet: (id: string, newParentId: string | undefined, insertIndex: number) => void
+  setActiveStorylet: (id: string | null) => void
 
   // Content
-  updateDocumentContent: (content: string) => void
+  updateStoryletContent: (content: string) => void
   _flushContentUpdate: () => void
 
   // Global settings
@@ -73,61 +73,71 @@ function generateId(): string {
 }
 
 /** Walk up the parentId chain to check if docId is a descendant of ancestorId */
-function isDescendant(documents: Document[], docId: string, ancestorId: string): boolean {
+function isDescendant(storylets: Storylet[], docId: string, ancestorId: string): boolean {
   let currentId: string | undefined = docId
   while (currentId) {
-    const doc = documents.find((d) => d.id === currentId)
-    if (!doc?.parentId) return false
-    if (doc.parentId === ancestorId) return true
-    currentId = doc.parentId
+    const storylet = storylets.find((d) => d.id === currentId)
+    if (!storylet?.parentId) return false
+    if (storylet.parentId === ancestorId) return true
+    currentId = storylet.parentId
   }
   return false
 }
 
-/** Returns the depth of a document (0 for top-level / undefined id) */
-function getDocumentDepth(documents: Document[], id: string | undefined): number {
+/** Returns the depth of a storylet (0 for top-level / undefined id) */
+function getStoryletDepth(storylets: Storylet[], id: string | undefined): number {
   let depth = 0
   let currentId = id
   while (currentId) {
-    const doc = documents.find((d) => d.id === currentId)
-    if (!doc?.parentId) break
+    const storylet = storylets.find((d) => d.id === currentId)
+    if (!storylet?.parentId) break
     depth++
-    currentId = doc.parentId
+    currentId = storylet.parentId
   }
   return depth
 }
 
-/** Returns the max depth below this document (0 if leaf) */
-function getSubtreeDepth(documents: Document[], id: string): number {
-  const children = documents.filter((d) => d.parentId === id)
+/** Returns the max depth below this storylet (0 if leaf) */
+function getSubtreeDepth(storylets: Storylet[], id: string): number {
+  const children = storylets.filter((d) => d.parentId === id)
   if (children.length === 0) return 0
-  return 1 + Math.max(...children.map((c) => getSubtreeDepth(documents, c.id)))
+  return 1 + Math.max(...children.map((c) => getSubtreeDepth(storylets, c.id)))
 }
 
-/** Collect a document and all its descendants in flat-array order */
-function collectSubtree(documents: Document[], id: string): Document[] {
+/** Collect a storylet and all its descendants in flat-array order */
+function collectSubtree(storylets: Storylet[], id: string): Storylet[] {
   const ids = new Set<string>([id])
   let changed = true
   while (changed) {
     changed = false
-    for (const doc of documents) {
-      if (doc.parentId && ids.has(doc.parentId) && !ids.has(doc.id)) {
-        ids.add(doc.id)
+    for (const storylet of storylets) {
+      if (storylet.parentId && ids.has(storylet.parentId) && !ids.has(storylet.id)) {
+        ids.add(storylet.id)
         changed = true
       }
     }
   }
-  return documents.filter((doc) => ids.has(doc.id))
+  return storylets.filter((storylet) => ids.has(storylet.id))
 }
 
 function now(): string {
   return new Date().toISOString()
 }
 
-const localforageStorage = createJSONStorage<DocumentState>(() => ({
+const localforageStorage = createJSONStorage<StoryletState>(() => ({
   getItem: async (name: string) => {
     const value = await localforage.getItem<string>(name)
-    return value
+    if (value !== null) return value
+    // Fallback: if reading the new key and nothing is there, try the legacy key
+    if (name === 'writinator-storylet') {
+      const legacy = await localforage.getItem<string>('writinator-document')
+      if (legacy !== null) {
+        await localforage.setItem(name, legacy)
+        await localforage.removeItem('writinator-document')
+        return legacy
+      }
+    }
+    return null
   },
   setItem: async (name: string, value: string) => {
     await localforage.setItem(name, value)
@@ -137,11 +147,11 @@ const localforageStorage = createJSONStorage<DocumentState>(() => ({
   },
 }))
 
-export const useDocumentStore = create<DocumentState>()(
+export const useStoryletStore = create<StoryletState>()(
   persist(
     (set, get) => ({
       book: null,
-      activeDocumentId: null,
+      activeStoryletId: null,
       globalSettings: {},
       hasHydrated: false,
       _contentUpdateTimer: null,
@@ -149,15 +159,15 @@ export const useDocumentStore = create<DocumentState>()(
 
       createBook: (title: string) => {
         const timestamp = now()
-        const documentId = generateId()
+        const storyletId = generateId()
         set({
           book: {
             id: generateId(),
             title,
-            documents: [
+            storylets: [
               {
-                id: documentId,
-                name: 'Document 1',
+                id: storyletId,
+                name: 'Storylet 1',
                 content: null,
                 createdAt: timestamp,
                 updatedAt: timestamp,
@@ -166,7 +176,7 @@ export const useDocumentStore = create<DocumentState>()(
             createdAt: timestamp,
             updatedAt: timestamp,
           },
-          activeDocumentId: documentId,
+          activeStoryletId: storyletId,
           globalSettings: { documentStyles: createDefaultDocumentStyles() },
         })
       },
@@ -176,7 +186,7 @@ export const useDocumentStore = create<DocumentState>()(
         set({
           book: file.book,
           globalSettings: file.globalSettings,
-          activeDocumentId: file.book.documents[0]?.id ?? null,
+          activeStoryletId: file.book.storylets[0]?.id ?? null,
         })
         loadSnapshotsFromFile(file.snapshots)
         useCharacterStore.getState().loadFromFile(
@@ -204,33 +214,33 @@ export const useDocumentStore = create<DocumentState>()(
         }
         clearFileHandle()
         useCharacterStore.getState().reset()
-        set({ book: null, activeDocumentId: null })
+        set({ book: null, activeStoryletId: null })
       },
 
-      addDocument: (name?: string, parentId?: string) => {
+      addStorylet: (name?: string, parentId?: string) => {
         const { book } = get()
         if (!book) return ''
         const id = generateId()
         const timestamp = now()
-        const siblings = book.documents.filter((doc) => doc.parentId === parentId)
-        const documentName = name ?? `Document ${siblings.length + 1}`
-        const document: Document = {
+        const siblings = book.storylets.filter((s) => s.parentId === parentId)
+        const storyletName = name ?? `Storylet ${siblings.length + 1}`
+        const storylet: Storylet = {
           id,
-          name: documentName,
+          name: storyletName,
           content: null,
           ...(parentId ? { parentId } : {}),
           createdAt: timestamp,
           updatedAt: timestamp,
         }
         // Insert after last sibling of the same parent (or its descendants)
-        let insertIdx = book.documents.length
+        let insertIdx = book.storylets.length
         if (parentId) {
-          const parentIdx = book.documents.findIndex((doc) => doc.id === parentId)
+          const parentIdx = book.storylets.findIndex((s) => s.id === parentId)
           if (parentIdx !== -1) {
             // Find the last descendant of this parent
             insertIdx = parentIdx + 1
-            for (let i = parentIdx + 1; i < book.documents.length; i++) {
-              if (isDescendant(book.documents, book.documents[i].id, parentId)) {
+            for (let i = parentIdx + 1; i < book.storylets.length; i++) {
+              if (isDescendant(book.storylets, book.storylets[i].id, parentId)) {
                 insertIdx = i + 1
               } else {
                 break
@@ -238,184 +248,184 @@ export const useDocumentStore = create<DocumentState>()(
             }
           }
         }
-        const documents = [...book.documents]
-        documents.splice(insertIdx, 0, document)
+        const storylets = [...book.storylets]
+        storylets.splice(insertIdx, 0, storylet)
         set({
-          book: { ...book, documents, updatedAt: timestamp },
-          activeDocumentId: id,
+          book: { ...book, storylets, updatedAt: timestamp },
+          activeStoryletId: id,
         })
         return id
       },
 
-      duplicateDocument: (id: string) => {
+      duplicateStorylet: (id: string) => {
         const { book } = get()
         if (!book) return ''
         const timestamp = now()
 
-        // Collect the target document and all its descendants (in order)
-        const target = book.documents.find((doc) => doc.id === id)
+        // Collect the target storylet and all its descendants (in order)
+        const target = book.storylets.find((s) => s.id === id)
         if (!target) return ''
 
-        // Gather original docs to copy: target + descendants in order
-        const toCopy = collectSubtree(book.documents, id)
+        // Gather original storylets to copy: target + descendants in order
+        const toCopy = collectSubtree(book.storylets, id)
 
         // Build old→new ID map
         const idMap = new Map<string, string>()
-        for (const doc of toCopy) {
-          idMap.set(doc.id, generateId())
+        for (const storylet of toCopy) {
+          idMap.set(storylet.id, generateId())
         }
 
         // Create copies with remapped IDs
-        const copies: Document[] = toCopy.map((doc, i) => ({
-          ...doc,
-          id: idMap.get(doc.id)!,
-          name: i === 0 ? `${doc.name} (copy)` : doc.name,
-          parentId: doc.parentId && idMap.has(doc.parentId)
-            ? idMap.get(doc.parentId)!
-            : doc.parentId,
+        const copies: Storylet[] = toCopy.map((storylet, i) => ({
+          ...storylet,
+          id: idMap.get(storylet.id)!,
+          name: i === 0 ? `${storylet.name} (copy)` : storylet.name,
+          parentId: storylet.parentId && idMap.has(storylet.parentId)
+            ? idMap.get(storylet.parentId)!
+            : storylet.parentId,
           createdAt: timestamp,
           updatedAt: timestamp,
         }))
 
         // Find insertion point: after the last descendant of the original
         const subtreeIds = new Set(toCopy.map((d) => d.id))
-        let lastDescIdx = book.documents.findIndex((doc) => doc.id === id)
-        for (let i = lastDescIdx + 1; i < book.documents.length; i++) {
-          if (subtreeIds.has(book.documents[i].id)) {
+        let lastDescIdx = book.storylets.findIndex((s) => s.id === id)
+        for (let i = lastDescIdx + 1; i < book.storylets.length; i++) {
+          if (subtreeIds.has(book.storylets[i].id)) {
             lastDescIdx = i
           } else {
             break
           }
         }
 
-        const documents = [...book.documents]
-        documents.splice(lastDescIdx + 1, 0, ...copies)
+        const storylets = [...book.storylets]
+        storylets.splice(lastDescIdx + 1, 0, ...copies)
 
         const newRootId = idMap.get(id)!
         set({
-          book: { ...book, documents, updatedAt: timestamp },
-          activeDocumentId: newRootId,
+          book: { ...book, storylets, updatedAt: timestamp },
+          activeStoryletId: newRootId,
         })
         return newRootId
       },
 
-      renameDocument: (id: string, name: string) => {
+      renameStorylet: (id: string, name: string) => {
         const { book } = get()
         if (!book) return
         set({
           book: {
             ...book,
-            documents: book.documents.map((doc) =>
-              doc.id === id ? { ...doc, name, updatedAt: now() } : doc
+            storylets: book.storylets.map((storylet) =>
+              storylet.id === id ? { ...storylet, name, updatedAt: now() } : storylet
             ),
             updatedAt: now(),
           },
         })
       },
 
-      setDocumentIcon: (id: string, icon: string | undefined) => {
+      setStoryletIcon: (id: string, icon: string | undefined) => {
         const { book } = get()
         if (!book) return
         set({
           book: {
             ...book,
-            documents: book.documents.map((doc) =>
-              doc.id === id ? { ...doc, icon, updatedAt: now() } : doc
+            storylets: book.storylets.map((storylet) =>
+              storylet.id === id ? { ...storylet, icon, updatedAt: now() } : storylet
             ),
             updatedAt: now(),
           },
         })
       },
 
-      setDocumentColor: (id: string, color: string | undefined) => {
+      setStoryletColor: (id: string, color: string | undefined) => {
         const { book } = get()
         if (!book) return
         set({
           book: {
             ...book,
-            documents: book.documents.map((doc) =>
-              doc.id === id ? { ...doc, color, updatedAt: now() } : doc
+            storylets: book.storylets.map((storylet) =>
+              storylet.id === id ? { ...storylet, color, updatedAt: now() } : storylet
             ),
             updatedAt: now(),
           },
         })
       },
 
-      deleteDocument: (id: string) => {
-        const { book, activeDocumentId } = get()
+      deleteStorylet: (id: string) => {
+        const { book, activeStoryletId } = get()
         if (!book) return
         // Collect all descendant ids
         const toDelete = new Set<string>([id])
         let changed = true
         while (changed) {
           changed = false
-          for (const doc of book.documents) {
-            if (doc.parentId && toDelete.has(doc.parentId) && !toDelete.has(doc.id)) {
-              toDelete.add(doc.id)
+          for (const storylet of book.storylets) {
+            if (storylet.parentId && toDelete.has(storylet.parentId) && !toDelete.has(storylet.id)) {
+              toDelete.add(storylet.id)
               changed = true
             }
           }
         }
-        const remaining = book.documents.filter((doc) => !toDelete.has(doc.id))
+        const remaining = book.storylets.filter((s) => !toDelete.has(s.id))
         if (remaining.length === 0) return
-        const newActiveId = toDelete.has(activeDocumentId ?? '')
+        const newActiveId = toDelete.has(activeStoryletId ?? '')
           ? remaining[0].id
-          : activeDocumentId
+          : activeStoryletId
         set({
-          book: { ...book, documents: remaining, updatedAt: now() },
-          activeDocumentId: newActiveId,
+          book: { ...book, storylets: remaining, updatedAt: now() },
+          activeStoryletId: newActiveId,
         })
       },
 
-      reorderDocuments: (ids: string[]) => {
+      reorderStorylets: (ids: string[]) => {
         const { book } = get()
         if (!book) return
-        const documentMap = new Map(book.documents.map((doc) => [doc.id, doc]))
+        const storyletMap = new Map(book.storylets.map((s) => [s.id, s]))
         const reordered = ids
-          .map((id) => documentMap.get(id))
-          .filter((doc): doc is Document => doc !== undefined)
+          .map((id) => storyletMap.get(id))
+          .filter((s): s is Storylet => s !== undefined)
         set({
-          book: { ...book, documents: reordered, updatedAt: now() },
+          book: { ...book, storylets: reordered, updatedAt: now() },
         })
       },
 
-      setActiveDocument: (id: string | null) => {
+      setActiveStorylet: (id: string | null) => {
         // Flush any pending content update before switching
         get()._flushContentUpdate()
-        // Snapshot the document we're leaving
-        const { book, activeDocumentId } = get()
-        if (book && activeDocumentId && activeDocumentId !== id) {
-          const document = book.documents.find((doc) => doc.id === activeDocumentId)
-          if (document?.content) {
-            createSnapshot(activeDocumentId, document.content, 'switch')
+        // Snapshot the storylet we're leaving
+        const { book, activeStoryletId } = get()
+        if (book && activeStoryletId && activeStoryletId !== id) {
+          const storylet = book.storylets.find((s) => s.id === activeStoryletId)
+          if (storylet?.content) {
+            createSnapshot(activeStoryletId, storylet.content, 'switch')
           }
         }
-        set({ activeDocumentId: id })
+        set({ activeStoryletId: id })
       },
 
-      moveDocument: (id: string, newParentId: string | undefined, insertIndex: number) => {
+      moveStorylet: (id: string, newParentId: string | undefined, insertIndex: number) => {
         const { book } = get()
         if (!book) return
 
-        const doc = book.documents.find((d) => d.id === id)
-        if (!doc) return
+        const storylet = book.storylets.find((d) => d.id === id)
+        if (!storylet) return
 
         // Cannot move into own descendants (circular)
-        if (newParentId && isDescendant(book.documents, newParentId, id)) return
+        if (newParentId && isDescendant(book.storylets, newParentId, id)) return
 
         // Depth check: new depth + subtree depth must not exceed MAX_DEPTH (4)
-        const newDepth = newParentId ? getDocumentDepth(book.documents, newParentId) + 1 : 0
-        const subtreeDepth = getSubtreeDepth(book.documents, id)
+        const newDepth = newParentId ? getStoryletDepth(book.storylets, newParentId) + 1 : 0
+        const subtreeDepth = getSubtreeDepth(book.storylets, id)
         if (newDepth + subtreeDepth > 4) return
 
-        // Collect the block to move (document + descendants in order)
-        const block = collectSubtree(book.documents, id)
+        // Collect the block to move (storylet + descendants in order)
+        const block = collectSubtree(book.storylets, id)
         const blockIds = new Set(block.map((d) => d.id))
 
         // Remove block from array
-        const remaining = book.documents.filter((d) => !blockIds.has(d.id))
+        const remaining = book.storylets.filter((d) => !blockIds.has(d.id))
 
-        // Update parentId on the moved document
+        // Update parentId on the moved storylet
         block[0] = { ...block[0], parentId: newParentId, updatedAt: now() }
 
         // Find new siblings and determine insertion point in flat array
@@ -435,8 +445,8 @@ export const useDocumentStore = create<DocumentState>()(
           } else {
             const lastSibling = newSiblings[newSiblings.length - 1]
             const lastSiblingSubtree = collectSubtree(remaining, lastSibling.id)
-            const lastDocInSubtree = lastSiblingSubtree[lastSiblingSubtree.length - 1]
-            flatInsertIdx = remaining.indexOf(lastDocInSubtree) + 1
+            const lastInSubtree = lastSiblingSubtree[lastSiblingSubtree.length - 1]
+            flatInsertIdx = remaining.indexOf(lastInSubtree) + 1
           }
         } else {
           // Insert before the sibling at insertIndex
@@ -449,20 +459,20 @@ export const useDocumentStore = create<DocumentState>()(
         result.splice(flatInsertIdx, 0, ...block)
 
         set({
-          book: { ...book, documents: result, updatedAt: now() },
+          book: { ...book, storylets: result, updatedAt: now() },
         })
       },
 
-      updateDocumentContent: (content: string) => {
+      updateStoryletContent: (content: string) => {
         const { _contentUpdateTimer } = get()
         if (_contentUpdateTimer) {
           clearTimeout(_contentUpdateTimer)
         }
         const timer = setTimeout(() => {
-          const { book, activeDocumentId, _pendingContent } = get()
-          if (!book || !activeDocumentId || !_pendingContent) return
+          const { book, activeStoryletId, _pendingContent } = get()
+          if (!book || !activeStoryletId || !_pendingContent) return
           // Track word delta for quest progress
-          const oldContent = book.documents.find((doc) => doc.id === activeDocumentId)?.content ?? null
+          const oldContent = book.storylets.find((s) => s.id === activeStoryletId)?.content ?? null
           const oldWords = countWords(oldContent)
           const newWords = countWords(_pendingContent)
           const delta = newWords - oldWords
@@ -472,10 +482,10 @@ export const useDocumentStore = create<DocumentState>()(
           set({
             book: {
               ...book,
-              documents: book.documents.map((doc) =>
-                doc.id === activeDocumentId
-                  ? { ...doc, content: _pendingContent, updatedAt: now() }
-                  : doc
+              storylets: book.storylets.map((storylet) =>
+                storylet.id === activeStoryletId
+                  ? { ...storylet, content: _pendingContent, updatedAt: now() }
+                  : storylet
               ),
               updatedAt: now(),
             },
@@ -485,8 +495,8 @@ export const useDocumentStore = create<DocumentState>()(
           // Update writeathon progress with new total book word count
           const updatedBook = get().book
           if (updatedBook) {
-            const totalBookWords = updatedBook.documents.reduce(
-              (sum, doc) => sum + countWords(doc.content),
+            const totalBookWords = updatedBook.storylets.reduce(
+              (sum, s) => sum + countWords(s.content),
               0
             )
             useWriteathonStore.getState().updateProgress(totalBookWords)
@@ -516,18 +526,18 @@ export const useDocumentStore = create<DocumentState>()(
           const { [oldName]: renamed, ...rest } = existingStyles
           nextStyles = { ...rest, [newName]: renamed }
         }
-        // Rewrite class="oldName" references in all documents (any tag/attrs)
+        // Rewrite class="oldName" references in all storylets (any tag/attrs)
         const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
         const classRegex = new RegExp(`class="${escaped}"`, 'g')
         const needle = `class="${oldName}"`
         const nextBook = book
           ? {
               ...book,
-              documents: book.documents.map((doc) => {
-                if (!doc.content || !doc.content.includes(needle)) return doc
-                const updated = doc.content.replace(classRegex, `class="${newName}"`)
-                if (updated === doc.content) return doc
-                return { ...doc, content: updated, updatedAt: now() }
+              storylets: book.storylets.map((storylet) => {
+                if (!storylet.content || !storylet.content.includes(needle)) return storylet
+                const updated = storylet.content.replace(classRegex, `class="${newName}"`)
+                if (updated === storylet.content) return storylet
+                return { ...storylet, content: updated, updatedAt: now() }
               }),
               updatedAt: now(),
             }
@@ -539,38 +549,38 @@ export const useDocumentStore = create<DocumentState>()(
       },
 
       replaceInlineStyleInOtherDocs: (styleString: string, className: string) => {
-        const { book, activeDocumentId } = get()
+        const { book, activeStoryletId } = get()
         if (!book) return 0
         const needle = `<span style="${styleString}">`
         const replacement = `<span class="${className}">`
         let total = 0
-        const nextDocs = book.documents.map((doc) => {
-          if (doc.id === activeDocumentId) return doc
-          if (!doc.content || !doc.content.includes(needle)) return doc
-          const parts = doc.content.split(needle)
+        const nextStorylets = book.storylets.map((storylet) => {
+          if (storylet.id === activeStoryletId) return storylet
+          if (!storylet.content || !storylet.content.includes(needle)) return storylet
+          const parts = storylet.content.split(needle)
           const count = parts.length - 1
-          if (count === 0) return doc
+          if (count === 0) return storylet
           total += count
-          return { ...doc, content: parts.join(replacement), updatedAt: now() }
+          return { ...storylet, content: parts.join(replacement), updatedAt: now() }
         })
         if (total === 0) return 0
-        set({ book: { ...book, documents: nextDocs, updatedAt: now() } })
+        set({ book: { ...book, storylets: nextStorylets, updatedAt: now() } })
         return total
       },
 
       _flushContentUpdate: () => {
-        const { _contentUpdateTimer, _pendingContent, book, activeDocumentId } = get()
+        const { _contentUpdateTimer, _pendingContent, book, activeStoryletId } = get()
         if (_contentUpdateTimer) {
           clearTimeout(_contentUpdateTimer)
         }
-        if (_pendingContent && book && activeDocumentId) {
+        if (_pendingContent && book && activeStoryletId) {
           set({
             book: {
               ...book,
-              documents: book.documents.map((doc) =>
-                doc.id === activeDocumentId
-                  ? { ...doc, content: _pendingContent, updatedAt: now() }
-                  : doc
+              storylets: book.storylets.map((storylet) =>
+                storylet.id === activeStoryletId
+                  ? { ...storylet, content: _pendingContent, updatedAt: now() }
+                  : storylet
               ),
               updatedAt: now(),
             },
@@ -583,15 +593,15 @@ export const useDocumentStore = create<DocumentState>()(
       },
     }),
     {
-      name: 'writinator-document',
-      version: 2,
+      name: 'writinator-storylet',
+      version: 3,
       storage: localforageStorage,
       partialize: (state) =>
         ({
           book: state.book,
-          activeDocumentId: state.activeDocumentId,
+          activeStoryletId: state.activeStoryletId,
           globalSettings: state.globalSettings,
-        }) as unknown as DocumentState,
+        }) as unknown as StoryletState,
       migrate: (persisted, version) => {
         if (version === 0) {
           // v0→v1: documentStyles moved into globalSettings
@@ -608,26 +618,42 @@ export const useDocumentStore = create<DocumentState>()(
             gs.documentStyles = flattenDocumentStyles(gs.documentStyles)
           }
         }
-        // Ensure book.documents exists (old data may use 'chapters')
+        if (version < 3) {
+          // v2→v3: rename book.documents → book.storylets, activeDocumentId → activeStoryletId
+          const state = persisted as Record<string, unknown>
+          if ('activeDocumentId' in state) {
+            state.activeStoryletId = state.activeDocumentId
+            delete state.activeDocumentId
+          }
+          const book = state.book as Record<string, unknown> | undefined
+          if (book && 'documents' in book && !('storylets' in book)) {
+            book.storylets = book.documents
+            delete book.documents
+          }
+        }
+        // Ensure book.storylets exists (old data may use 'chapters' or 'documents')
         const state = persisted as Record<string, unknown>
         const book = state.book as Record<string, unknown> | undefined
-        if (book && !book.documents) {
-          book.documents = book.chapters ?? []
+        if (book && !book.storylets) {
+          book.storylets = book.documents ?? book.chapters ?? []
+          delete book.documents
           delete book.chapters
         }
-        return persisted as DocumentState
+        return persisted as StoryletState
       },
       onRehydrateStorage: () => (state, error) => {
         if (error) {
-          console.error('[documentStore] rehydration error:', error)
+          console.error('[storyletStore] rehydration error:', error)
         }
-        // Ensure book.documents exists (old data may use 'chapters' or be missing)
-        if (state?.book && !state.book.documents) {
-          const legacy = (state.book as unknown as Record<string, unknown>).chapters as Document[] | undefined
-          state.book = { ...state.book, documents: legacy ?? [] }
+        // Ensure book.storylets exists (old data may use 'chapters' or 'documents' or be missing)
+        if (state?.book && !state.book.storylets) {
+          const bookRaw = state.book as unknown as Record<string, unknown>
+          const legacyDocs = bookRaw.documents as Storylet[] | undefined
+          const legacyChapters = bookRaw.chapters as Storylet[] | undefined
+          state.book = { ...state.book, storylets: legacyDocs ?? legacyChapters ?? [] }
         }
-        // useDocumentStore is defined by the time this callback fires (zustand defers it)
-        useDocumentStore.setState({ hasHydrated: true })
+        // useStoryletStore is defined by the time this callback fires (zustand defers it)
+        useStoryletStore.setState({ hasHydrated: true })
       },
     }
   )

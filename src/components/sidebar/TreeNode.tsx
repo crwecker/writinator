@@ -3,13 +3,13 @@ import { useSortable } from '@dnd-kit/sortable'
 import { ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
 import { getIconComponent } from '../../lib/icons'
 import { AppearancePicker } from './AppearancePicker'
-import { useDocumentStore } from '../../stores/documentStore'
-import type { Document } from '../../types'
+import { useStoryletStore } from '../../stores/storyletStore'
+import type { Storylet } from '../../types'
 
 export type DropIndicator = 'insert-before' | 'insert-after' | 'reparent' | 'invalid' | null
 
 interface TreeNodeProps {
-  doc: Document
+  storylet: Storylet
   depth: number
   isActive: boolean
   hasChildren: boolean
@@ -20,14 +20,14 @@ interface TreeNodeProps {
   onClick: () => void
   onRename: (name: string) => void
   onDelete: () => void
-  onAddSubDocument: () => void
+  onAddSubStorylet: () => void
   isDeletable: boolean
   autoEdit?: boolean
   onAutoEditConsumed?: () => void
 }
 
 export function TreeNode({
-  doc,
+  storylet,
   depth,
   isActive,
   hasChildren,
@@ -38,13 +38,13 @@ export function TreeNode({
   onClick,
   onRename,
   onDelete,
-  onAddSubDocument,
+  onAddSubStorylet,
   isDeletable,
   autoEdit,
   onAutoEditConsumed,
 }: TreeNodeProps) {
   const [isEditing, setIsEditing] = useState(autoEdit ?? false)
-  const [editValue, setEditValue] = useState(doc.name)
+  const [editValue, setEditValue] = useState(storylet.name)
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
@@ -58,7 +58,7 @@ export function TreeNode({
     listeners,
     setNodeRef,
     isDragging,
-  } = useSortable({ id: doc.id })
+  } = useSortable({ id: storylet.id })
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -86,14 +86,14 @@ export function TreeNode({
   }, [showContextMenu])
 
   function startEditing() {
-    setEditValue(doc.name)
+    setEditValue(storylet.name)
     setIsEditing(true)
     setShowContextMenu(false)
   }
 
   function commitRename() {
     const trimmed = editValue.trim()
-    if (trimmed && trimmed !== doc.name) {
+    if (trimmed && trimmed !== storylet.name) {
       onRename(trimmed)
     }
     setIsEditing(false)
@@ -115,18 +115,18 @@ export function TreeNode({
   }
 
   function handleDuplicate() {
-    useDocumentStore.getState().duplicateDocument(doc.id)
+    useStoryletStore.getState().duplicateStorylet(storylet.id)
     setShowContextMenu(false)
   }
 
   function getDescendantCount(): number {
-    const book = useDocumentStore.getState().book
+    const book = useStoryletStore.getState().book
     if (!book) return 0
-    const ids = new Set<string>([doc.id])
+    const ids = new Set<string>([storylet.id])
     let changed = true
     while (changed) {
       changed = false
-      for (const d of book.documents ?? []) {
+      for (const d of book.storylets ?? []) {
         if (d.parentId && ids.has(d.parentId) && !ids.has(d.id)) {
           ids.add(d.id)
           changed = true
@@ -149,12 +149,12 @@ export function TreeNode({
   }
 
   function handleIconSelect(iconName: string | undefined) {
-    useDocumentStore.getState().setDocumentIcon(doc.id, iconName)
+    useStoryletStore.getState().setStoryletIcon(storylet.id, iconName)
     setShowAppearancePicker(false)
   }
 
   function handleColorSelect(color: string | undefined) {
-    useDocumentStore.getState().setDocumentColor(doc.id, color)
+    useStoryletStore.getState().setStoryletColor(storylet.id, color)
     setShowAppearancePicker(false)
   }
 
@@ -173,8 +173,8 @@ export function TreeNode({
       {/* Main row */}
       <div
         style={{
-          paddingLeft: `${depth * 20 + (doc.color ? 6 : 0)}px`,
-          borderLeft: doc.color ? `2px solid ${doc.color}` : '2px solid transparent',
+          paddingLeft: `${depth * 20 + (storylet.color ? 6 : 0)}px`,
+          borderLeft: storylet.color ? `2px solid ${storylet.color}` : '2px solid transparent',
         }}
         className={`group flex items-center gap-1 py-1 px-2 cursor-pointer select-none text-sm rounded-sm mx-1
           ${isActive ? 'bg-blue-300/20 text-white' : 'text-gray-300 hover:bg-gray-700/50'}
@@ -208,10 +208,10 @@ export function TreeNode({
         <button
           type="button"
           className="shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-white"
-          style={doc.color ? { color: doc.color } : undefined}
+          style={storylet.color ? { color: storylet.color } : undefined}
           onClick={openAppearanceFromIconButton}
         >
-          {createElement(getIconComponent(doc.icon ?? ''), { size: 16 })}
+          {createElement(getIconComponent(storylet.icon ?? ''), { size: 16 })}
         </button>
 
         {/* Middle zone: name / rename input */}
@@ -229,7 +229,7 @@ export function TreeNode({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="truncate flex-1" style={doc.color ? { color: doc.color } : undefined}>{doc.name}</span>
+          <span className="truncate flex-1" style={storylet.color ? { color: storylet.color } : undefined}>{storylet.name}</span>
         )}
 
         {/* Right zone: action buttons (visible on hover) */}
@@ -245,7 +245,7 @@ export function TreeNode({
               className="p-0.5 rounded text-gray-400 hover:text-white"
               onClick={(e) => {
                 e.stopPropagation()
-                onAddSubDocument()
+                onAddSubStorylet()
               }}
             >
               <Plus size={16} />
@@ -266,8 +266,8 @@ export function TreeNode({
                   {(() => {
                     const count = getDescendantCount()
                     return count > 0
-                      ? `Delete '${doc.name}' and ${count} sub-document${count > 1 ? 's' : ''}?`
-                      : `Delete '${doc.name}'?`
+                      ? `Delete '${storylet.name}' and ${count} sub-storylet${count > 1 ? 's' : ''}?`
+                      : `Delete '${storylet.name}'?`
                   })()}
                 </p>
                 <div className="flex items-center gap-2">
@@ -330,10 +330,10 @@ export function TreeNode({
                   onClick={(e) => {
                     e.stopPropagation()
                     setShowContextMenu(false)
-                    onAddSubDocument()
+                    onAddSubStorylet()
                   }}
                 >
-                  Add sub-document
+                  Add sub-storylet
                 </button>
                 {isDeletable && (
                   <>
@@ -362,7 +362,7 @@ export function TreeNode({
         onSelectIcon={handleIconSelect}
         onSelectColor={handleColorSelect}
         anchorRect={appearancePickerRect}
-        currentColor={doc.color}
+        currentColor={storylet.color}
       />
 
       {/* Insert-after indicator line */}

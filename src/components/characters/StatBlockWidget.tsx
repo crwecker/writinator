@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useCharacterStore } from '../../stores/characterStore'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { computeStateAt } from '../../lib/characterState'
 import type {
   ActiveBuff,
@@ -13,8 +13,8 @@ import type {
 interface StatBlockWidgetProps {
   characterId: string
   fields?: string[]
-  documentId: string
-  offsetInDocument: number
+  storyletId: string
+  offsetInStorylet: number
 }
 
 const DEFAULT_FIELD_IDS = ['hp', 'mp', 'level', 'xp', 'attributes']
@@ -180,12 +180,12 @@ function BuffsSection({ buffs }: { buffs: ActiveBuff[] }) {
 export default function StatBlockWidget({
   characterId,
   fields,
-  documentId,
-  offsetInDocument,
+  storyletId,
+  offsetInStorylet,
 }: StatBlockWidgetProps) {
   const characters = useCharacterStore((s) => s.characters)
   const markers = useCharacterStore((s) => s.markers)
-  const book = useDocumentStore((s) => s.book)
+  const book = useStoryletStore((s) => s.book)
 
   const character: Character | undefined = useMemo(
     () => characters.find((c) => c.id === characterId),
@@ -195,10 +195,10 @@ export default function StatBlockWidget({
   const computed = useMemo(() => {
     if (!character || !book) return null
     return computeStateAt(character, book, markers, {
-      documentId,
-      offset: offsetInDocument,
+      storyletId,
+      offset: offsetInStorylet,
     })
-  }, [character, book, markers, documentId, offsetInDocument])
+  }, [character, book, markers, storyletId, offsetInStorylet])
 
   if (!character) {
     return (

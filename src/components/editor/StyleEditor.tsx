@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import type { NamedStyle } from '../../types'
 import { DEFAULT_STYLE_NAMES } from '../../types'
 
@@ -194,9 +194,9 @@ function NamedStyleFields({
 
 export function StyleEditor({ open, onClose, editorView }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
-  const updateGlobalSettings = useDocumentStore((s) => s.updateGlobalSettings)
-  const renameStyle = useDocumentStore((s) => s.renameStyle)
+  const documentStyles = useStoryletStore((s) => s.globalSettings.documentStyles)
+  const updateGlobalSettings = useStoryletStore((s) => s.updateGlobalSettings)
+  const renameStyle = useStoryletStore((s) => s.renameStyle)
 
   const setStyles = (next: Record<string, NamedStyle>) => {
     updateGlobalSettings({ documentStyles: next })
@@ -287,9 +287,9 @@ export function StyleEditor({ open, onClose, editorView }: Props) {
                     renameStyle(name, newName)
                     // Resync the CodeMirror buffer with the (possibly) rewritten active doc
                     if (editorView) {
-                      const store = useDocumentStore.getState()
-                      const active = store.book?.documents?.find(
-                        (d) => d.id === store.activeDocumentId
+                      const store = useStoryletStore.getState()
+                      const active = store.book?.storylets?.find(
+                        (d) => d.id === store.activeStoryletId
                       )
                       const content = active?.content ?? ''
                       if (content !== editorView.state.doc.toString()) {

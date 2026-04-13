@@ -8,7 +8,7 @@ import VimStatusLine from '../editor/VimStatusLine'
 import type { VimMode } from '../editor/VimStatusLine'
 import { ShortcutsMenu } from './ShortcutsMenu'
 import { ExportMenu } from './ExportMenu'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { quickSave, saveAsNewFile } from '../../lib/fileSystem'
 import { createSnapshot } from '../../stores/snapshotStore'
@@ -22,7 +22,7 @@ import { CharacterSheetModal } from '../characters/CharacterSheetModal'
 import { CharacterPanel } from '../characters/CharacterPanel'
 import { DeltaEditorModal } from '../characters/DeltaEditorModal'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
-import { SubDocumentLinks } from '../editor/SubDocumentLinks'
+import { SubStoryletLinks } from '../editor/SubStoryletLinks'
 import { LandingPage } from './LandingPage'
 import { RewardToast } from '../quests/RewardToast'
 import { usePlayerStore } from '../../stores/playerStore'
@@ -57,14 +57,14 @@ export function AppShell() {
   const retroactiveGrantApplied = usePlayerStore((s) => s.retroactiveGrantApplied)
   const prevCoinsRef = useRef(coins)
 
-  const book = useDocumentStore((s) => s.book)
-  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
-  const hasHydrated = useDocumentStore((s) => s.hasHydrated)
-  const renameBook = useDocumentStore((s) => s.renameBook)
-  const renameDocument = useDocumentStore((s) => s.renameDocument)
+  const book = useStoryletStore((s) => s.book)
+  const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
+  const hasHydrated = useStoryletStore((s) => s.hasHydrated)
+  const renameBook = useStoryletStore((s) => s.renameBook)
+  const renameStorylet = useStoryletStore((s) => s.renameStorylet)
   const bookWordCount = useMemo(
-    () => book?.documents.reduce((sum, doc) => sum + countWords(doc.content), 0) ?? 0,
-    [book?.documents],
+    () => book?.storylets.reduce((sum, storylet) => sum + countWords(storylet.content), 0) ?? 0,
+    [book?.storylets],
   )
   const distractionFree = useEditorStore((s) => s.distractionFree)
   const toggleDistractionFree = useEditorStore((s) => s.toggleDistractionFree)
@@ -72,12 +72,12 @@ export function AppShell() {
   const sidebarOpen = useEditorStore((s) => s.sidebarOpen)
   const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
 
-  const activeDocument = book?.documents?.find((doc) => doc.id === activeDocumentId)
+  const activeStorylet = book?.storylets?.find((storylet) => storylet.id === activeStoryletId)
 
   const [editingBookTitle, setEditingBookTitle] = useState(false)
   const [bookTitleValue, setBookTitleValue] = useState('')
-  const [editingDocTitle, setEditingDocTitle] = useState(false)
-  const [docTitleValue, setDocTitleValue] = useState('')
+  const [editingStoryletTitle, setEditingStoryletTitle] = useState(false)
+  const [storyletTitleValue, setStoryletTitleValue] = useState('')
 
   const startEditingBookTitle = useCallback(() => {
     if (!book) return
@@ -91,19 +91,19 @@ export function AppShell() {
     setEditingBookTitle(false)
   }, [bookTitleValue, book?.title, renameBook])
 
-  const startEditingDocTitle = useCallback(() => {
-    if (!activeDocument) return
-    setDocTitleValue(activeDocument.name)
-    setEditingDocTitle(true)
-  }, [activeDocument])
+  const startEditingStoryletTitle = useCallback(() => {
+    if (!activeStorylet) return
+    setStoryletTitleValue(activeStorylet.name)
+    setEditingStoryletTitle(true)
+  }, [activeStorylet])
 
-  const commitDocTitle = useCallback(() => {
-    const trimmed = docTitleValue.trim()
-    if (trimmed && activeDocumentId && trimmed !== activeDocument?.name) {
-      renameDocument(activeDocumentId, trimmed)
+  const commitStoryletTitle = useCallback(() => {
+    const trimmed = storyletTitleValue.trim()
+    if (trimmed && activeStoryletId && trimmed !== activeStorylet?.name) {
+      renameStorylet(activeStoryletId, trimmed)
     }
-    setEditingDocTitle(false)
-  }, [docTitleValue, activeDocumentId, activeDocument?.name, renameDocument])
+    setEditingStoryletTitle(false)
+  }, [storyletTitleValue, activeStoryletId, activeStorylet?.name, renameStorylet])
 
   const handleWordCountChange = useCallback((c: number) => setWordCount(c), [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
@@ -144,7 +144,7 @@ export function AppShell() {
     editorView.dispatch({
       changes: { from: 0, to: editorView.state.doc.length, insert: content },
     })
-    useDocumentStore.getState().updateDocumentContent(content)
+    useStoryletStore.getState().updateStoryletContent(content)
   }, [editorView])
 
   // Global keyboard shortcuts (driven by keybinding store)
@@ -169,13 +169,13 @@ export function AppShell() {
       }
       if (matchesEvent(km.saveToDisk, e)) {
         e.preventDefault()
-        const state = useDocumentStore.getState()
+        const state = useStoryletStore.getState()
         state._flushContentUpdate()
-        const { book: currentBook, activeDocumentId: docId, globalSettings } = useDocumentStore.getState()
+        const { book: currentBook, activeStoryletId: docId, globalSettings } = useStoryletStore.getState()
         if (currentBook) {
-          const doc = docId ? currentBook.documents.find((d) => d.id === docId) : null
-          const snapshotPromise = doc?.content
-            ? createSnapshot(docId!, doc.content, 'manual')
+          const storylet = docId ? currentBook.storylets.find((d) => d.id === docId) : null
+          const snapshotPromise = storylet?.content
+            ? createSnapshot(docId!, storylet.content, 'manual')
             : Promise.resolve(null)
           snapshotPromise.then(() =>
             quickSave(currentBook, globalSettings).then((saved) => {
@@ -192,7 +192,7 @@ export function AppShell() {
       }
       if (matchesEvent(km.closeBook, e)) {
         e.preventDefault()
-        void useDocumentStore.getState().closeBook()
+        void useStoryletStore.getState().closeBook()
         return
       }
       if (km.toggleCharacterPanel && matchesEvent(km.toggleCharacterPanel, e)) {
@@ -220,14 +220,14 @@ export function AppShell() {
   // Auto-snapshot every 5 minutes
   useEffect(() => {
     const interval = setInterval(() => {
-      const { book, activeDocumentId } = useDocumentStore.getState()
-      if (!book || !activeDocumentId) return
-      useDocumentStore.getState()._flushContentUpdate()
-      const document = useDocumentStore.getState().book?.documents?.find(
-        (doc) => doc.id === activeDocumentId
+      const { book, activeStoryletId } = useStoryletStore.getState()
+      if (!book || !activeStoryletId) return
+      useStoryletStore.getState()._flushContentUpdate()
+      const storylet = useStoryletStore.getState().book?.storylets?.find(
+        (s) => s.id === activeStoryletId
       )
-      if (document?.content) {
-        createSnapshot(activeDocumentId, document.content, 'auto')
+      if (storylet?.content) {
+        createSnapshot(activeStoryletId, storylet.content, 'auto')
       }
     }, 5 * 60 * 1000)
     return () => clearInterval(interval)
@@ -299,28 +299,28 @@ export function AppShell() {
                 {book?.title ?? 'Writinator'}
               </span>
             )}
-            {activeDocument && (
+            {activeStorylet && (
               <>
                 <span className="text-gray-600 shrink-0">—</span>
-                {editingDocTitle ? (
+                {editingStoryletTitle ? (
                   <input
                     autoFocus
                     className="bg-gray-800 border border-blue-300 rounded px-1 py-0 text-sm text-white font-medium outline-none"
-                    value={docTitleValue}
-                    onChange={(e) => setDocTitleValue(e.target.value)}
-                    onBlur={commitDocTitle}
+                    value={storyletTitleValue}
+                    onChange={(e) => setStoryletTitleValue(e.target.value)}
+                    onBlur={commitStoryletTitle}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') commitDocTitle()
-                      if (e.key === 'Escape') setEditingDocTitle(false)
+                      if (e.key === 'Enter') commitStoryletTitle()
+                      if (e.key === 'Escape') setEditingStoryletTitle(false)
                     }}
                   />
                 ) : (
                   <span
                     className="text-gray-400 font-medium truncate cursor-default"
-                    onDoubleClick={startEditingDocTitle}
-                    title="Double-click to rename document"
+                    onDoubleClick={startEditingStoryletTitle}
+                    title="Double-click to rename storylet"
                   >
-                    {activeDocument.name}
+                    {activeStorylet.name}
                   </span>
                 )}
               </>
@@ -355,7 +355,7 @@ export function AppShell() {
             onVimModeChange={handleVimModeChange}
             onEditorView={handleEditorView}
           />
-          <SubDocumentLinks />
+          <SubStoryletLinks />
           <BubbleToolbar
             editorView={editorView}
             onInsertMarker={handleInsertMarker}

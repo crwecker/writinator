@@ -3,7 +3,7 @@ import type {
   Book,
   Character,
   CharacterState,
-  Document,
+  Storylet,
   EquippedItem,
   StatDelta,
   StatDefinition,
@@ -173,19 +173,19 @@ export function renderStatblockText(
 
 interface CharacterMarkerContext {
   book: Book
-  documentId: string
+  storyletId: string
   characters: Character[]
   markers: Record<string, StatDelta[]>
 }
 
 function getCharacterMarkerContext(
   book: Book,
-  documentId: string
+  storyletId: string
 ): CharacterMarkerContext {
   const store = useCharacterStore.getState()
   return {
     book,
-    documentId,
+    storyletId,
     characters: store.characters,
     markers: store.markers,
   }
@@ -235,7 +235,7 @@ function processCharacterMarkers(
             .filter(Boolean)
         : undefined
       const computed = computeStateAt(character, ctx.book, ctx.markers, {
-        documentId: ctx.documentId,
+        storyletId: ctx.storyletId,
         offset: actualOffset,
       })
       const rendered = renderStatblockText(
@@ -294,26 +294,26 @@ function download(content: string | Blob, filename: string, mimeType: string): v
   URL.revokeObjectURL(url)
 }
 
-function getDepth(document: Document, documents: Document[]): number {
+function getDepth(storylet: Storylet, storylets: Storylet[]): number {
   let depth = 0
-  let current = document
+  let current = storylet
   while (current.parentId) {
     depth++
-    const parent = documents.find((doc) => doc.id === current.parentId)
+    const parent = storylets.find((s) => s.id === current.parentId)
     if (!parent) break
     current = parent
   }
   return depth
 }
 
-/** Get the full book as a single markdown string with document headings */
+/** Get the full book as a single markdown string with storylet headings */
 function bookToMarkdown(
   book: Book,
   options?: { preserveStatMarkers?: boolean }
 ): string {
   const parts: string[] = [`# ${book.title}\n`]
-  for (const doc of book.documents) {
-    const depth = getDepth(doc, book.documents)
+  for (const doc of book.storylets) {
+    const depth = getDepth(doc, book.storylets)
     const hashes = '#'.repeat(Math.min(depth + 2, 6))
     parts.push(`${hashes} ${doc.name}\n`)
     if (doc.content) {
@@ -423,8 +423,8 @@ function astToPlainText(tree: Root): string {
 
 export function exportAsPlainText(book: Book): void {
   const parts: string[] = [book.title, '']
-  for (const doc of book.documents) {
-    const depth = getDepth(doc, book.documents)
+  for (const doc of book.storylets) {
+    const depth = getDepth(doc, book.storylets)
     const indent = '  '.repeat(depth)
     parts.push(`${indent}${doc.name}`)
     parts.push('')
@@ -492,9 +492,9 @@ function blockToHtml(node: Content): string {
 }
 
 export function exportAsHtml(book: Book): void {
-  const body = book.documents
+  const body = book.storylets
     .map((doc) => {
-      const depth = getDepth(doc, book.documents)
+      const depth = getDepth(doc, book.storylets)
       const level = Math.min(depth + 2, 6)
       const heading = `<h${level}>${escapeHtml(doc.name)}</h${level}>`
       const ctx = getCharacterMarkerContext(book, doc.id)
@@ -606,12 +606,12 @@ export function exportAsRtf(book: Book): void {
   // Title
   let body = `{\\pard\\qc\\fs48\\b ${rtfEscape(book.title)}\\b0\\par}\n\\par\n`
 
-  for (const doc of book.documents) {
-    const depth = getDepth(doc, book.documents)
+  for (const doc of book.storylets) {
+    const depth = getDepth(doc, book.storylets)
     const sizes = [40, 32, 28, 26, 24]
     const size = sizes[Math.min(depth, 4)]
     // Page break before each top-level document (except first)
-    if (book.documents.indexOf(doc) > 0 && depth === 0) {
+    if (book.storylets.indexOf(doc) > 0 && depth === 0) {
       body += '\\page\n'
     }
     body += `{\\pard\\fs${size}\\b ${rtfEscape(doc.name)}\\b0\\par}\n\\par\n`
@@ -739,9 +739,9 @@ export async function exportAsDocx(book: Book): Promise<void> {
     pageBreakBefore: true,
   }))
 
-  for (let i = 0; i < book.documents.length; i++) {
-    const doc = book.documents[i]
-    const depth = getDepth(doc, book.documents)
+  for (let i = 0; i < book.storylets.length; i++) {
+    const doc = book.storylets[i]
+    const depth = getDepth(doc, book.storylets)
 
     // Page break before top-level documents (not first)
     if (depth === 0 && i > 0) {
@@ -751,7 +751,7 @@ export async function exportAsDocx(book: Book): Promise<void> {
       }))
     }
 
-    // Document heading
+    // Storylet heading
     const level = Math.min(depth, 5)
     sectionChildren.push(new Paragraph({
       children: phrasingToRuns([{ type: 'text', value: doc.name }]),
@@ -759,7 +759,7 @@ export async function exportAsDocx(book: Book): Promise<void> {
       spacing: { before: depth === 0 ? 600 : 400, after: 200 },
     }))
 
-    // Document content
+    // Storylet content
     if (doc.content) {
       const ctx = getCharacterMarkerContext(book, doc.id)
       const processed = processCharacterMarkers(doc.content, ctx, 'docx')
@@ -932,8 +932,8 @@ export async function exportAsPdf(book: Book): Promise<void> {
     bold: true,
     margin: [0, 0, 0, 20] as [number, number, number, number],
   })
-  for (const doc of book.documents) {
-    const depth = getDepth(doc, book.documents)
+  for (const doc of book.storylets) {
+    const depth = getDepth(doc, book.storylets)
     content.push({
       text: doc.name,
       margin: [depth * 20, 2, 0, 2] as [number, number, number, number],
@@ -945,16 +945,16 @@ export async function exportAsPdf(book: Book): Promise<void> {
   content.push({ text: '', pageBreak: 'after' })
 
   // Documents
-  for (let i = 0; i < book.documents.length; i++) {
-    const doc = book.documents[i]
-    const depth = getDepth(doc, book.documents)
+  for (let i = 0; i < book.storylets.length; i++) {
+    const doc = book.storylets[i]
+    const depth = getDepth(doc, book.storylets)
 
     // Page break before top-level documents
     if (depth === 0 && i > 0) {
       content.push({ text: '', pageBreak: 'before' })
     }
 
-    // Document heading
+    // Storylet heading
     const sizes = [24, 20, 16, 14]
     content.push({
       text: doc.name,
@@ -963,7 +963,7 @@ export async function exportAsPdf(book: Book): Promise<void> {
       margin: [0, depth === 0 ? 40 : 20, 0, 12] as [number, number, number, number],
     })
 
-    // Document content
+    // Storylet content
     if (doc.content) {
       const ctx = getCharacterMarkerContext(book, doc.id)
       const processed = processCharacterMarkers(doc.content, ctx, 'plain')
@@ -1033,7 +1033,7 @@ export async function exportAsEpub(book: Book): Promise<void> {
     })
   }
 
-  function contentToXhtml(doc: Document): string {
+  function contentToXhtml(doc: Storylet): string {
     if (!doc.content) return ''
     const ctx = getCharacterMarkerContext(book, doc.id)
     const processed = processCharacterMarkers(doc.content, ctx, 'epub')
@@ -1057,9 +1057,9 @@ export async function exportAsEpub(book: Book): Promise<void> {
   interface Chapter { id: string; title: string; xhtml: string }
   const chapters: Chapter[] = []
 
-  for (let i = 0; i < book.documents.length; i++) {
-    const doc = book.documents[i]
-    const depth = getDepth(doc, book.documents)
+  for (let i = 0; i < book.storylets.length; i++) {
+    const doc = book.storylets[i]
+    const depth = getDepth(doc, book.storylets)
     const level = Math.min(depth + 2, 6)
     const heading = `<h${level}>${escapeHtml(doc.name)}</h${level}>`
     const body = contentToXhtml(doc)
@@ -1176,7 +1176,7 @@ ${spineItems}
 
 // ─── ZIP Export ────────────────────────────────────────
 
-function formatDocumentContent(doc: Document, format: 'md' | 'txt' | 'html'): string {
+function formatStoryletContent(doc: Storylet, format: 'md' | 'txt' | 'html'): string {
   const content = doc.content || ''
   if (format === 'html') {
     return `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${escapeHtml(doc.name)}</title></head><body><h1>${escapeHtml(doc.name)}</h1><pre>${escapeHtml(content)}</pre></body></html>`
@@ -1191,8 +1191,8 @@ export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Pr
   const ext = format === 'md' ? '.md' : format === 'txt' ? '.txt' : '.html'
   const zipFormat: StatblockExportFormat = format === 'md' ? 'markdown' : format === 'txt' ? 'plain' : 'html'
 
-  function addDocuments(parentId: string | undefined, folder: JSZip) {
-    const children = book.documents.filter(d => d.parentId === parentId)
+  function addStorylets(parentId: string | undefined, folder: JSZip) {
+    const children = book.storylets.filter(d => d.parentId === parentId)
     const usedNames = new Map<string, number>()
 
     for (const doc of children) {
@@ -1202,22 +1202,22 @@ export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Pr
       if (count > 0) name = `${name} (${count + 1})`
 
       const ctx = getCharacterMarkerContext(book, doc.id)
-      const processedDoc: Document = {
+      const processedDoc: Storylet = {
         ...doc,
         content: doc.content ? processCharacterMarkers(doc.content, ctx, zipFormat) : '',
       }
-      const content = formatDocumentContent(processedDoc, format)
+      const content = formatStoryletContent(processedDoc, format)
       folder.file(name + ext, content)
 
-      const hasChildren = book.documents.some(d => d.parentId === doc.id)
+      const hasChildren = book.storylets.some(d => d.parentId === doc.id)
       if (hasChildren) {
         const subFolder = folder.folder(name)!
-        addDocuments(doc.id, subFolder)
+        addStorylets(doc.id, subFolder)
       }
     }
   }
 
-  addDocuments(undefined, rootFolder)
+  addStorylets(undefined, rootFolder)
 
   const blob = await zip.generateAsync({ type: 'blob' })
   download(blob, `${sanitizeFilename(book.title)}-${format}-export.zip`, 'application/zip')

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Snapshot } from '../../types'
 import { getSnapshots } from '../../stores/snapshotStore'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 
 function formatTime(iso: string): string {
   const d = new Date(iso)
@@ -35,18 +35,18 @@ export function SnapshotBrowser({ open, onClose, onRestore }: Props) {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [previewId, setPreviewId] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
+  const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
 
   useEffect(() => {
-    if (!open || !activeDocumentId) return
+    if (!open || !activeStoryletId) return
     let cancelled = false
-    getSnapshots(activeDocumentId).then((snaps) => {
+    getSnapshots(activeStoryletId).then((snaps) => {
       if (cancelled) return
       setSnapshots(snaps)
       setPreviewId(null)
     }).catch(() => { /* ignore */ })
     return () => { cancelled = true }
-  }, [open, activeDocumentId])
+  }, [open, activeStoryletId])
 
   // Close on Escape
   useEffect(() => {
@@ -115,7 +115,7 @@ export function SnapshotBrowser({ open, onClose, onRestore }: Props) {
         <div className="flex-1 overflow-y-auto">
           {snapshots.length === 0 ? (
             <div className="px-4 py-8 text-center text-gray-500 text-sm">
-              No snapshots yet. Snapshots are created on save, document switch, and every 5 minutes.
+              No snapshots yet. Snapshots are created on save, storylet switch, and every 5 minutes.
             </div>
           ) : (
             snapshots.map((s) => (

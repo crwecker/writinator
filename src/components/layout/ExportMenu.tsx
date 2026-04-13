@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import {
   exportAsMarkdown,
   exportAsPlainText,
@@ -71,10 +71,10 @@ export function ExportMenu() {
               key={fmt.label}
               disabled={exporting !== null}
               onClick={async () => {
-                const book = useDocumentStore.getState().book
+                const book = useStoryletStore.getState().book
                 if (!book) return
-                useDocumentStore.getState()._flushContentUpdate()
-                const currentBook = useDocumentStore.getState().book!
+                useStoryletStore.getState()._flushContentUpdate()
+                const currentBook = useStoryletStore.getState().book!
                 setExporting(fmt.label)
                 try {
                   await fmt.action(currentBook)
@@ -95,10 +95,10 @@ export function ExportMenu() {
               key={fmt.label}
               disabled={exporting !== null}
               onClick={async () => {
-                const book = useDocumentStore.getState().book
+                const book = useStoryletStore.getState().book
                 if (!book) return
-                useDocumentStore.getState()._flushContentUpdate()
-                const currentBook = useDocumentStore.getState().book!
+                useStoryletStore.getState()._flushContentUpdate()
+                const currentBook = useStoryletStore.getState().book!
                 setExporting(fmt.label)
                 try {
                   await exportAsZip(currentBook, fmt.format)

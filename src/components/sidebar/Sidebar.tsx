@@ -14,101 +14,101 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { TreeNode, type DropIndicator } from './TreeNode'
 import { getIconComponent } from '../../lib/icons'
-import type { Document } from '../../types'
+import type { Storylet } from '../../types'
 
 const MAX_DEPTH = 4
 
 type DropIntent = 'before' | 'after' | 'child'
 
 interface FlatItem {
-  doc: Document
+  storylet: Storylet
   depth: number
 }
 
-function getChildren(documents: Document[], parentId?: string): Document[] {
-  return documents.filter((doc) => doc.parentId === parentId)
+function getChildren(storylets: Storylet[], parentId?: string): Storylet[] {
+  return storylets.filter((storylet) => storylet.parentId === parentId)
 }
 
 function flattenTree(
-  documents: Document[],
+  storylets: Storylet[],
   collapsedIds: string[],
   parentId?: string,
   depth = 0
 ): FlatItem[] {
-  const children = getChildren(documents, parentId)
+  const children = getChildren(storylets, parentId)
   const result: FlatItem[] = []
   for (const child of children) {
-    result.push({ doc: child, depth })
+    result.push({ storylet: child, depth })
     if (!collapsedIds.includes(child.id)) {
-      result.push(...flattenTree(documents, collapsedIds, child.id, depth + 1))
+      result.push(...flattenTree(storylets, collapsedIds, child.id, depth + 1))
     }
   }
   return result
 }
 
-function isDescendantOf(documents: Document[], docId: string, ancestorId: string): boolean {
+function isDescendantOf(storylets: Storylet[], docId: string, ancestorId: string): boolean {
   let currentId: string | undefined = docId
   while (currentId) {
-    const doc = documents.find((d) => d.id === currentId)
-    if (!doc?.parentId) return false
-    if (doc.parentId === ancestorId) return true
-    currentId = doc.parentId
+    const storylet = storylets.find((d) => d.id === currentId)
+    if (!storylet?.parentId) return false
+    if (storylet.parentId === ancestorId) return true
+    currentId = storylet.parentId
   }
   return false
 }
 
-function getDocumentDepth(documents: Document[], id: string | undefined): number {
+function getStoryletDepth(storylets: Storylet[], id: string | undefined): number {
   let depth = 0
   let currentId = id
   while (currentId) {
-    const doc = documents.find((d) => d.id === currentId)
-    if (!doc?.parentId) break
+    const storylet = storylets.find((d) => d.id === currentId)
+    if (!storylet?.parentId) break
     depth++
-    currentId = doc.parentId
+    currentId = storylet.parentId
   }
   return depth
 }
 
-function getSubtreeDepth(documents: Document[], id: string): number {
-  const children = documents.filter((d) => d.parentId === id)
+function getSubtreeDepth(storylets: Storylet[], id: string): number {
+  const children = storylets.filter((d) => d.parentId === id)
   if (children.length === 0) return 0
-  return 1 + Math.max(...children.map((c) => getSubtreeDepth(documents, c.id)))
+  return 1 + Math.max(...children.map((c) => getSubtreeDepth(storylets, c.id)))
 }
 
 function wouldExceedMaxDepth(
-  documents: Document[],
+  storylets: Storylet[],
   draggedId: string,
   newParentId: string | undefined
 ): boolean {
-  const newDepth = newParentId ? getDocumentDepth(documents, newParentId) + 1 : 0
-  const subtreeDepth = getSubtreeDepth(documents, draggedId)
+  const newDepth = newParentId ? getStoryletDepth(storylets, newParentId) + 1 : 0
+  const subtreeDepth = getSubtreeDepth(storylets, draggedId)
   return newDepth + subtreeDepth > MAX_DEPTH
 }
 
 export function Sidebar() {
-  const book = useDocumentStore((s) => s.book)
-  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
-  const setActiveDocument = useDocumentStore((s) => s.setActiveDocument)
-  const addDocument = useDocumentStore((s) => s.addDocument)
-  const renameDocument = useDocumentStore((s) => s.renameDocument)
-  const deleteDocument = useDocumentStore((s) => s.deleteDocument)
-  const moveDocument = useDocumentStore((s) => s.moveDocument)
+  const book = useStoryletStore((s) => s.book)
+  const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
+  const setActiveStorylet = useStoryletStore((s) => s.setActiveStorylet)
+  const addStorylet = useStoryletStore((s) => s.addStorylet)
+  const renameStorylet = useStoryletStore((s) => s.renameStorylet)
+  const deleteStorylet = useStoryletStore((s) => s.deleteStorylet)
+  const moveStorylet = useStoryletStore((s) => s.moveStorylet)
 
-  const collapsedDocumentIds = useEditorStore((s) => s.collapsedDocumentIds)
-  const toggleDocumentCollapsed = useEditorStore((s) => s.toggleDocumentCollapsed)
+  const collapsedStoryletIds = useEditorStore((s) => s.collapsedStoryletIds)
+  const toggleStoryletCollapsed = useEditorStore((s) => s.toggleStoryletCollapsed)
 
   const [newlyCreatedId, setNewlyCreatedId] = useState<string | null>(null)
 
-  const handleAddDocument = useCallback(
+  const handleAddStorylet = useCallback(
     (parentId?: string) => {
-      const id = addDocument(undefined, parentId)
+      const id = addStorylet(undefined, parentId)
       if (id) setNewlyCreatedId(id)
     },
-    [addDocument]
+    [addStorylet]
   )
 
   const clearNewlyCreatedId = useCallback(() => {
@@ -130,22 +130,22 @@ export function Sidebar() {
 
   const flatItems = useMemo(() => {
     if (!book) return []
-    return flattenTree(book.documents ?? [], collapsedDocumentIds)
-  }, [book, collapsedDocumentIds])
+    return flattenTree(book.storylets ?? [], collapsedStoryletIds)
+  }, [book, collapsedStoryletIds])
 
-  const flatItemIds = useMemo(() => flatItems.map((item) => item.doc.id), [flatItems])
+  const flatItemIds = useMemo(() => flatItems.map((item) => item.storylet.id), [flatItems])
 
   const flatItemMap = useMemo(() => {
     const map = new Map<string, FlatItem>()
     for (const item of flatItems) {
-      map.set(item.doc.id, item)
+      map.set(item.storylet.id, item)
     }
     return map
   }, [flatItems])
 
-  const activeDocument = useMemo(() => {
+  const activeStorylet = useMemo(() => {
     if (!activeId || !book) return null
-    return book.documents?.find((d) => d.id === activeId) ?? null
+    return book.storylets?.find((d) => d.id === activeId) ?? null
   }, [activeId, book])
 
   const activeItemDepth = useMemo(() => {
@@ -158,15 +158,15 @@ export function Sidebar() {
       if (!book) return false
       if (dragId === targetId && intent === 'child') return false
 
-      const targetDoc = book.documents?.find((d) => d.id === targetId)
-      if (!targetDoc) return false
+      const targetStorylet = book.storylets?.find((d) => d.id === targetId)
+      if (!targetStorylet) return false
 
       // Can't drop into own descendants
-      if (isDescendantOf(book.documents ?? [], targetId, dragId)) return false
+      if (isDescendantOf(book.storylets ?? [], targetId, dragId)) return false
 
       // Check depth
-      const newParentId = intent === 'child' ? targetId : targetDoc.parentId
-      if (wouldExceedMaxDepth(book.documents ?? [], dragId, newParentId)) return false
+      const newParentId = intent === 'child' ? targetId : targetStorylet.parentId
+      if (wouldExceedMaxDepth(book.storylets ?? [], dragId, newParentId)) return false
 
       return true
     },
@@ -238,21 +238,21 @@ export function Sidebar() {
       return
     }
 
-    const targetDoc = book.documents?.find((d) => d.id === targetId)
-    if (!targetDoc) {
+    const targetStorylet = book.storylets?.find((d) => d.id === targetId)
+    if (!targetStorylet) {
       resetDragState()
       return
     }
 
     if (dropIntent === 'child') {
       // Reparent: make first child of target
-      moveDocument(dragId, targetId, 0)
+      moveStorylet(dragId, targetId, 0)
     } else {
       // Insert before or after target, as sibling
-      const siblings = getChildren(book.documents ?? [], targetDoc.parentId)
+      const siblings = getChildren(book.storylets ?? [], targetStorylet.parentId)
       const targetSiblingIndex = siblings.findIndex((d) => d.id === targetId)
       const insertIndex = dropIntent === 'before' ? targetSiblingIndex : targetSiblingIndex + 1
-      moveDocument(dragId, targetDoc.parentId, insertIndex)
+      moveStorylet(dragId, targetStorylet.parentId, insertIndex)
     }
 
     resetDragState()
@@ -279,7 +279,7 @@ export function Sidebar() {
 
   return (
     <div className="flex flex-col bg-gray-900 border-r border-gray-700 h-full w-[260px] shrink-0 overflow-hidden">
-      {/* Document tree */}
+      {/* Storylet tree */}
       <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -294,25 +294,25 @@ export function Sidebar() {
           >
             <div className="flex-1 overflow-y-auto py-1">
               {flatItems.map((item) => {
-                const hasChildren = book.documents?.some((d) => d.parentId === item.doc.id)
-                const isCollapsed = collapsedDocumentIds.includes(item.doc.id)
+                const hasChildren = book.storylets?.some((d) => d.parentId === item.storylet.id)
+                const isCollapsed = collapsedStoryletIds.includes(item.storylet.id)
                 return (
                   <TreeNode
-                    key={item.doc.id}
-                    doc={item.doc}
+                    key={item.storylet.id}
+                    storylet={item.storylet}
                     depth={item.depth}
-                    isActive={item.doc.id === activeDocumentId}
+                    isActive={item.storylet.id === activeStoryletId}
                     hasChildren={hasChildren}
                     isCollapsed={isCollapsed}
-                    isDragSource={item.doc.id === activeId}
-                    dropIndicator={getDropIndicator(item.doc.id)}
-                    onToggleCollapse={() => toggleDocumentCollapsed(item.doc.id)}
-                    onClick={() => setActiveDocument(item.doc.id)}
-                    onRename={(name) => renameDocument(item.doc.id, name)}
-                    onDelete={() => deleteDocument(item.doc.id)}
-                    onAddSubDocument={() => handleAddDocument(item.doc.id)}
-                    isDeletable={(book.documents?.length ?? 0) > 1}
-                    autoEdit={item.doc.id === newlyCreatedId}
+                    isDragSource={item.storylet.id === activeId}
+                    dropIndicator={getDropIndicator(item.storylet.id)}
+                    onToggleCollapse={() => toggleStoryletCollapsed(item.storylet.id)}
+                    onClick={() => setActiveStorylet(item.storylet.id)}
+                    onRename={(name) => renameStorylet(item.storylet.id, name)}
+                    onDelete={() => deleteStorylet(item.storylet.id)}
+                    onAddSubStorylet={() => handleAddStorylet(item.storylet.id)}
+                    isDeletable={(book.storylets?.length ?? 0) > 1}
+                    autoEdit={item.storylet.id === newlyCreatedId}
                     onAutoEditConsumed={clearNewlyCreatedId}
                   />
                 )
@@ -322,24 +322,24 @@ export function Sidebar() {
 
           {/* Drag overlay — floating ghost of the dragged item */}
           <DragOverlay dropAnimation={null}>
-            {activeDocument ? (
+            {activeStorylet ? (
               <div
                 className="flex items-center gap-1 py-1 px-2 text-sm text-gray-200 bg-gray-800 border border-gray-600 rounded shadow-lg shadow-black/30 scale-[1.02] opacity-90"
                 style={{ paddingLeft: `${activeItemDepth * 20}px` }}
               >
-                {createElement(getIconComponent(activeDocument.icon ?? ''), { size: 16, className: 'text-gray-400 shrink-0' })}
-                <span className="truncate">{activeDocument.name}</span>
+                {createElement(getIconComponent(activeStorylet.icon ?? ''), { size: 16, className: 'text-gray-400 shrink-0' })}
+                <span className="truncate">{activeStorylet.name}</span>
               </div>
             ) : null}
           </DragOverlay>
         </DndContext>
 
-      {/* Add document button */}
+      {/* Add storylet button */}
       <button
         className="mx-2 my-2 px-2 py-1 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded border border-dashed border-gray-700 hover:border-gray-500 transition-colors"
-        onClick={() => handleAddDocument()}
+        onClick={() => handleAddStorylet()}
       >
-        + New Document
+        + New Storylet
       </button>
     </div>
   )

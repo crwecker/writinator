@@ -5,7 +5,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { vim, getCM as getVimCM, Vim } from '@replit/codemirror-vim'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { useCharacterStore } from '../../stores/characterStore'
 import { htmlToMarkdownWithStyles } from '../../lib/richPaste'
@@ -15,7 +15,7 @@ import {
 } from './statMarkerExtension'
 import {
   statblockMarkerExtension,
-  dispatchStatblockActiveDocument,
+  dispatchStatblockActiveStorylet,
 } from './statblockMarkerExtension'
 import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
@@ -93,7 +93,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
   const alwaysHide = mode === 'preview'
 
   // Cache document styles for heading overrides
-  const docStyles = useDocumentStore.getState().globalSettings.documentStyles
+  const docStyles = useStoryletStore.getState().globalSettings.documentStyles
 
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i)
@@ -579,11 +579,11 @@ interface EditorProps {
 
 export default function Editor({ onWordCountChange, onVimModeChange, onEditorView }: EditorProps) {
   // Use selectors to avoid re-renders on unrelated store changes
-  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
+  const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
   const fontFamily = useEditorStore((s) => s.fontFamily)
   const fontSize = useEditorStore((s) => s.fontSize)
   const renderMode = useEditorStore((s) => s.renderMode)
-  const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
+  const documentStyles = useStoryletStore((s) => s.globalSettings.documentStyles)
 
   const distractionFree = useEditorStore((s) => s.distractionFree)
 
@@ -641,7 +641,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     typewriterCompartmentRef.current = typewriterComp
     docStylesCompartmentRef.current = docStylesComp
 
-    const updateContent = useDocumentStore.getState().updateDocumentContent
+    const updateContent = useStoryletStore.getState().updateStoryletContent
 
     const state = EditorState.create({
       doc: '',
@@ -666,7 +666,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
         typewriterComp.of(useEditorStore.getState().distractionFree ? typewriterScroll() : []),
-        docStylesComp.of(makeDocStylesTheme(useDocumentStore.getState().globalSettings.documentStyles)),
+        docStylesComp.of(makeDocStylesTheme(useStoryletStore.getState().globalSettings.documentStyles)),
         EditorView.theme({
           '&': { height: '100%', backgroundColor: 'transparent' },
           '.cm-scroller': { overflow: 'auto', padding: '2rem', lineHeight: '1.75' },
@@ -704,7 +704,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             const { from, to } = view.state.selection.main
 
             // Check for font conflict between pasted content and existing document styles
-            const existingFont = useDocumentStore.getState().globalSettings.documentStyles?.body?.fontFamily
+            const existingFont = useStoryletStore.getState().globalSettings.documentStyles?.body?.fontFamily
             if (pastedBodyFont && existingFont) {
               const existingNorm = existingFont.replace(/['"]/g, '').toLowerCase()
               const pastedNorm = pastedBodyFont.toLowerCase()
@@ -721,8 +721,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
                     selection: { anchor: from + md.length },
                   })
                   if (styles) {
-                    const existing = useDocumentStore.getState().globalSettings.documentStyles ?? {}
-                    useDocumentStore.getState().updateGlobalSettings({ documentStyles: { ...existing, ...styles } })
+                    const existing = useStoryletStore.getState().globalSettings.documentStyles ?? {}
+                    useStoryletStore.getState().updateGlobalSettings({ documentStyles: { ...existing, ...styles } })
                   }
                 } else {
                   // Wrap each line in a font span for the pasted body font
@@ -753,8 +753,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
               selection: { anchor: from + md.length },
             })
             if (styles) {
-              const existing = useDocumentStore.getState().globalSettings.documentStyles ?? {}
-              useDocumentStore.getState().updateGlobalSettings({ documentStyles: { ...existing, ...styles } })
+              const existing = useStoryletStore.getState().globalSettings.documentStyles ?? {}
+              useStoryletStore.getState().updateGlobalSettings({ documentStyles: { ...existing, ...styles } })
             }
             return true
           },
@@ -785,15 +785,15 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
       ;(window as unknown as { __editorView?: EditorView }).__editorView = view
     }
 
-    // Load initial document content
-    const store = useDocumentStore.getState()
-    const activeDocument = store.book?.documents?.find((doc) => doc.id === store.activeDocumentId)
-    if (activeDocument?.content) {
-      view.dispatch({ changes: { from: 0, to: 0, insert: activeDocument.content } })
-      callbacksRef.current.onWordCountChange?.(countWords(activeDocument.content))
-      loadedDocumentRef.current = activeDocument.id
-    } else if (activeDocument) {
-      loadedDocumentRef.current = activeDocument.id
+    // Load initial storylet content
+    const store = useStoryletStore.getState()
+    const activeStorylet = store.book?.storylets?.find((s) => s.id === store.activeStoryletId)
+    if (activeStorylet?.content) {
+      view.dispatch({ changes: { from: 0, to: 0, insert: activeStorylet.content } })
+      callbacksRef.current.onWordCountChange?.(countWords(activeStorylet.content))
+      loadedDocumentRef.current = activeStorylet.id
+    } else if (activeStorylet) {
+      loadedDocumentRef.current = activeStorylet.id
     }
 
     return () => {
@@ -807,17 +807,17 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     }
   }, [])
 
-  // Load document content when active document changes
-  const loadDocument = useCallback(() => {
+  // Load storylet content when active storylet changes
+  const loadStorylet = useCallback(() => {
     const view = viewRef.current
     if (!view) return
-    const store = useDocumentStore.getState()
-    const activeDocument = store.book?.documents?.find((doc) => doc.id === store.activeDocumentId)
-    if (!activeDocument) return
-    if (loadedDocumentRef.current === activeDocument.id) return
+    const store = useStoryletStore.getState()
+    const activeStorylet = store.book?.storylets?.find((s) => s.id === store.activeStoryletId)
+    if (!activeStorylet) return
+    if (loadedDocumentRef.current === activeStorylet.id) return
 
-    loadedDocumentRef.current = activeDocument.id
-    const content = activeDocument.content ?? ''
+    loadedDocumentRef.current = activeStorylet.id
+    const content = activeStorylet.content ?? ''
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: content },
     })
@@ -825,12 +825,12 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   }, [])
 
   useEffect(() => {
-    loadDocument()
+    loadStorylet()
     const view = viewRef.current
     if (view) {
-      dispatchStatblockActiveDocument(view, activeDocumentId ?? '')
+      dispatchStatblockActiveStorylet(view, activeStoryletId ?? '')
     }
-  }, [activeDocumentId, loadDocument])
+  }, [activeStoryletId, loadStorylet])
 
   // Update font family
   useEffect(() => {
@@ -898,8 +898,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (import.meta.env.DEV) {
       ;(window as unknown as { __characterStore?: typeof useCharacterStore }).__characterStore =
         useCharacterStore
-      ;(window as unknown as { __documentStore?: typeof useDocumentStore }).__documentStore =
-        useDocumentStore
+      ;(window as unknown as { __storyletStore?: typeof useStoryletStore }).__storyletStore =
+        useStoryletStore
       // Expose an in-memory markdown renderer so QA can inspect export output
       // without triggering a file download.
       import('../../lib/export').then((mod) => {
@@ -915,7 +915,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             preview: string
           }
         }).__exportSmokeTest = () => {
-          const book = useDocumentStore.getState().book
+          const book = useStoryletStore.getState().book
           if (!book) {
             return { ok: false, markerCount: 0, statblockCount: 0, length: 0, preview: '(no book)' }
           }
@@ -945,15 +945,15 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     view.dom.classList.toggle('typewriter-mode', distractionFree)
   }, [distractionFree])
 
-  const hasBook = useDocumentStore((s) => !!s.book)
-  const hasDocument = useDocumentStore((s) => !!s.activeDocumentId)
+  const hasBook = useStoryletStore((s) => !!s.book)
+  const hasStorylet = useStoryletStore((s) => !!s.activeStoryletId)
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden bg-bg-default relative">
       <div ref={containerRef} className="h-full w-full" />
-      {(!hasBook || !hasDocument) && (
+      {(!hasBook || !hasStorylet) && (
         <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-          <p>Create a book or select a document to start writing.</p>
+          <p>Create a book or select a storylet to start writing.</p>
         </div>
       )}
     </div>

@@ -10,21 +10,26 @@ export default function App() {
     // that might have incompatible data formats
     async function init() {
       try {
-        const raw = await localforage.getItem('writinator-document')
+        // Read under new or legacy key (legacy = writinator-document)
+        const raw =
+          (await localforage.getItem('writinator-storylet')) ??
+          (await localforage.getItem('writinator-document'))
         if (raw) {
           // Check if data is from old format (TipTap JSONContent)
           const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
           const book = parsed?.state?.book
-          // Support both old `chapters` and new `documents` field names
-          const docs = book?.documents ?? book?.chapters
+          // Support new `storylets` and both old `documents` and `chapters` field names
+          const docs = book?.storylets ?? book?.documents ?? book?.chapters
           if (docs?.some((d: Record<string, unknown>) => d.content && typeof d.content !== 'string')) {
             console.warn('Clearing incompatible data from previous app version')
+            await localforage.removeItem('writinator-storylet')
             await localforage.removeItem('writinator-document')
             await localforage.removeItem('writinator-editor')
           }
         }
       } catch {
         // If parsing fails, clear corrupt data
+        await localforage.removeItem('writinator-storylet')
         await localforage.removeItem('writinator-document')
         await localforage.removeItem('writinator-editor')
       }

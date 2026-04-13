@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { useCharacterStore } from '../../stores/characterStore'
 import { useEditorStore } from '../../stores/editorStore'
 import type { NamedStyle } from '../../types'
@@ -676,7 +676,7 @@ function saveSelectionAsNamedStyle(
   let replaceAll = false
   if (otherInCurrentDoc > 0) {
     replaceAll = window.confirm(
-      `Found ${otherInCurrentDoc} other span${otherInCurrentDoc === 1 ? '' : 's'} with identical styling in this document. Convert all of them to "${name}" too?\n\n(Spans in other documents in the book will also be converted.)`
+      `Found ${otherInCurrentDoc} other span${otherInCurrentDoc === 1 ? '' : 's'} with identical styling in this storylet. Convert all of them to "${name}" too?\n\n(Spans in other storylets in the book will also be converted.)`
     )
   } else {
     replaceAll = window.confirm(
@@ -795,9 +795,9 @@ function wrapWithSpanClass(view: EditorView, className: string) {
 }
 
 export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles }: BubbleToolbarProps) {
-  const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
-  const updateGlobalSettings = useDocumentStore((s) => s.updateGlobalSettings)
-  const replaceInlineStyleInOtherDocs = useDocumentStore((s) => s.replaceInlineStyleInOtherDocs)
+  const documentStyles = useStoryletStore((s) => s.globalSettings.documentStyles)
+  const updateGlobalSettings = useStoryletStore((s) => s.updateGlobalSettings)
+  const replaceInlineStyleInOtherDocs = useStoryletStore((s) => s.replaceInlineStyleInOtherDocs)
   const namedStyles: Record<string, NamedStyle> | undefined = documentStyles
     ? Object.fromEntries(
         Object.entries(documentStyles).filter(

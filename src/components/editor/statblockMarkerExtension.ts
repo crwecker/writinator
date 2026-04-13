@@ -15,7 +15,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { createElement } from 'react'
 import { STATBLOCK_MARKER_REGEX } from '../../lib/markerUtils'
 import StatBlockWidget from '../characters/StatBlockWidget'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 
 function parseOptionsRaw(raw: string | undefined): Record<string, string> {
   if (!raw) return {}
@@ -48,22 +48,22 @@ function parseFields(options: Record<string, string>): string[] | undefined {
 class StatBlockWidgetType extends WidgetType {
   readonly characterId: string
   readonly fields: string[] | undefined
-  readonly offsetInDocument: number
-  readonly documentId: string
+  readonly offsetInStorylet: number
+  readonly storyletId: string
 
   private root: Root | null = null
 
   constructor(
     characterId: string,
     fields: string[] | undefined,
-    offsetInDocument: number,
-    documentId: string
+    offsetInStorylet: number,
+    storyletId: string
   ) {
     super()
     this.characterId = characterId
     this.fields = fields
-    this.offsetInDocument = offsetInDocument
-    this.documentId = documentId
+    this.offsetInStorylet = offsetInStorylet
+    this.storyletId = storyletId
   }
 
   eq(other: WidgetType): boolean {
@@ -79,8 +79,8 @@ class StatBlockWidgetType extends WidgetType {
     return (
       fieldsEq &&
       other.characterId === this.characterId &&
-      other.offsetInDocument === this.offsetInDocument &&
-      other.documentId === this.documentId
+      other.offsetInStorylet === this.offsetInStorylet &&
+      other.storyletId === this.storyletId
     )
   }
 
@@ -94,8 +94,8 @@ class StatBlockWidgetType extends WidgetType {
       createElement(StatBlockWidget, {
         characterId: this.characterId,
         fields: this.fields,
-        documentId: this.documentId,
-        offsetInDocument: this.offsetInDocument,
+        storyletId: this.storyletId,
+        offsetInStorylet: this.offsetInStorylet,
       })
     )
     this.root = root
@@ -119,30 +119,30 @@ class StatBlockWidgetType extends WidgetType {
   }
 }
 
-/** Notifies the plugin that activeDocumentId changed (so widgets can rebind). */
-export const setStatblockActiveDocumentEffect = StateEffect.define<string>()
+/** Notifies the plugin that activeStoryletId changed (so widgets can rebind). */
+export const setStatblockActiveStoryletEffect = StateEffect.define<string>()
 
-const activeDocumentField = StateField.define<string>({
-  create: () => useDocumentStore.getState().activeDocumentId ?? '',
+const activeStoryletField = StateField.define<string>({
+  create: () => useStoryletStore.getState().activeStoryletId ?? '',
   update(value, tr) {
     for (const e of tr.effects) {
-      if (e.is(setStatblockActiveDocumentEffect)) return e.value
+      if (e.is(setStatblockActiveStoryletEffect)) return e.value
     }
     return value
   },
 })
 
-export function dispatchStatblockActiveDocument(
+export function dispatchStatblockActiveStorylet(
   view: EditorView,
-  documentId: string
+  storyletId: string
 ): void {
   view.dispatch({
-    effects: setStatblockActiveDocumentEffect.of(documentId),
+    effects: setStatblockActiveStoryletEffect.of(storyletId),
   })
 }
 
 function buildDecorations(state: EditorState): DecorationSet {
-  const documentId = state.field(activeDocumentField, false) ?? ''
+  const storyletId = state.field(activeStoryletField, false) ?? ''
   const fullText = state.doc.toString()
   const re = new RegExp(STATBLOCK_MARKER_REGEX.source, 'g')
   const matches: Array<{
@@ -171,7 +171,7 @@ function buildDecorations(state: EditorState): DecorationSet {
           mm.characterId,
           mm.fields,
           mm.start,
-          documentId
+          storyletId
         ),
         block: true,
         side: 1,
@@ -187,7 +187,7 @@ const statblockDecorationField = StateField.define<DecorationSet>({
   },
   update(value, tr) {
     const docIdChanged = tr.effects.some((e) =>
-      e.is(setStatblockActiveDocumentEffect)
+      e.is(setStatblockActiveStoryletEffect)
     )
     if (tr.docChanged || docIdChanged) {
       return buildDecorations(tr.state)
@@ -206,5 +206,5 @@ const statblockBaseTheme = EditorView.baseTheme({
 })
 
 export function statblockMarkerExtension(): Extension {
-  return [activeDocumentField, statblockDecorationField, statblockBaseTheme]
+  return [activeStoryletField, statblockDecorationField, statblockBaseTheme]
 }

@@ -17,8 +17,8 @@ interface EditorState extends EditorPreferences {
   setRenderMode: (mode: EditorPreferences['renderMode']) => void
   toggleRenderMode: () => void
   toggleSidebar: () => void
-  toggleDocumentCollapsed: (id: string) => void
-  setCollapsedDocumentIds: (ids: string[]) => void
+  toggleStoryletCollapsed: (id: string) => void
+  setCollapsedStoryletIds: (ids: string[]) => void
   setCursorOffset: (offset: number) => void
   pushRecentColor: (color: string) => void
 }
@@ -48,7 +48,7 @@ export const useEditorStore = create<EditorState>()(
       distractionFree: false,
       renderMode: 'preview',
       sidebarOpen: true,
-      collapsedDocumentIds: [],
+      collapsedStoryletIds: [],
       cursorOffset: 0,
       recentColors: [],
 
@@ -70,15 +70,15 @@ export const useEditorStore = create<EditorState>()(
         set({ renderMode: next[get().renderMode] })
       },
       toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
-      toggleDocumentCollapsed: (id: string) => {
-        const current = get().collapsedDocumentIds
+      toggleStoryletCollapsed: (id: string) => {
+        const current = get().collapsedStoryletIds
         set({
-          collapsedDocumentIds: current.includes(id)
+          collapsedStoryletIds: current.includes(id)
             ? current.filter((i) => i !== id)
             : [...current, id],
         })
       },
-      setCollapsedDocumentIds: (ids: string[]) => set({ collapsedDocumentIds: ids }),
+      setCollapsedStoryletIds: (ids: string[]) => set({ collapsedStoryletIds: ids }),
       setCursorOffset: (offset: number) => {
         if (get().cursorOffset === offset) return
         set({ cursorOffset: offset })
@@ -104,7 +104,7 @@ export const useEditorStore = create<EditorState>()(
           distractionFree: state.distractionFree,
           renderMode: state.renderMode,
           sidebarOpen: state.sidebarOpen,
-          collapsedDocumentIds: state.collapsedDocumentIds,
+          collapsedStoryletIds: state.collapsedStoryletIds,
           recentColors: state.recentColors,
         }) as unknown as EditorState,
     }

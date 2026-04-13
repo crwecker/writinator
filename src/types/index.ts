@@ -1,4 +1,4 @@
-export interface Document {
+export interface Storylet {
   id: string
   name: string
   content: string | null
@@ -12,7 +12,7 @@ export interface Document {
 export interface Book {
   id: string
   title: string
-  documents: Document[]
+  storylets: Storylet[]
   createdAt: string
   updatedAt: string
 }
@@ -60,7 +60,7 @@ export interface ImageRevealSession {
 
 export interface Snapshot {
   id: string
-  documentId: string
+  storyletId: string
   content: string
   wordCount: number
   timestamp: string
@@ -93,7 +93,7 @@ export interface EditorPreferences {
   distractionFree: boolean
   renderMode: 'source' | 'rendered' | 'preview'
   sidebarOpen: boolean
-  collapsedDocumentIds: string[]
+  collapsedStoryletIds: string[]
 }
 
 export interface GlobalSettings {
@@ -101,9 +101,9 @@ export interface GlobalSettings {
 }
 
 export interface WritinatorFile {
-  version: 3
+  version: 4
   book: Book
-  snapshots: Record<string, Snapshot[]>  // keyed by document ID
+  snapshots: Record<string, Snapshot[]>  // keyed by storylet ID
   globalSettings: GlobalSettings
   characters: Character[]
   markers: Record<string, StatDelta[]>   // keyed by marker UUID
@@ -248,14 +248,14 @@ export interface CharacterState {
   activeBuffs: ActiveBuff[]
 }
 
-/** Delta-marker reference discovered by extracting markers from document content. */
+/** Delta-marker reference discovered by extracting markers from storylet content. */
 export interface DeltaMarkerRef {
   kind: 'delta'
   id: string
   offset: number
 }
 
-/** Statblock-marker reference discovered by extracting markers from document content. */
+/** Statblock-marker reference discovered by extracting markers from storylet content. */
 export interface StatblockMarkerRef {
   kind: 'statblock'
   characterId: string
@@ -273,12 +273,12 @@ export type ExtractedMarker = DeltaMarkerRef | StatblockMarkerRef
 export interface HistorySample {
   /** Marker index within the walk (0 = base/initial sample). */
   markerIndex: number
-  /** Offset inside the document where the marker lives. 0 for the base sample. */
+  /** Offset inside the storylet where the marker lives. 0 for the base sample. */
   offset: number
-  /** Document id where the marker lives (first document for the base sample). */
-  documentId: string
-  /** Document display name (denormalized for rendering). */
-  documentName: string
+  /** Storylet id where the marker lives (first storylet for the base sample). */
+  storyletId: string
+  /** Storylet display name (denormalized for rendering). */
+  storyletName: string
   /** Effective stat values at this point. */
   effective: Record<string, StatValue>
   /** Word index (approximate) within the book tree prefix. */
@@ -289,7 +289,7 @@ export type ConsistencyIssue =
   | {
       kind: 'orphanMarker'
       markerId: string
-      documentId: string
+      storyletId: string
       offset: number
     }
   | {
@@ -301,7 +301,7 @@ export type ConsistencyIssue =
       characterId: string
       statId: string
       reason: string
-      documentId?: string
+      storyletId?: string
       offset?: number
     }
   | {

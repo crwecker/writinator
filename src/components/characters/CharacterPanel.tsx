@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useCharacterStore } from '../../stores/characterStore'
-import { useDocumentStore } from '../../stores/documentStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { checkConsistency, computeStateAt, getDocumentTreeOrder } from '../../lib/characterState'
+import { checkConsistency, computeStateAt, getStoryletTreeOrder } from '../../lib/characterState'
 import { extractMarkers } from '../../lib/markerUtils'
 import { ProgressionGraph } from './ProgressionGraph'
 import type {
@@ -371,9 +371,9 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
   const setMarker = useCharacterStore((s) => s.setMarker)
   const setEquipmentSlots = useCharacterStore((s) => s.setEquipmentSlots)
   const cursorOffset = useEditorStore((s) => s.cursorOffset)
-  const activeDocumentId = useDocumentStore((s) => s.activeDocumentId)
-  const setActiveDocument = useDocumentStore((s) => s.setActiveDocument)
-  const book = useDocumentStore((s) => s.book)
+  const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
+  const setActiveStorylet = useStoryletStore((s) => s.setActiveStorylet)
+  const book = useStoryletStore((s) => s.book)
   const [tab, setTab] = useState<PanelTab>('stats')
   const [graphCharacterIdRaw, setGraphCharacterId] = useState<string>('')
   const graphCharacterId = useMemo(() => {
@@ -390,20 +390,20 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
 
   const computedPerCharacter = useMemo(() => {
     if (!book) return new Map<string, { state: CharacterState; effective: Record<string, StatValue> }>()
-    const stopAt = activeDocumentId
-      ? { documentId: activeDocumentId, offset: cursorOffset }
+    const stopAt = activeStoryletId
+      ? { storyletId: activeStoryletId, offset: cursorOffset }
       : undefined
     const map = new Map<string, { state: CharacterState; effective: Record<string, StatValue> }>()
     for (const c of characters) {
       map.set(c.id, computeStateAt(c, book, markers, stopAt))
     }
     return map
-  }, [characters, markers, book, activeDocumentId, cursorOffset])
+  }, [characters, markers, book, activeStoryletId, cursorOffset])
 
   const jumpToMarker = (docId: string, offset: number) => {
     if (!editorView) return
-    if (docId !== activeDocumentId) {
-      setActiveDocument(docId)
+    if (docId !== activeStoryletId) {
+      setActiveStorylet(docId)
       setTimeout(() => {
         const v = editorView
         if (!v) return
@@ -482,9 +482,9 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
           </div>
         ) : tab === 'stats' ? (
           <>
-            {!book || !activeDocumentId ? (
+            {!book || !activeStoryletId ? (
               <div className="text-center text-xs text-gray-500 py-8">
-                Open a document to see live-computed state.
+                Open a storylet to see live-computed state.
               </div>
             ) : (
               characters.map((c) => {
@@ -527,9 +527,9 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
             book={book}
             editorView={editorView}
             onJumpToMarker={jumpToMarker}
-            onRemoveOrphanFromText={(markerId, documentId) => {
+            onRemoveOrphanFromText={(markerId, storyletId) => {
               if (!book || !editorView) return
-              const d = book.documents.find((x) => x.id === documentId)
+              const d = book.storylets.find((x) => x.id === storyletId)
               if (!d) return
               const content = d.content ?? ''
               const escaped = markerId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -547,10 +547,10 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
                   },
                 })
               }
-              if (documentId === activeDocumentId) {
+              if (storyletId === activeStoryletId) {
                 doRemove()
               } else {
-                setActiveDocument(documentId)
+                setActiveStorylet(storyletId)
                 setTimeout(doRemove, 30)
               }
             }}
@@ -651,8 +651,8 @@ interface IssuesTabProps {
   characters: Character[]
   book: import('../../types').Book | null
   editorView: EditorView | null
-  onJumpToMarker: (documentId: string, offset: number) => void
-  onRemoveOrphanFromText: (markerId: string, documentId: string) => void
+  onJumpToMarker: (storyletId: string, offset: number) => void
+  onRemoveOrphanFromText: (markerId: string, storyletId: string) => void
   onCreateEmptyDelta: (markerId: string) => void
   onDeleteInverseOrphan: (markerId: string) => void
   onAddSlot: (characterId: string, slot: string) => void
@@ -707,7 +707,7 @@ function IssuesTab({
   const characterName = (id: string) =>
     characters.find((c) => c.id === id)?.name ?? 'Unknown'
   const docName = (id: string | undefined) =>
-    id ? book.documents.find((d) => d.id === id)?.name ?? '(unknown doc)' : '(unknown doc)'
+    id ? book.storylets.find((d) => d.id === id)?.name ?? '(unknown doc)' : '(unknown doc)'
 
   return (
     <div className="space-y-3" data-testid="character-panel-issues">
@@ -733,16 +733,16 @@ function IssuesTab({
                         <span className="text-gray-500">Marker </span>
                         <code className="text-gray-400">{issue.markerId.slice(0, 8)}…</code>
                         <span className="text-gray-500"> in </span>
-                        <span className="text-gray-300">{docName(issue.documentId)}</span>
+                        <span className="text-gray-300">{docName(issue.storyletId)}</span>
                       </div>
                       <div className="flex gap-1.5 flex-wrap">
-                        <IssueButton onClick={() => onRemoveOrphanFromText(issue.markerId, issue.documentId)}>
+                        <IssueButton onClick={() => onRemoveOrphanFromText(issue.markerId, issue.storyletId)}>
                           Remove from text
                         </IssueButton>
                         <IssueButton onClick={() => onCreateEmptyDelta(issue.markerId)}>
                           Create empty entry
                         </IssueButton>
-                        <IssueButton onClick={() => onJumpToMarker(issue.documentId, issue.offset)}>
+                        <IssueButton onClick={() => onJumpToMarker(issue.storyletId, issue.offset)}>
                           Jump
                         </IssueButton>
                       </div>
@@ -769,11 +769,11 @@ function IssuesTab({
                         <span className="text-gray-500"> — </span>
                         <span className="text-gray-300">{issue.reason}</span>
                       </div>
-                      {issue.documentId && typeof issue.offset === 'number' && (
+                      {issue.storyletId && typeof issue.offset === 'number' && (
                         <div className="flex gap-1.5">
                           <IssueButton
                             onClick={() =>
-                              onJumpToMarker(issue.documentId as string, issue.offset as number)
+                              onJumpToMarker(issue.storyletId as string, issue.offset as number)
                             }
                           >
                             Jump to marker
@@ -874,8 +874,8 @@ function summarizeOp(op: StatDeltaOp, character: Character | undefined): string 
 
 interface ChangeEntry {
   markerId: string
-  documentId: string
-  documentName: string
+  storyletId: string
+  storyletName: string
   offset: number
   deltas: StatDelta[]
 }
@@ -889,21 +889,21 @@ function ChangesTab({
   book: import('../../types').Book | null
   characters: Character[]
   markers: Record<string, StatDelta[]>
-  onJumpToMarker: (documentId: string, offset: number) => void
+  onJumpToMarker: (storyletId: string, offset: number) => void
 }) {
   const entries = useMemo<ChangeEntry[]>(() => {
     const out: ChangeEntry[] = []
     if (!book) return out
-    for (const doc of getDocumentTreeOrder(book)) {
-      const extracted = extractMarkers(doc.content ?? '')
+    for (const storylet of getStoryletTreeOrder(book)) {
+      const extracted = extractMarkers(storylet.content ?? '')
       for (const marker of extracted) {
         if (marker.kind !== 'delta') continue
         const deltas = markers[marker.id]
         if (!deltas || deltas.length === 0) continue
         out.push({
           markerId: marker.id,
-          documentId: doc.id,
-          documentName: doc.name,
+          storyletId: storylet.id,
+          storyletName: storylet.name,
           offset: marker.offset,
           deltas,
         })
@@ -932,18 +932,18 @@ function ChangesTab({
   return (
     <div className="space-y-2" data-testid="character-panel-changes">
       {entries.map((entry) => {
-        const newDoc = entry.documentId !== lastDocId
-        lastDocId = entry.documentId
+        const newDoc = entry.storyletId !== lastDocId
+        lastDocId = entry.storyletId
         return (
           <div key={entry.markerId}>
             {newDoc && (
               <div className="text-[10px] uppercase tracking-wide text-gray-500 pt-2 pb-1">
-                {entry.documentName}
+                {entry.storyletName}
               </div>
             )}
             <button
               data-testid="character-panel-change-row"
-              onClick={() => onJumpToMarker(entry.documentId, entry.offset)}
+              onClick={() => onJumpToMarker(entry.storyletId, entry.offset)}
               className="w-full text-left px-2 py-1.5 bg-gray-800/40 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 rounded transition-colors space-y-1"
             >
               {entry.deltas.map((d) => {

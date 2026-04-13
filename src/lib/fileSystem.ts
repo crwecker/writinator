@@ -28,7 +28,7 @@ export async function saveFile(
   const snapshots = await getAllSnapshots()
   const { characters, markers } = useCharacterStore.getState()
   const file: WritinatorFile = {
-    version: 3,
+    version: 4,
     book,
     snapshots,
     globalSettings,
@@ -53,7 +53,7 @@ export async function quickSave(
   const snapshots = await getAllSnapshots()
   const { characters, markers } = useCharacterStore.getState()
   const file: WritinatorFile = {
-    version: 3,
+    version: 4,
     book,
     snapshots,
     globalSettings,
