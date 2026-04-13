@@ -21,7 +21,7 @@
 }
 
 .cm-line {
-  padding: 0 0 0.75em 0;
+  padding-bottom: 0.75em !important;
 }
 
 /* Placeholder */

@@ -683,25 +683,55 @@ function ListParams({
           ))}
         </select>
       </label>
-      <label className="flex items-center gap-1.5 flex-1">
-        <span className="text-xs text-gray-400">Items</span>
-        <input
-          type="text"
-          value={op.items.join(', ')}
-          placeholder="comma,separated,items"
-          onChange={(e) =>
-            onChange({
-              ...op,
-              items: e.target.value
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-          className={`${INPUT_CLS} flex-1`}
-        />
-      </label>
+      <ListItemsInput op={op} onChange={onChange} />
     </div>
+  )
+}
+
+function ListItemsInput({
+  op,
+  onChange,
+}: {
+  op: Extract<StatDeltaOp, { kind: 'listAdd' | 'listRemove' }>
+  onChange: (op: StatDeltaOp) => void
+}) {
+  const [text, setText] = useState(() => op.items.join(', '))
+  const opRef = useRef(op)
+  opRef.current = op
+
+  // Re-sync local text when external items change AND the user isn't mid-edit (change came from elsewhere)
+  useEffect(() => {
+    const parsed = text
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const matches =
+      parsed.length === op.items.length && parsed.every((s, i) => s === op.items[i])
+    if (!matches) setText(op.items.join(', '))
+    // intentionally only react to op.items — not `text`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [op.items.join('\u0000')])
+
+  function commit(value: string) {
+    const items = value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    onChange({ ...opRef.current, items })
+  }
+
+  return (
+    <label className="flex items-center gap-1.5 flex-1">
+      <span className="text-xs text-gray-400">Items</span>
+      <input
+        type="text"
+        value={text}
+        placeholder="comma, separated, items"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        className={`${INPUT_CLS} flex-1`}
+      />
+    </label>
   )
 }
 
