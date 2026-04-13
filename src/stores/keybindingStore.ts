@@ -12,6 +12,7 @@ export type ActionName =
   | 'toggleCharacterPanel'
   | 'insertStatMarker'
   | 'publishStorylet'
+  | 'findInBook'
 
 export interface KeyCombo {
   key: string  // e.g. 'f', 's', 'h'
@@ -34,10 +35,11 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   toggleCharacterPanel: 'Toggle Character Panel',
   insertStatMarker: 'Insert stat change',
   publishStorylet: 'Toggle publish panel',
+  findInBook: 'Find in book',
 }
 
 export const DEFAULT_KEYMAP: KeyMap = {
-  toggleTypewriter: { key: 'f', ctrl: true, shift: true },
+  toggleTypewriter: { key: 'm', ctrl: true, shift: true },
   toggleFileTree: { key: 'b', ctrl: true },
   saveToDisk: { key: 's', ctrl: true },
   closeBook: { key: 'o', ctrl: true },
@@ -46,6 +48,7 @@ export const DEFAULT_KEYMAP: KeyMap = {
   toggleCharacterPanel: { key: 'c', ctrl: true, shift: true },
   insertStatMarker: { key: '.', ctrl: true, shift: true },
   publishStorylet: { key: 'p', ctrl: true, shift: true },
+  findInBook: { key: 'f', ctrl: true, shift: true },
 }
 
 export function comboToString(combo: KeyCombo): string {

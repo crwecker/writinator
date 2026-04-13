@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins } from 'lucide-react'
+import { Coins, Search } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -14,6 +14,7 @@ import { quickSave, saveAsNewFile } from '../../lib/fileSystem'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
+import { FindInBook } from './FindInBook'
 import { PublishedSnapshotsBrowser } from './PublishedSnapshotsBrowser'
 import { PublishModal } from './PublishModal'
 import { StyleEditor } from '../editor/StyleEditor'
@@ -43,6 +44,7 @@ export function AppShell() {
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const editorViewRef = useRef<EditorView | null>(null)
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
   const [publishedSnapshotsOpen, setPublishedSnapshotsOpen] = useState(false)
   const [publishModalOpen, setPublishModalOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
@@ -161,6 +163,11 @@ export function AppShell() {
       if (matchesEvent(km.toggleTypewriter, e)) {
         e.preventDefault()
         toggleDistractionFree()
+        return
+      }
+      if (km.findInBook && matchesEvent(km.findInBook, e)) {
+        e.preventDefault()
+        setFindOpen((prev) => !prev)
         return
       }
       if (matchesEvent(km.snapshotHistory, e)) {
@@ -398,6 +405,13 @@ export function AppShell() {
               Publish
             </button>
             <button
+              onClick={() => setFindOpen((prev) => !prev)}
+              className="text-gray-500 hover:text-gray-300 transition-colors px-1.5 py-0.5"
+              title="Find in book (Ctrl+Shift+F)"
+            >
+              <Search size={13} />
+            </button>
+            <button
               onClick={() => {
                 setSnapshotsOpen((prev) => !prev)
                 setPublishedSnapshotsOpen(false)
@@ -436,6 +450,11 @@ export function AppShell() {
             open={snapshotsOpen}
             onClose={() => setSnapshotsOpen(false)}
             onRestore={handleRestoreSnapshot}
+          />
+          <FindInBook
+            open={findOpen}
+            onClose={() => setFindOpen(false)}
+            editorView={editorView}
           />
           <PublishModal
             open={publishModalOpen}
