@@ -9,6 +9,13 @@ export interface Storylet {
   updatedAt: string
   lastPublishedAt?: string
   lastPublishedSnapshotId?: string
+  /**
+   * Bumped on external bulk mutations (e.g. Find-in-Book replace) so the
+   * editor view can reload the document even when the active storylet id
+   * hasn't changed. Defaults to 0 for storylets persisted before this field
+   * was introduced.
+   */
+  docVersion?: number
 }
 
 export interface PublishedSnapshot {
@@ -106,6 +113,26 @@ export interface StoryletSearchResult {
 }
 
 export type ReplaceScope = 'storylet' | 'book'
+
+/**
+ * A single match's before/after snippet used by the replace preview modal.
+ * `before` is the existing line snippet (with match offsets); `after` is what
+ * the snippet will look like once the replacement is applied.
+ */
+export interface ReplacePreviewMatch {
+  start: number
+  end: number
+  beforeSnippet: string
+  beforeMatchRange: [number, number]
+  afterSnippet: string
+  afterReplacementRange: [number, number]
+}
+
+export interface ReplacePreview {
+  storyletId: string
+  storyletName: string
+  matches: ReplacePreviewMatch[]
+}
 
 export interface TextStyle {
   fontFamily?: string        // CSS font-family value

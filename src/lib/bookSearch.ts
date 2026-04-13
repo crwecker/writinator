@@ -1,5 +1,8 @@
 import type {
   Book,
+  ReplacePreview,
+  ReplacePreviewMatch,
+  ReplaceScope,
   SearchMatch,
   SearchOptions,
   Storylet,
@@ -127,6 +130,117 @@ export function searchStorylet(
   if ('error' in compiled) return []
   if (!storylet.content) return []
   return collectMatchesInContent(storylet.id, storylet.content, compiled.regex)
+}
+
+/**
+ * Expand a regex match's replacement string. Supports `$&` (whole match) and
+ * `$1`-`$9` numbered backreferences — same subset replaceAll uses. We hand-roll
+ * this so the preview's `after` snippet matches what String.replace would
+ * produce when called with the same regex+replacement.
+ */
+function expandReplacement(
+  replacement: string,
+  match: RegExpExecArray,
+): string {
+  return replacement.replace(/\$(&|\d)/g, (token, key: string) => {
+    if (key === '&') return match[0]
+    const idx = Number(key)
+    if (Number.isFinite(idx) && idx >= 1 && idx <= 9) {
+      const group = match[idx]
+      return group === undefined ? '' : group
+    }
+    return token
+  })
+}
+
+/**
+ * Build a per-match before/after preview snippet.
+ * Both snippets are drawn from the same enclosing line in the original content
+ * so they line up visually in the diff modal.
+ */
+function buildPreviewMatch(
+  content: string,
+  match: RegExpExecArray,
+  replacement: string,
+): ReplacePreviewMatch {
+  const start = match.index
+  const end = start + match[0].length
+
+  // Find enclosing line boundaries in the original content.
+  const lineStart = (() => {
+    const idx = content.lastIndexOf('\n', start - 1)
+    return idx === -1 ? 0 : idx + 1
+  })()
+  const lineEndRaw = content.indexOf('\n', end)
+  const lineEnd = lineEndRaw === -1 ? content.length : lineEndRaw
+
+  const snippetStart = Math.max(lineStart, start - SNIPPET_CONTEXT_CHARS)
+  const snippetEnd = Math.min(lineEnd, end + SNIPPET_CONTEXT_CHARS)
+
+  const beforeSnippet = content.slice(snippetStart, snippetEnd)
+  const beforeMatchRange: [number, number] = [
+    start - snippetStart,
+    end - snippetStart,
+  ]
+
+  const replacementText = expandReplacement(replacement, match)
+  const afterSnippet =
+    content.slice(snippetStart, start) +
+    replacementText +
+    content.slice(end, snippetEnd)
+  const afterReplacementRange: [number, number] = [
+    start - snippetStart,
+    start - snippetStart + replacementText.length,
+  ]
+
+  return {
+    start,
+    end,
+    beforeSnippet,
+    beforeMatchRange,
+    afterSnippet,
+    afterReplacementRange,
+  }
+}
+
+/**
+ * Compute per-storylet before/after previews for a Find+Replace operation.
+ * Honors the same scope semantics as `replaceAllInBook`. Storylets with no
+ * matches are omitted. Capped per storylet by MAX_MATCHES_PER_STORYLET.
+ */
+export function computeReplacePreview(
+  book: Book,
+  options: SearchOptions,
+  replacement: string,
+  scope: ReplaceScope,
+  targetStoryletId?: string,
+): ReplacePreview[] {
+  const compiled = compileQuery(options)
+  if ('error' in compiled) return []
+  const { regex } = compiled
+  const previews: ReplacePreview[] = []
+  for (const storylet of getStoryletTreeOrder(book)) {
+    if (scope === 'storylet' && storylet.id !== targetStoryletId) continue
+    if (!storylet.content) continue
+    const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
+    const scanner = new RegExp(regex.source, flags)
+    const matches: ReplacePreviewMatch[] = []
+    let m: RegExpExecArray | null
+    while ((m = scanner.exec(storylet.content)) !== null) {
+      matches.push(buildPreviewMatch(storylet.content, m, replacement))
+      if (matches.length >= MAX_MATCHES_PER_STORYLET) break
+      if (m[0].length === 0) {
+        scanner.lastIndex = scanner.lastIndex + 1
+      }
+    }
+    if (matches.length === 0) continue
+    previews.push({
+      storyletId: storylet.id,
+      storyletName: storylet.name,
+      matches,
+    })
+  }
+  return previews
 }
 
 /**

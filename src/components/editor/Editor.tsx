@@ -580,6 +580,9 @@ interface EditorProps {
 export default function Editor({ onWordCountChange, onVimModeChange, onEditorView }: EditorProps) {
   // Use selectors to avoid re-renders on unrelated store changes
   const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
+  const activeDocVersion = useStoryletStore(
+    (s) => s.book?.storylets.find((sl) => sl.id === s.activeStoryletId)?.docVersion ?? 0
+  )
   const fontFamily = useEditorStore((s) => s.fontFamily)
   const fontSize = useEditorStore((s) => s.fontSize)
   const renderMode = useEditorStore((s) => s.renderMode)
@@ -589,7 +592,10 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
 
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const loadedDocumentRef = useRef<string | null>(null)
+  // Tracks which storylet (id + docVersion) is currently loaded into the EditorView.
+  // docVersion lets external bulk mutations (e.g. Find-in-Book replace) force a reload
+  // even when the active id is unchanged.
+  const loadedDocumentRef = useRef<{ id: string; version: number } | null>(null)
   const fontCompartmentRef = useRef<Compartment | null>(null)
   const fontSizeCompartmentRef = useRef<Compartment | null>(null)
   const typewriterCompartmentRef = useRef<Compartment | null>(null)
@@ -791,9 +797,9 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (activeStorylet?.content) {
       view.dispatch({ changes: { from: 0, to: 0, insert: activeStorylet.content } })
       callbacksRef.current.onWordCountChange?.(countWords(activeStorylet.content))
-      loadedDocumentRef.current = activeStorylet.id
+      loadedDocumentRef.current = { id: activeStorylet.id, version: activeStorylet.docVersion ?? 0 }
     } else if (activeStorylet) {
-      loadedDocumentRef.current = activeStorylet.id
+      loadedDocumentRef.current = { id: activeStorylet.id, version: activeStorylet.docVersion ?? 0 }
     }
 
     return () => {
@@ -814,9 +820,11 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const store = useStoryletStore.getState()
     const activeStorylet = store.book?.storylets?.find((s) => s.id === store.activeStoryletId)
     if (!activeStorylet) return
-    if (loadedDocumentRef.current === activeStorylet.id) return
+    const currentVersion = activeStorylet.docVersion ?? 0
+    const loaded = loadedDocumentRef.current
+    if (loaded && loaded.id === activeStorylet.id && loaded.version === currentVersion) return
 
-    loadedDocumentRef.current = activeStorylet.id
+    loadedDocumentRef.current = { id: activeStorylet.id, version: currentVersion }
     const content = activeStorylet.content ?? ''
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: content },
@@ -830,7 +838,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (view) {
       dispatchStatblockActiveStorylet(view, activeStoryletId ?? '')
     }
-  }, [activeStoryletId, loadStorylet])
+  }, [activeStoryletId, activeDocVersion, loadStorylet])
 
   // Update font family
   useEffect(() => {

@@ -646,7 +646,12 @@ export const useStoryletStore = create<StoryletState>()(
           if (out === original) return storylet
           storyletsChanged++
           matchesReplaced += count
-          return { ...storylet, content: out, updatedAt: timestamp }
+          return {
+            ...storylet,
+            content: out,
+            updatedAt: timestamp,
+            docVersion: (storylet.docVersion ?? 0) + 1,
+          }
         })
         if (storyletsChanged === 0) {
           return { storyletsChanged: 0, matchesReplaced: 0 }
