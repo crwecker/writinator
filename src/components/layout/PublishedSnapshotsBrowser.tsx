@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ArrowLeft, Copy, RotateCw, Trash2 } from 'lucide-react'
+import { ArrowLeft, Copy, RotateCw, Send, Trash2 } from 'lucide-react'
 import type { PublishedSnapshot } from '../../types'
 import {
   getPublishedSnapshots,
@@ -15,8 +15,7 @@ import { DiffView } from './DiffView'
 import { renderStoryletAsMarkdown, renderStoryletAsHtml } from '../../lib/render'
 
 interface Props {
-  open: boolean
-  onClose: () => void
+  onOpenPublishModal: () => void
 }
 
 type CopyFormat = 'markdown' | 'html'
@@ -36,25 +35,29 @@ function computeWordDelta(
   return { insertedWords, deletedWords }
 }
 
-export function PublishedSnapshotsBrowser({ open, onClose }: Props) {
+export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
   const [snapshots, setSnapshots] = useState<PublishedSnapshot[]>([])
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [copyFormat, setCopyFormat] = useState<CopyFormat>('markdown')
   const [copiedFrom, setCopiedFrom] = useState<CopiedFrom>(null)
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
   const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
   const setStoryletPublishedMeta = useStoryletStore((s) => s.setStoryletPublishedMeta)
+  // Subscribe to lastPublishedSnapshotId so we refresh the list when the user publishes via the modal
+  const lastPublishedSnapshotId = useStoryletStore((s) => {
+    if (!s.activeStoryletId) return undefined
+    return s.book?.storylets.find((st) => st.id === s.activeStoryletId)?.lastPublishedSnapshotId
+  })
   // Read current storylet content directly from the store (subscribe so it stays fresh)
   const currentContent = useStoryletStore((s) => {
     if (!s.activeStoryletId) return ''
     return s.book?.storylets.find((st) => st.id === s.activeStoryletId)?.content ?? ''
   })
 
-  // Load snapshots whenever the panel opens or the active storylet changes
+  // Load snapshots whenever the active storylet changes or a new version is published
   useEffect(() => {
-    if (!open || !activeStoryletId) return
+    if (!activeStoryletId) return
     let cancelled = false
     getPublishedSnapshots(activeStoryletId)
       .then((snaps) => {
@@ -66,13 +69,18 @@ export function PublishedSnapshotsBrowser({ open, onClose }: Props) {
     return () => {
       cancelled = true
     }
-  }, [open, activeStoryletId])
+  }, [activeStoryletId, lastPublishedSnapshotId])
+
+  // Reset preview when switching storylets
+  useEffect(() => {
+    setPreviewId(null)
+  }, [activeStoryletId])
 
   // Flush pending editor content when entering preview so the diff is current
   useEffect(() => {
-    if (!open || !activeStoryletId || previewId === null) return
+    if (!activeStoryletId || previewId === null) return
     useStoryletStore.getState()._flushContentUpdate()
-  }, [open, activeStoryletId, previewId])
+  }, [activeStoryletId, previewId])
 
   // Clean up the copied-feedback timer on unmount
   useEffect(() => {
@@ -83,38 +91,21 @@ export function PublishedSnapshotsBrowser({ open, onClose }: Props) {
     }
   }, [])
 
-  // Close / navigate on Escape
+  // Escape navigates within the panel (preview → list, confirm → cancel). Does not close the panel.
   useEffect(() => {
-    if (!open) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (previewId !== null) {
-          e.preventDefault()
-          e.stopPropagation()
-          setPreviewId(null)
-        } else if (deleteConfirmId !== null) {
-          setDeleteConfirmId(null)
-        } else {
-          e.preventDefault()
-          onClose()
-        }
+      if (e.key !== 'Escape') return
+      if (previewId !== null) {
+        e.preventDefault()
+        e.stopPropagation()
+        setPreviewId(null)
+      } else if (deleteConfirmId !== null) {
+        setDeleteConfirmId(null)
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose, deleteConfirmId, previewId])
-
-  // Close on click outside
-  useEffect(() => {
-    if (!open) return
-    function onClick(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [open, onClose])
+  }, [deleteConfirmId, previewId])
 
   async function handleDelete(snapshotId: string) {
     if (!activeStoryletId) return
@@ -211,15 +202,10 @@ export function PublishedSnapshotsBrowser({ open, onClose }: Props) {
     }
   }
 
-  if (!open) return null
-
   const previewEntry = previewId ? snapshots.find((s) => s.id === previewId) ?? null : null
 
   return (
-    <div
-      ref={panelRef}
-      className="fixed right-0 top-0 bottom-0 z-50 w-[380px] max-w-[90vw] bg-gray-900 border-l border-gray-700 shadow-2xl flex flex-col"
-    >
+    <div className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[380px] shrink-0 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
         {previewEntry ? (
@@ -250,14 +236,26 @@ export function PublishedSnapshotsBrowser({ open, onClose }: Props) {
             </div>
           </div>
         ) : (
-          <span className="text-sm font-medium text-gray-200">Published</span>
+          <span className="text-sm font-medium text-gray-200">Publish</span>
         )}
-        <button
-          onClick={previewEntry ? () => setPreviewId(null) : onClose}
-          className="text-gray-500 hover:text-gray-300 text-xs"
-        >
-          {previewEntry ? 'List' : 'Close'}
-        </button>
+        {previewEntry ? (
+          <button
+            onClick={() => setPreviewId(null)}
+            className="text-gray-500 hover:text-gray-300 text-xs"
+          >
+            List
+          </button>
+        ) : (
+          <button
+            onClick={onOpenPublishModal}
+            disabled={!activeStoryletId}
+            className="flex items-center gap-1 px-2 py-0.5 text-xs text-emerald-300 hover:text-emerald-200 border border-emerald-700 hover:border-emerald-500 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            title="Publish current storylet content"
+          >
+            <Send size={12} />
+            Publish
+          </button>
+        )}
       </div>
 
       {/* Format toggle — always visible below the header */}

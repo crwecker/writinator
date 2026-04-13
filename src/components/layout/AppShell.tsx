@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { BookOpenCheck, Coins, Send } from 'lucide-react'
+import { Coins } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -169,17 +169,10 @@ export function AppShell() {
         setPublishedSnapshotsOpen(false)
         return
       }
-      if (km.openPublishedSnapshots && matchesEvent(km.openPublishedSnapshots, e)) {
+      if (km.publishStorylet && matchesEvent(km.publishStorylet, e)) {
         e.preventDefault()
         setPublishedSnapshotsOpen((prev) => !prev)
         setSnapshotsOpen(false)
-        return
-      }
-      if (km.publishStorylet && matchesEvent(km.publishStorylet, e)) {
-        e.preventDefault()
-        if (useStoryletStore.getState().activeStoryletId) {
-          setPublishModalOpen(true)
-        }
         return
       }
       if (matchesEvent(km.toggleFileTree, e)) {
@@ -395,22 +388,14 @@ export function AppShell() {
           <div className="flex items-center gap-1">
             <ExportMenu />
             <button
-              onClick={() => setPublishModalOpen(true)}
-              disabled={!activeStorylet}
-              className="text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors px-2 py-0.5 text-xs flex items-center gap-1"
-              title="Publish storylet (Ctrl+Shift+P)"
-            >
-              <Send size={12} /> Publish
-            </button>
-            <button
               onClick={() => {
                 setPublishedSnapshotsOpen((prev) => !prev)
                 setSnapshotsOpen(false)
               }}
-              className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs flex items-center gap-1"
-              title="Published versions (Ctrl+Shift+L)"
+              className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
+              title="Publish panel (Ctrl+Shift+P)"
             >
-              <BookOpenCheck size={12} /> Published
+              Publish
             </button>
             <button
               onClick={() => {
@@ -452,10 +437,6 @@ export function AppShell() {
             onClose={() => setSnapshotsOpen(false)}
             onRestore={handleRestoreSnapshot}
           />
-          <PublishedSnapshotsBrowser
-            open={publishedSnapshotsOpen}
-            onClose={() => setPublishedSnapshotsOpen(false)}
-          />
           <PublishModal
             open={publishModalOpen}
             onClose={() => setPublishModalOpen(false)}
@@ -491,6 +472,12 @@ export function AppShell() {
         </div>
 
         {!distractionFree && <ImageRevealPanel />}
+
+        {publishedSnapshotsOpen && !distractionFree && (
+          <PublishedSnapshotsBrowser
+            onOpenPublishModal={() => setPublishModalOpen(true)}
+          />
+        )}
 
         {characterPanelOpen && !distractionFree && (
           <CharacterPanel
