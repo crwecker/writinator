@@ -11,6 +11,7 @@ export type ActionName =
   | 'toggleRenderMode'
   | 'toggleCharacterPanel'
   | 'insertStatMarker'
+  | 'publishStorylet'
 
 export interface KeyCombo {
   key: string  // e.g. 'f', 's', 'h'
@@ -32,6 +33,7 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   toggleRenderMode: 'Cycle Formatting View',
   toggleCharacterPanel: 'Toggle Character Panel',
   insertStatMarker: 'Insert stat change',
+  publishStorylet: 'Publish storylet',
 }
 
 export const DEFAULT_KEYMAP: KeyMap = {
@@ -43,6 +45,7 @@ export const DEFAULT_KEYMAP: KeyMap = {
   toggleRenderMode: { key: 'e', ctrl: true, shift: true },
   toggleCharacterPanel: { key: 'c', ctrl: true, shift: true },
   insertStatMarker: { key: '.', ctrl: true, shift: true },
+  publishStorylet: { key: 'p', ctrl: true, shift: true },
 }
 
 export function comboToString(combo: KeyCombo): string {

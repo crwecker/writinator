@@ -58,6 +58,9 @@ interface StoryletState {
   moveStorylet: (id: string, newParentId: string | undefined, insertIndex: number) => void
   setActiveStorylet: (id: string | null) => void
 
+  // Published snapshot meta
+  setStoryletPublishedMeta: (id: string, meta: { lastPublishedAt: string; lastPublishedSnapshotId: string }) => void
+
   // Content
   updateStoryletContent: (content: string) => void
   _flushContentUpdate: () => void
@@ -319,6 +322,27 @@ export const useStoryletStore = create<StoryletState>()(
             ...book,
             storylets: book.storylets.map((storylet) =>
               storylet.id === id ? { ...storylet, name, updatedAt: now() } : storylet
+            ),
+            updatedAt: now(),
+          },
+        })
+      },
+
+      setStoryletPublishedMeta: (id: string, meta: { lastPublishedAt: string; lastPublishedSnapshotId: string }) => {
+        const { book } = get()
+        if (!book) return
+        set({
+          book: {
+            ...book,
+            storylets: book.storylets.map((storylet) =>
+              storylet.id === id
+                ? {
+                    ...storylet,
+                    lastPublishedAt: meta.lastPublishedAt,
+                    lastPublishedSnapshotId: meta.lastPublishedSnapshotId,
+                    updatedAt: now(),
+                  }
+                : storylet
             ),
             updatedAt: now(),
           },

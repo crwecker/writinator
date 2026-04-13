@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins } from 'lucide-react'
+import { Coins, Send } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -14,6 +14,7 @@ import { quickSave, saveAsNewFile } from '../../lib/fileSystem'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
+import { PublishModal } from './PublishModal'
 import { StyleEditor } from '../editor/StyleEditor'
 import { AdventurersGuild, type GuildTab } from '../quests/AdventurersGuild'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
@@ -39,6 +40,7 @@ export function AppShell() {
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const editorViewRef = useRef<EditorView | null>(null)
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
+  const [publishModalOpen, setPublishModalOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [guildOpen, setGuildOpen] = useState(false)
   const [guildTab, setGuildTab] = useState<GuildTab>('board')
@@ -160,6 +162,13 @@ export function AppShell() {
       if (matchesEvent(km.snapshotHistory, e)) {
         e.preventDefault()
         setSnapshotsOpen((prev) => !prev)
+        return
+      }
+      if (km.publishStorylet && matchesEvent(km.publishStorylet, e)) {
+        e.preventDefault()
+        if (useStoryletStore.getState().activeStoryletId) {
+          setPublishModalOpen(true)
+        }
         return
       }
       if (matchesEvent(km.toggleFileTree, e)) {
@@ -330,6 +339,14 @@ export function AppShell() {
           <div className="flex items-center gap-1">
             <ExportMenu />
             <button
+              onClick={() => setPublishModalOpen(true)}
+              disabled={!activeStorylet}
+              className="text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors px-2 py-0.5 text-xs flex items-center gap-1"
+              title="Publish storylet (Ctrl+Shift+P)"
+            >
+              <Send size={12} /> Publish
+            </button>
+            <button
               onClick={() => setSnapshotsOpen((prev) => !prev)}
               className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
               title="Snapshot history (Ctrl+Shift+H)"
@@ -365,6 +382,10 @@ export function AppShell() {
             open={snapshotsOpen}
             onClose={() => setSnapshotsOpen(false)}
             onRestore={handleRestoreSnapshot}
+          />
+          <PublishModal
+            open={publishModalOpen}
+            onClose={() => setPublishModalOpen(false)}
           />
           <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} editorView={editorView} />
 
