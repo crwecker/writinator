@@ -18,6 +18,7 @@ import {
   STAT_MARKER_REGEX,
   STATBLOCK_MARKER_REGEX,
 } from './markerUtils'
+import { renderStoryletAsMarkdown, renderStoryletAsHtml } from './render'
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ function sanitizeFilename(name: string): string {
 /** Clean paste artifacts from content. Converts {align:X} markers to HTML
  *  comments that survive markdown parsing, then post-processing converts
  *  them to styled elements. */
-function stripPasteArtifacts(content: string): string {
+export function stripPasteArtifacts(content: string): string {
   return content.replace(/\{align:(\w+)\}\s*/g, '<!--align:$1-->')
 }
 
@@ -171,14 +172,14 @@ export function renderStatblockText(
   )} — Status</div>${rowsHtml}${equippedHtml}${buffsHtml}</div>`
 }
 
-interface CharacterMarkerContext {
+export interface CharacterMarkerContext {
   book: Book
   storyletId: string
   characters: Character[]
   markers: Record<string, StatDelta[]>
 }
 
-function getCharacterMarkerContext(
+export function getCharacterMarkerContext(
   book: Book,
   storyletId: string
 ): CharacterMarkerContext {
@@ -196,7 +197,7 @@ function getCharacterMarkerContext(
  * markers (`<!-- statblock:characterId[:fields=...] -->`) with format-specific
  * rendered text. Operates on raw document content before any markdown parsing.
  */
-function processCharacterMarkers(
+export function processCharacterMarkers(
   content: string,
   ctx: CharacterMarkerContext,
   format: StatblockExportFormat,
@@ -270,7 +271,7 @@ function preprocessForEpub(content: string): string {
 }
 
 /** Convert <!--align:X--> comments into styled wrappers on the next element */
-function applyAlignmentMarkers(html: string): string {
+export function applyAlignmentMarkers(html: string): string {
   return html.replace(/<!--align:(\w+)-->\s*(<[a-zA-Z][^>]*>)/g, (_m, align: string, tag: string) => {
     if (tag.includes('style="')) {
       return tag.replace('style="', `style="text-align: ${align}; `)
@@ -294,7 +295,7 @@ function download(content: string | Blob, filename: string, mimeType: string): v
   URL.revokeObjectURL(url)
 }
 
-function getDepth(storylet: Storylet, storylets: Storylet[]): number {
+export function getDepth(storylet: Storylet, storylets: Storylet[]): number {
   let depth = 0
   let current = storylet
   while (current.parentId) {
@@ -313,15 +314,7 @@ function bookToMarkdown(
 ): string {
   const parts: string[] = [`# ${book.title}\n`]
   for (const doc of book.storylets) {
-    const depth = getDepth(doc, book.storylets)
-    const hashes = '#'.repeat(Math.min(depth + 2, 6))
-    parts.push(`${hashes} ${doc.name}\n`)
-    if (doc.content) {
-      const ctx = getCharacterMarkerContext(book, doc.id)
-      parts.push(
-        processCharacterMarkers(doc.content, ctx, 'markdown', options)
-      )
-    }
+    parts.push(renderStoryletAsMarkdown(doc, book, options))
     parts.push('')
   }
   return parts.join('\n')
@@ -439,7 +432,7 @@ export function exportAsPlainText(book: Book): void {
 
 // ─── HTML Export (via AST) ──────────────────────────────
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
@@ -461,7 +454,7 @@ function phrasingToHtml(nodes: PhrasingContent[]): string {
   }).join('')
 }
 
-function astToHtml(tree: Root): string {
+export function astToHtml(tree: Root): string {
   return tree.children.map((node) => blockToHtml(node)).join('\n')
 }
 
@@ -493,19 +486,7 @@ function blockToHtml(node: Content): string {
 
 export function exportAsHtml(book: Book): void {
   const body = book.storylets
-    .map((doc) => {
-      const depth = getDepth(doc, book.storylets)
-      const level = Math.min(depth + 2, 6)
-      const heading = `<h${level}>${escapeHtml(doc.name)}</h${level}>`
-      const ctx = getCharacterMarkerContext(book, doc.id)
-      const processed = doc.content
-        ? processCharacterMarkers(doc.content, ctx, 'html')
-        : ''
-      const content = processed
-        ? applyAlignmentMarkers(astToHtml(parseMarkdown(stripPasteArtifacts(processed))))
-        : ''
-      return `${heading}\n${content}`
-    })
+    .map((s) => renderStoryletAsHtml(s, book))
     .join('\n\n')
 
   const html = `<!DOCTYPE html>
