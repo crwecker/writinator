@@ -462,8 +462,6 @@ export function AppShell() {
           />
           <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} editorView={editorView} />
 
-          <ImageRevealPanel />
-
           {activeSessions.length === 0 && (
             <QuestReminder
               onStartQuest={() => {
@@ -491,6 +489,8 @@ export function AppShell() {
             editorView={editorView}
           />
         </div>
+
+        {!distractionFree && <ImageRevealPanel />}
 
         {characterPanelOpen && !distractionFree && (
           <CharacterPanel

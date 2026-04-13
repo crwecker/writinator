@@ -806,17 +806,16 @@ export function ImageRevealPanel() {
   }
 
   // ==================================================================
-  // EXPANDED — all sessions at full size
+  // EXPANDED — all sessions at full size, pinned as right sidebar
   // ==================================================================
   return (
-    <div className="fixed bottom-12 right-4 z-40 animate-fade-in">
-      <div className="w-80 bg-gray-900 border border-gray-700 shadow-2xl rounded-lg overflow-hidden flex flex-col">
+    <aside className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-80 shrink-0 overflow-hidden animate-fade-in">
         <PanelHeader
           title="Image Quests"
           onCollapse={collapse}
         />
 
-        <div className="overflow-y-auto max-h-[80vh]">
+        <div className="flex-1 overflow-y-auto">
           {activeSessions.map((session) => {
             const image = loadedImages[session.id]
             const remaining = Math.max(session.wordGoal - session.wordsWritten, 0)
@@ -962,7 +961,6 @@ export function ImageRevealPanel() {
             )
           })}
         </div>
-      </div>
-    </div>
+    </aside>
   )
 }
