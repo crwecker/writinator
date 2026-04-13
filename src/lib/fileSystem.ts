@@ -1,6 +1,7 @@
 import type { Book, GlobalSettings, WritinatorFile } from '../types'
 import { migrateFile } from './migration'
 import { getAllSnapshots } from '../stores/snapshotStore'
+import { getAllPublishedSnapshots } from '../stores/publishedSnapshotStore'
 import { useRecentFilesStore } from '../stores/recentFilesStore'
 import { useCharacterStore } from '../stores/characterStore'
 
@@ -26,11 +27,13 @@ export async function saveFile(
   globalSettings: GlobalSettings
 ): Promise<void> {
   const snapshots = await getAllSnapshots()
+  const publishedSnapshots = await getAllPublishedSnapshots()
   const { characters, markers } = useCharacterStore.getState()
   const file: WritinatorFile = {
-    version: 4,
+    version: 5,
     book,
     snapshots,
+    publishedSnapshots,
     globalSettings,
     characters,
     markers,
@@ -51,11 +54,13 @@ export async function quickSave(
   if (!storedFileHandle) return false
 
   const snapshots = await getAllSnapshots()
+  const publishedSnapshots = await getAllPublishedSnapshots()
   const { characters, markers } = useCharacterStore.getState()
   const file: WritinatorFile = {
-    version: 4,
+    version: 5,
     book,
     snapshots,
+    publishedSnapshots,
     globalSettings,
     characters,
     markers,

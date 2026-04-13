@@ -5,6 +5,7 @@ import type {
   DocumentStyles,
   GlobalSettings,
   NamedStyle,
+  PublishedSnapshot,
   Snapshot,
   StatDelta,
   WritinatorFile,
@@ -99,6 +100,16 @@ function isV4File(data: Record<string, unknown>): boolean {
   )
 }
 
+function isV5File(data: Record<string, unknown>): boolean {
+  return (
+    data.version === 5 &&
+    isRecord(data.book) &&
+    typeof (data.book as Record<string, unknown>).id === 'string' &&
+    typeof (data.book as Record<string, unknown>).title === 'string' &&
+    Array.isArray((data.book as Record<string, unknown>).storylets)
+  )
+}
+
 function v3BookToV4(book: LegacyV3Book): Book {
   return {
     id: book.id,
@@ -109,7 +120,9 @@ function v3BookToV4(book: LegacyV3Book): Book {
   }
 }
 
-function migrateOldBook(old: OldBook): WritinatorFile {
+type V4File = Omit<WritinatorFile, 'version' | 'publishedSnapshots'> & { version: 4 }
+
+function migrateOldBook(old: OldBook): V4File {
   const storylets: Storylet[] = old.chapters.map((ch) => ({
     id: ch.id,
     name: ch.name,
@@ -142,55 +155,81 @@ function migrateOldBook(old: OldBook): WritinatorFile {
   }
 }
 
+function migrateToV5(v4: V4File): WritinatorFile {
+  return {
+    version: 5,
+    book: v4.book,
+    snapshots: v4.snapshots,
+    publishedSnapshots: {},
+    globalSettings: v4.globalSettings,
+    characters: v4.characters,
+    markers: v4.markers,
+  }
+}
+
 /**
- * Migrate any file data (old/v2/v3/v4) into a v4 WritinatorFile.
+ * Migrate any file data (old/v2/v3/v4/v5) into a v5 WritinatorFile.
  */
 export function migrateFile(data: unknown): WritinatorFile {
   if (!isRecord(data)) {
     throw new Error('Invalid file: expected a JSON object')
   }
 
-  // v4 — already current
-  if (isV4File(data)) {
+  // v5 — already current
+  if (isV5File(data)) {
     return {
+      version: 5,
+      book: data.book as Book,
+      snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
+      publishedSnapshots: (data.publishedSnapshots ?? {}) as Record<string, PublishedSnapshot[]>,
+      globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
+      characters: (data.characters ?? []) as Character[],
+      markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
+    }
+  }
+
+  // v4 → v5: add publishedSnapshots
+  if (isV4File(data)) {
+    return migrateToV5({
       version: 4,
       book: data.book as Book,
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: (data.characters ?? []) as Character[],
       markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
-    }
+    })
   }
 
-  // v3 → v4: rename book.documents → book.storylets
+  // v3 → v4 → v5: rename book.documents → book.storylets
   if (isV3File(data)) {
     const legacyBook = data.book as unknown as LegacyV3Book
-    return {
+    return migrateToV5({
       version: 4,
       book: v3BookToV4(legacyBook),
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: (data.characters ?? []) as Character[],
       markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
-    }
+    })
   }
 
-  // v2 → v4: add empty characters + markers, rename documents → storylets
+  // v2 → v4 → v5: add empty characters + markers, rename documents → storylets
   if (isV2File(data)) {
     const legacyBook = data.book as unknown as LegacyV3Book
-    return {
+    return migrateToV5({
       version: 4,
       book: v3BookToV4(legacyBook),
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: [],
       markers: {},
-    }
+    })
   }
 
-  // Old format: bare Book with chapters
+  // Old format: bare Book with chapters → v4 → v5
   if (isOldFormat(data)) {
-    return migrateOldBook(data as OldBook)
+    const v4 = migrateOldBook(data as OldBook)
+    return migrateToV5(v4)
   }
 
   throw new Error('Invalid file: unrecognized format')

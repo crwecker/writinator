@@ -26,6 +26,7 @@ function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
   return { ...(rest as Record<string, NamedStyle>), ...(namedStyles ?? {}) }
 }
 import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
+import { loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
 import { useImageRevealStore } from './imageRevealStore'
 import { useWriteathonStore } from './writeathonStore'
@@ -189,6 +190,7 @@ export const useStoryletStore = create<StoryletState>()(
           activeStoryletId: file.book.storylets[0]?.id ?? null,
         })
         loadSnapshotsFromFile(file.snapshots)
+        loadPublishedSnapshotsFromFile(file.publishedSnapshots ?? {})
         useCharacterStore.getState().loadFromFile(
           file.characters ?? [],
           file.markers ?? {}

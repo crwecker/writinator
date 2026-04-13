@@ -7,6 +7,19 @@ export interface Storylet {
   color?: string      // hex color
   createdAt: string
   updatedAt: string
+  lastPublishedAt?: string
+  lastPublishedSnapshotId?: string
+}
+
+export interface PublishedSnapshot {
+  id: string
+  storyletId: string
+  name: string
+  version?: string
+  label?: string
+  publishedAt: string
+  content: string
+  format: 'markdown'
 }
 
 export interface Book {
@@ -101,12 +114,13 @@ export interface GlobalSettings {
 }
 
 export interface WritinatorFile {
-  version: 4
+  version: 5
   book: Book
-  snapshots: Record<string, Snapshot[]>  // keyed by storylet ID
+  snapshots: Record<string, Snapshot[]>         // keyed by storylet ID
+  publishedSnapshots: Record<string, PublishedSnapshot[]>  // keyed by storylet ID
   globalSettings: GlobalSettings
   characters: Character[]
-  markers: Record<string, StatDelta[]>   // keyed by marker UUID
+  markers: Record<string, StatDelta[]>          // keyed by marker UUID
 }
 
 // ---------------------------------------------------------------------------
