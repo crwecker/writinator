@@ -9,6 +9,7 @@ const triggerLabel: Record<Snapshot['trigger'], string> = {
   switch: 'switch',
   auto: 'auto',
   closeBook: 'close',
+  bulkReplace: 'replace',
 }
 
 interface Props {

@@ -77,8 +77,35 @@ export interface Snapshot {
   content: string
   wordCount: number
   timestamp: string
-  trigger: 'manual' | 'switch' | 'auto' | 'closeBook'
+  trigger: 'manual' | 'switch' | 'auto' | 'closeBook' | 'bulkReplace'
 }
+
+// ---------------------------------------------------------------------------
+// Find in Book — Phase 1: search types
+// ---------------------------------------------------------------------------
+
+export interface SearchOptions {
+  query: string
+  caseSensitive: boolean
+  wholeWord: boolean
+  regex: boolean
+}
+
+export interface SearchMatch {
+  storyletId: string
+  start: number
+  end: number
+  lineSnippet: string
+  matchIndexInSnippet: [number, number]
+}
+
+export interface StoryletSearchResult {
+  storyletId: string
+  storyletName: string
+  matches: SearchMatch[]
+}
+
+export type ReplaceScope = 'storylet' | 'book'
 
 export interface TextStyle {
   fontFamily?: string        // CSS font-family value
