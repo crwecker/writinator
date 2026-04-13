@@ -33,6 +33,56 @@ function cloneStatValue(v: StatValue): StatValue {
   }
 }
 
+// Inline-encoded list-item quantity: "Name xN" where N is an integer >= 1.
+// Missing suffix = 1. Used by inventory-style lists; harmless on plain lists.
+const QTY_RE = /\s+x(\d+)$/i
+
+function parseQty(raw: string): { name: string; qty: number } {
+  const m = raw.match(QTY_RE)
+  if (!m || m.index === undefined) return { name: raw, qty: 1 }
+  const qty = parseInt(m[1], 10)
+  if (!Number.isFinite(qty) || qty < 1) return { name: raw, qty: 1 }
+  return { name: raw.slice(0, m.index).trimEnd(), qty }
+}
+
+function formatQty(name: string, qty: number): string {
+  return qty > 1 ? `${name} x${qty}` : name
+}
+
+export function applyListAdd(current: string[], toAdd: string[]): string[] {
+  const out = [...current]
+  for (const raw of toAdd) {
+    const { name, qty } = parseQty(raw)
+    const key = name.toLowerCase()
+    const idx = out.findIndex((it) => parseQty(it).name.toLowerCase() === key)
+    if (idx >= 0) {
+      const cur = parseQty(out[idx])
+      out[idx] = formatQty(cur.name, cur.qty + qty)
+    } else {
+      out.push(formatQty(name, qty))
+    }
+  }
+  return out
+}
+
+export function applyListRemove(current: string[], toRemove: string[]): string[] {
+  const out = [...current]
+  for (const raw of toRemove) {
+    const { name, qty } = parseQty(raw)
+    const key = name.toLowerCase()
+    const idx = out.findIndex((it) => parseQty(it).name.toLowerCase() === key)
+    if (idx < 0) continue
+    const cur = parseQty(out[idx])
+    const nextQty = cur.qty - qty
+    if (nextQty <= 0) {
+      out.splice(idx, 1)
+    } else {
+      out[idx] = formatQty(cur.name, nextQty)
+    }
+  }
+  return out
+}
+
 function cloneBase(base: Record<string, StatValue>): Record<string, StatValue> {
   const out: Record<string, StatValue> = {}
   for (const k of Object.keys(base)) {
@@ -121,17 +171,19 @@ export function applyDeltaOp(
     case 'listAdd': {
       const cur = next.base[op.statId]
       if (cur && cur.kind === 'list') {
-        next.base[op.statId] = { kind: 'list', items: [...cur.items, ...op.items] }
+        next.base[op.statId] = {
+          kind: 'list',
+          items: applyListAdd(cur.items, op.items),
+        }
       }
       break
     }
     case 'listRemove': {
       const cur = next.base[op.statId]
       if (cur && cur.kind === 'list') {
-        const remove = new Set(op.items)
         next.base[op.statId] = {
           kind: 'list',
-          items: cur.items.filter((it) => !remove.has(it)),
+          items: applyListRemove(cur.items, op.items),
         }
       }
       break

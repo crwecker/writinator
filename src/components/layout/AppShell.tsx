@@ -68,7 +68,6 @@ export function AppShell() {
   )
   const distractionFree = useEditorStore((s) => s.distractionFree)
   const toggleDistractionFree = useEditorStore((s) => s.toggleDistractionFree)
-  const renderMode = useEditorStore((s) => s.renderMode)
   const toggleRenderMode = useEditorStore((s) => s.toggleRenderMode)
   const sidebarOpen = useEditorStore((s) => s.sidebarOpen)
   const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
@@ -431,13 +430,6 @@ export function AppShell() {
             title="Character stats panel (Ctrl+Shift+C)"
           >
             Stats
-          </button>
-          <button
-            onClick={toggleRenderMode}
-            className="text-gray-500 hover:text-gray-300 transition-colors"
-            title="Cycle source/rendered/preview (Ctrl+Shift+E)"
-          >
-            {renderMode === 'source' ? 'Source' : renderMode === 'rendered' ? 'Rendered' : 'Preview'}
           </button>
           <button
             onClick={() => {

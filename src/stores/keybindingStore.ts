@@ -29,7 +29,7 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   saveToDisk: 'Save to disk',
   closeBook: 'Close Book',
   snapshotHistory: 'Snapshot history',
-  toggleRenderMode: 'Cycle source/rendered/preview',
+  toggleRenderMode: 'Cycle Formatting View',
   toggleCharacterPanel: 'Toggle Character Panel',
   insertStatMarker: 'Insert stat change',
 }

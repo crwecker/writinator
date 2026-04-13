@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useCharacterStore } from '../../stores/characterStore'
+import { useEditorStore } from '../../stores/editorStore'
 import type { NamedStyle } from '../../types'
 import { DEFAULT_STYLE_NAMES } from '../../types'
 
@@ -66,6 +67,96 @@ function ToolbarButton({
     >
       {children}
     </button>
+  )
+}
+
+function ColorPickerButton({ editorView }: { editorView: EditorView }) {
+  const recentColors = useEditorStore((s) => s.recentColors)
+  const pushRecentColor = useEditorStore((s) => s.pushRecentColor)
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  // Track the latest color from the native picker without committing to recents
+  // on every drag update — only commit when the picker dialog closes (blur).
+  const pendingColorRef = useRef<string | null>(null)
+
+  function applyColor(color: string) {
+    wrapWithSpanStyle(editorView, `color: ${color}`)
+  }
+
+  function commitColor(color: string) {
+    applyColor(color)
+    pushRecentColor(color)
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        title="Text color"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setOpen((v) => !v)
+        }}
+        className="flex flex-col items-center justify-center rounded px-1.5 py-1 text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+      >
+        <span className="text-sm font-semibold leading-none">A</span>
+        <span className="mt-0.5 block h-0.5 w-3.5 rounded-sm bg-gradient-to-r from-red-500 via-yellow-400 to-blue-500" />
+      </button>
+      {open && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute left-0 top-full z-50 mt-1 w-44 rounded border border-gray-700 bg-gray-800 p-2 shadow-lg"
+        >
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">
+            Recent
+          </div>
+          {recentColors.length === 0 ? (
+            <div className="mb-2 text-xs italic text-gray-600">none yet</div>
+          ) : (
+            <div className="mb-2 grid grid-cols-8 gap-1">
+              {recentColors.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  title={c}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    commitColor(c)
+                  }}
+                  className="h-4 w-4 rounded border border-gray-600 hover:border-gray-300"
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          )}
+          <input
+            type="color"
+            onChange={(e) => {
+              pendingColorRef.current = e.target.value
+              applyColor(e.target.value)
+            }}
+            onBlur={() => {
+              if (pendingColorRef.current) {
+                pushRecentColor(pendingColorRef.current)
+                pendingColorRef.current = null
+              }
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="block h-7 w-full cursor-pointer rounded border border-gray-700 bg-transparent"
+          />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -485,6 +576,179 @@ function stripBlockPrefixes(view: EditorView) {
   view.focus()
 }
 
+function cssToNamedStyle(css: string): NamedStyle {
+  const parsed = parseStyleString(css)
+  const style: NamedStyle = {}
+  for (const [rawKey, value] of Object.entries(parsed)) {
+    const key = rawKey.toLowerCase()
+    if (!value) continue
+    switch (key) {
+      case 'font-family':
+        style.fontFamily = value
+        break
+      case 'font-size': {
+        const n = parseFloat(value)
+        if (!Number.isNaN(n)) style.fontSize = n
+        break
+      }
+      case 'line-height': {
+        const n = parseFloat(value)
+        if (!Number.isNaN(n)) style.lineHeight = n
+        break
+      }
+      case 'color':
+        style.color = value
+        break
+      case 'letter-spacing':
+        style.letterSpacing = value
+        break
+      case 'font-weight':
+        style.fontWeight = value
+        break
+      case 'font-style':
+        style.fontStyle = value
+        break
+      case 'text-decoration':
+        style.textDecoration = value
+        break
+      case 'background-color':
+        style.backgroundColor = value
+        break
+    }
+  }
+  return style
+}
+
+function saveSelectionAsNamedStyle(
+  view: EditorView,
+  existingStyles: Record<string, NamedStyle>,
+  updateGlobalSettings: (patch: { documentStyles: Record<string, NamedStyle> }) => void,
+  replaceInlineStyleInOtherDocs: (styleString: string, className: string) => number
+) {
+  const { from, to } = view.state.selection.main
+  if (from === to) {
+    window.alert('Select text inside an inline-styled span first.')
+    return
+  }
+  const startLine = view.state.doc.lineAt(from)
+  const endLine = view.state.doc.lineAt(to)
+  if (startLine.number !== endLine.number) {
+    window.alert('Selection must be on a single line.')
+    return
+  }
+  const lineText = startLine.text
+  const selStart = from - startLine.from
+  const selEnd = to - startLine.from
+  const enclosing = findEnclosingStyleSpan(lineText, selStart, selEnd)
+  if (!enclosing) {
+    window.alert('Selection is not inside an inline-styled <span>.')
+    return
+  }
+  const rawName = window.prompt('Name this style:', '')
+  if (!rawName) return
+  const name = rawName.trim()
+  if (!name) return
+  if ((DEFAULT_STYLE_NAMES as readonly string[]).includes(name)) {
+    window.alert(`"${name}" is reserved.`)
+    return
+  }
+  if (existingStyles[name]) {
+    if (!window.confirm(`Style "${name}" already exists. Overwrite?`)) return
+  }
+  const namedStyle = cssToNamedStyle(enclosing.style)
+  updateGlobalSettings({
+    documentStyles: { ...existingStyles, [name]: namedStyle },
+  })
+
+  // Count other identical inline-style spans in the current doc (excluding the
+  // selection's own span, which we're about to convert regardless).
+  const needle = `<span style="${enclosing.style}">`
+  const currentDocText = view.state.doc.toString()
+  let otherInCurrentDoc = 0
+  let searchFrom = 0
+  while (true) {
+    const idx = currentDocText.indexOf(needle, searchFrom)
+    if (idx === -1) break
+    if (idx !== startLine.from + enclosing.start) otherInCurrentDoc++
+    searchFrom = idx + needle.length
+  }
+
+  let replaceAll = false
+  if (otherInCurrentDoc > 0) {
+    replaceAll = window.confirm(
+      `Found ${otherInCurrentDoc} other span${otherInCurrentDoc === 1 ? '' : 's'} with identical styling in this document. Convert all of them to "${name}" too?\n\n(Spans in other documents in the book will also be converted.)`
+    )
+  } else {
+    replaceAll = window.confirm(
+      `Also convert any identical <span style="…"> elsewhere in the book to "${name}"?`
+    )
+  }
+
+  const newOpen = `<span class="${name}">`
+
+  if (replaceAll) {
+    const changes: { from: number; to: number; insert: string }[] = []
+    searchFrom = 0
+    while (true) {
+      const idx = currentDocText.indexOf(needle, searchFrom)
+      if (idx === -1) break
+      changes.push({ from: idx, to: idx + needle.length, insert: newOpen })
+      searchFrom = idx + needle.length
+    }
+    view.dispatch({ changes })
+    replaceInlineStyleInOtherDocs(enclosing.style, name)
+  } else {
+    view.dispatch({
+      changes: {
+        from: startLine.from + enclosing.start,
+        to: startLine.from + enclosing.openEnd,
+        insert: newOpen,
+      },
+    })
+  }
+  view.focus()
+}
+
+function clearFormattingInSelection(view: EditorView) {
+  const { from, to } = view.state.selection.main
+  if (from === to) return
+  const doc = view.state.doc
+  const startLine = doc.lineAt(from)
+  const endLine = doc.lineAt(to)
+  const changes: { from: number; to: number; insert: string }[] = []
+  const tagRegex = /<span\s+(?:style|class)="[^"]*">|<\/span>/g
+
+  for (let ln = startLine.number; ln <= endLine.number; ln++) {
+    const line = doc.line(ln)
+    const lineText = line.text
+    type Open = { start: number; openEnd: number }
+    const stack: Open[] = []
+    const pairs: Array<{ start: number; openEnd: number; closeStart: number; closeEnd: number }> = []
+    tagRegex.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = tagRegex.exec(lineText)) !== null) {
+      if (m[0].startsWith('</')) {
+        const o = stack.pop()
+        if (o) pairs.push({ ...o, closeStart: m.index, closeEnd: m.index + m[0].length })
+      } else {
+        stack.push({ start: m.index, openEnd: m.index + m[0].length })
+      }
+    }
+    const selStart = Math.max(from - line.from, 0)
+    const selEnd = Math.min(to - line.from, lineText.length)
+    for (const p of pairs) {
+      // Overlap between [p.start, p.closeEnd] and [selStart, selEnd]
+      if (p.closeEnd <= selStart || p.start >= selEnd) continue
+      changes.push({ from: line.from + p.start, to: line.from + p.openEnd, insert: '' })
+      changes.push({ from: line.from + p.closeStart, to: line.from + p.closeEnd, insert: '' })
+    }
+  }
+
+  if (changes.length === 0) return
+  view.dispatch({ changes })
+  view.focus()
+}
+
 function styleToCSS(style: NamedStyle): string {
   const parts: string[] = []
   if (style.fontFamily) parts.push(`font-family: ${style.fontFamily}`)
@@ -500,15 +764,18 @@ function styleToCSS(style: NamedStyle): string {
 }
 
 function wrapLineWithSpanClass(line: string, className: string): string | null {
-  const classSpanMatch = line.match(/^<span\s+class="([^"]*)">(.*)<\/span>$/)
-  if (classSpanMatch) {
-    if (classSpanMatch[1] === className) {
-      // Same class — unwrap
-      return classSpanMatch[2]
-    }
-    // Different class — replace
-    return `<span class="${className}">${classSpanMatch[2]}</span>`
+  // Line is wholly wrapped in a class span — toggle off (same class) or swap class.
+  const wholeClassMatch = line.match(/^<span\s+class="([^"]*)">(.*)<\/span>$/)
+  if (wholeClassMatch) {
+    if (wholeClassMatch[1] === className) return wholeClassMatch[2]
+    return `<span class="${className}">${wholeClassMatch[2]}</span>`
   }
+  // Line contains span(s) somewhere (possibly with prefixes like `{align:center} `).
+  // Replace every span opening tag (style or class) with the new class.
+  if (/<span\s+(?:style|class)="/.test(line)) {
+    return line.replace(/<span\s+(?:style|class)="[^"]*">/g, `<span class="${className}">`)
+  }
+  // No existing span: wrap the whole line.
   return `<span class="${className}">${line}</span>`
 }
 
@@ -529,6 +796,8 @@ function wrapWithSpanClass(view: EditorView, className: string) {
 
 export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles }: BubbleToolbarProps) {
   const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
+  const updateGlobalSettings = useDocumentStore((s) => s.updateGlobalSettings)
+  const replaceInlineStyleInOtherDocs = useDocumentStore((s) => s.replaceInlineStyleInOtherDocs)
   const namedStyles: Record<string, NamedStyle> | undefined = documentStyles
     ? Object.fromEntries(
         Object.entries(documentStyles).filter(
@@ -697,23 +966,17 @@ export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles
       </select>
 
       {/* Color picker */}
-      <label
-        title="Text color"
-        onMouseDown={(e) => e.preventDefault()}
-        className="relative flex flex-col items-center justify-center cursor-pointer rounded px-1.5 py-1 text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+      <ColorPickerButton editorView={editorView} />
+
+      <ToolbarButton
+        onClick={() => clearFormattingInSelection(editorView)}
+        title="Remove span formatting from selection"
       >
-        <span className="text-sm font-semibold leading-none">A</span>
-        <span className="mt-0.5 block h-0.5 w-3.5 rounded-sm bg-gradient-to-r from-red-500 via-yellow-400 to-blue-500" />
-        <input
-          type="color"
-          onChange={(e) => {
-            wrapWithSpanStyle(editorView, `color: ${e.target.value}`)
-            editorView.focus()
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        />
-      </label>
+        <span className="flex items-center gap-0.5">
+          <span className="text-sm font-semibold italic">T</span>
+          <span className="text-xs">✕</span>
+        </span>
+      </ToolbarButton>
 
       {/* Styles dropdown — default document styles + named styles */}
       {(() => {
@@ -736,6 +999,13 @@ export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles
                 const val = e.target.value
                 if (val === '__edit__') {
                   onEditStyles?.()
+                } else if (val === '__save__') {
+                  saveSelectionAsNamedStyle(
+                    editorView,
+                    documentStyles ?? {},
+                    updateGlobalSettings,
+                    replaceInlineStyleInOtherDocs
+                  )
                 } else if (val.startsWith('named:')) {
                   wrapWithSpanClass(editorView, val.slice(6))
                 } else if (val === 'blockquote') {
@@ -773,7 +1043,8 @@ export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles
               {hasNamed && Object.keys(namedStyles!).map((name) => (
                 <option key={name} value={`named:${name}`}>{name}</option>
               ))}
-              {onEditStyles && <option disabled>───</option>}
+              <option disabled>───</option>
+              <option value="__save__">Save selection as named style…</option>
               {onEditStyles && <option value="__edit__">Edit Styles…</option>}
             </select>
           </>

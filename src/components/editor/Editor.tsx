@@ -68,6 +68,9 @@ function makeDocStylesTheme(styles: DocumentStyles | undefined): Extension {
   return Object.keys(rules).length ? EditorView.theme(rules) : []
 }
 
+// Effect dispatched when documentStyles changes so the decoration plugin re-runs
+const docStylesChangedEffect = StateEffect.define<null>()
+
 // StateEffect and StateField for render mode so the decoration plugin can read it synchronously
 const setRenderModeEffect = StateEffect.define<'source' | 'rendered' | 'preview'>()
 const renderModeField = StateField.define<'source' | 'rendered' | 'preview'>({
@@ -361,6 +364,20 @@ function markdownDecorations(view: EditorView): DecorationSet {
       }
       if (cssString === null) continue
 
+      // line-height on an inline span doesn't change the block line box for
+      // soft-wrapped rows — promote it to a line-level decoration so wrapped
+      // rows actually tighten/expand.
+      const lineHeightMatch = cssString.match(/line-height:\s*([^;]+)/)
+      if (lineHeightMatch) {
+        decorations.push({
+          from: line.from,
+          to: line.from,
+          deco: Decoration.line({
+            attributes: { style: `line-height: ${lineHeightMatch[1].trim()};` },
+          }),
+        })
+      }
+
       if (isRendered && (alwaysHide || !isCursorLine)) {
         decorations.push({
           from: matchStart,
@@ -401,7 +418,10 @@ const markdownDecorationPlugin = ViewPlugin.fromClass(
       const renderModeChanged = update.transactions.some((tr) =>
         tr.effects.some((e) => e.is(setRenderModeEffect))
       )
-      if (update.docChanged || update.viewportChanged || renderModeChanged) {
+      const stylesChanged = update.transactions.some((tr) =>
+        tr.effects.some((e) => e.is(docStylesChangedEffect))
+      )
+      if (update.docChanged || update.viewportChanged || renderModeChanged || stylesChanged) {
         this.decorations = markdownDecorations(update.view)
       } else if (update.view.state.field(renderModeField) === 'rendered' && update.selectionSet) {
         const oldLine = update.startState.doc.lineAt(update.startState.selection.main.head).number
@@ -513,7 +533,15 @@ async function pasteStyle(view: EditorView): Promise<boolean> {
 
     const { from, to } = view.state.selection.main
     const selected = view.state.sliceDoc(from, to)
-    const wrapped = `${wrap.open}${selected}${wrap.close}`
+
+    // If pasting a <span> wrap and the selection already contains span(s),
+    // replace their opening tags rather than nesting an outer wrapper.
+    const isSpanWrap = /^<span\b/i.test(wrap.open)
+    const hasExistingSpan = /<span\s+(?:class|style)="[^"]*">/i.test(selected)
+    const wrapped =
+      isSpanWrap && hasExistingSpan
+        ? selected.replace(/<span\s+(?:class|style)="[^"]*">/g, wrap.open)
+        : `${wrap.open}${selected}${wrap.close}`
 
     view.dispatch({
       changes: { from, to, insert: wrapped },
@@ -555,6 +583,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const fontFamily = useEditorStore((s) => s.fontFamily)
   const fontSize = useEditorStore((s) => s.fontSize)
   const renderMode = useEditorStore((s) => s.renderMode)
+  const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
 
   const distractionFree = useEditorStore((s) => s.distractionFree)
 
@@ -637,7 +666,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
         typewriterComp.of(useEditorStore.getState().distractionFree ? typewriterScroll() : []),
-        docStylesComp.of(makeDocStylesTheme(undefined)),
+        docStylesComp.of(makeDocStylesTheme(useDocumentStore.getState().globalSettings.documentStyles)),
         EditorView.theme({
           '&': { height: '100%', backgroundColor: 'transparent' },
           '.cm-scroller': { overflow: 'auto', padding: '2rem', lineHeight: '1.75' },
@@ -818,6 +847,19 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     if (!view || !comp) return
     view.dispatch({ effects: comp.reconfigure(makeFontSizeTheme(fontSize)) })
   }, [fontSize])
+
+  // Update document styles (body theme + refresh decorations for named/heading styles)
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = docStylesCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({
+      effects: [
+        comp.reconfigure(makeDocStylesTheme(documentStyles)),
+        docStylesChangedEffect.of(null),
+      ],
+    })
+  }, [documentStyles])
 
   // Sync render mode into CM6 state
   useEffect(() => {

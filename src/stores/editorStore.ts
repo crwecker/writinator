@@ -6,6 +6,8 @@ import type { EditorPreferences } from '../types'
 interface EditorState extends EditorPreferences {
   /** Transient: current CodeMirror main-selection head offset. Not persisted. */
   cursorOffset: number
+  /** Recently used text colors (most recent first, capped). */
+  recentColors: string[]
   setVimMode: (enabled: boolean) => void
   toggleVimMode: () => void
   setFontFamily: (family: EditorPreferences['fontFamily']) => void
@@ -18,7 +20,10 @@ interface EditorState extends EditorPreferences {
   toggleDocumentCollapsed: (id: string) => void
   setCollapsedDocumentIds: (ids: string[]) => void
   setCursorOffset: (offset: number) => void
+  pushRecentColor: (color: string) => void
 }
+
+const RECENT_COLORS_MAX = 8
 
 const localforageStorage = createJSONStorage<EditorState>(() => ({
   getItem: async (name: string) => {
@@ -45,6 +50,7 @@ export const useEditorStore = create<EditorState>()(
       sidebarOpen: true,
       collapsedDocumentIds: [],
       cursorOffset: 0,
+      recentColors: [],
 
       setVimMode: (enabled: boolean) => set({ vimMode: enabled }),
       toggleVimMode: () => set({ vimMode: !get().vimMode }),
@@ -77,6 +83,15 @@ export const useEditorStore = create<EditorState>()(
         if (get().cursorOffset === offset) return
         set({ cursorOffset: offset })
       },
+      pushRecentColor: (color: string) => {
+        const normalized = color.toLowerCase()
+        const current = get().recentColors
+        const next = [normalized, ...current.filter((c) => c.toLowerCase() !== normalized)].slice(
+          0,
+          RECENT_COLORS_MAX
+        )
+        set({ recentColors: next })
+      },
     }),
     {
       name: 'writinator-editor',
@@ -90,6 +105,7 @@ export const useEditorStore = create<EditorState>()(
           renderMode: state.renderMode,
           sidebarOpen: state.sidebarOpen,
           collapsedDocumentIds: state.collapsedDocumentIds,
+          recentColors: state.recentColors,
         }) as unknown as EditorState,
     }
   )

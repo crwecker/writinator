@@ -65,6 +65,7 @@ interface DocumentState {
   setGlobalSettings: (settings: GlobalSettings) => void
   updateGlobalSettings: (patch: Partial<GlobalSettings>) => void
   renameStyle: (oldName: string, newName: string) => void
+  replaceInlineStyleInOtherDocs: (styleString: string, className: string) => number
 }
 
 function generateId(): string {
@@ -535,6 +536,26 @@ export const useDocumentStore = create<DocumentState>()(
           globalSettings: { ...globalSettings, documentStyles: nextStyles },
           ...(nextBook ? { book: nextBook } : {}),
         })
+      },
+
+      replaceInlineStyleInOtherDocs: (styleString: string, className: string) => {
+        const { book, activeDocumentId } = get()
+        if (!book) return 0
+        const needle = `<span style="${styleString}">`
+        const replacement = `<span class="${className}">`
+        let total = 0
+        const nextDocs = book.documents.map((doc) => {
+          if (doc.id === activeDocumentId) return doc
+          if (!doc.content || !doc.content.includes(needle)) return doc
+          const parts = doc.content.split(needle)
+          const count = parts.length - 1
+          if (count === 0) return doc
+          total += count
+          return { ...doc, content: parts.join(replacement), updatedAt: now() }
+        })
+        if (total === 0) return 0
+        set({ book: { ...book, documents: nextDocs, updatedAt: now() } })
+        return total
       },
 
       _flushContentUpdate: () => {
