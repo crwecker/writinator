@@ -37,6 +37,7 @@ export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
   const [vimCurrentMode, setVimCurrentMode] = useState<VimMode>('NORMAL')
   const [editorView, setEditorView] = useState<EditorView | null>(null)
+  const editorViewRef = useRef<EditorView | null>(null)
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [guildOpen, setGuildOpen] = useState(false)
@@ -107,7 +108,10 @@ export function AppShell() {
 
   const handleWordCountChange = useCallback((c: number) => setWordCount(c), [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
-  const handleEditorView = useCallback((v: EditorView | null) => setEditorView(v), [])
+  const handleEditorView = useCallback((v: EditorView | null) => {
+    setEditorView(v)
+    editorViewRef.current = v
+  }, [])
 
   const handleInsertMarker = useCallback((markerId: string) => {
     setDeltaEditorState({ open: true, markerId, mode: 'create' })
@@ -195,6 +199,18 @@ export function AppShell() {
       if (km.toggleCharacterPanel && matchesEvent(km.toggleCharacterPanel, e)) {
         e.preventDefault()
         setCharacterPanelOpen((p) => !p)
+        return
+      }
+      if (km.insertStatMarker && matchesEvent(km.insertStatMarker, e)) {
+        const view = editorViewRef.current
+        if (!view) return
+        e.preventDefault()
+        const { to } = view.state.selection.main
+        const markerId = crypto.randomUUID()
+        view.dispatch({
+          changes: { from: to, to, insert: `<!-- stat:${markerId} -->` },
+        })
+        setDeltaEditorState({ open: true, markerId, mode: 'create' })
         return
       }
     }
@@ -314,6 +330,13 @@ export function AppShell() {
 
           <div className="flex items-center gap-1">
             <ExportMenu />
+            <button
+              onClick={() => setSnapshotsOpen((prev) => !prev)}
+              className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
+              title="Snapshot history (Ctrl+Shift+H)"
+            >
+              History
+            </button>
             <ShortcutsMenu />
           </div>
         </div>
@@ -334,13 +357,17 @@ export function AppShell() {
             onEditorView={handleEditorView}
           />
           <SubDocumentLinks />
-          <BubbleToolbar editorView={editorView} onInsertMarker={handleInsertMarker} />
+          <BubbleToolbar
+            editorView={editorView}
+            onInsertMarker={handleInsertMarker}
+            onEditStyles={() => setStyleEditorOpen(true)}
+          />
           <SnapshotBrowser
             open={snapshotsOpen}
             onClose={() => setSnapshotsOpen(false)}
             onRestore={handleRestoreSnapshot}
           />
-          <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} />
+          <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} editorView={editorView} />
 
           <ImageRevealPanel />
 
@@ -363,6 +390,16 @@ export function AppShell() {
             open={characterSheetOpen}
             onClose={() => setCharacterSheetOpen(false)}
           />
+          <DeltaEditorModal
+            open={deltaEditorState.open}
+            onClose={closeDeltaEditor}
+            markerId={deltaEditorState.markerId}
+            mode={deltaEditorState.mode}
+            editorView={editorView}
+          />
+        </div>
+
+        {characterPanelOpen && !distractionFree && (
           <CharacterPanel
             open={characterPanelOpen}
             onClose={() => setCharacterPanelOpen(false)}
@@ -372,14 +409,7 @@ export function AppShell() {
               setCharacterSheetOpen(true)
             }}
           />
-          <DeltaEditorModal
-            open={deltaEditorState.open}
-            onClose={closeDeltaEditor}
-            markerId={deltaEditorState.markerId}
-            mode={deltaEditorState.mode}
-            editorView={editorView}
-          />
-        </div>
+        )}
       </div>
 
       <JourneyBar bookWordCount={bookWordCount} />
@@ -395,21 +425,6 @@ export function AppShell() {
         <DailyTarget bookWordCount={bookWordCount} />
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setStyleEditorOpen((p) => !p)}
-            className="text-gray-500 hover:text-gray-300 transition-colors"
-            title="Document styles"
-          >
-            Styles
-          </button>
-          <button
-            data-testid="characters-button"
-            onClick={() => setCharacterSheetOpen((p) => !p)}
-            className="text-gray-500 hover:text-gray-300 transition-colors"
-            title="Characters"
-          >
-            Characters
-          </button>
-          <button
             data-testid="character-panel-button"
             onClick={() => setCharacterPanelOpen((p) => !p)}
             className="text-gray-500 hover:text-gray-300 transition-colors"
@@ -420,9 +435,9 @@ export function AppShell() {
           <button
             onClick={toggleRenderMode}
             className="text-gray-500 hover:text-gray-300 transition-colors"
-            title="Toggle source/rendered (Ctrl+Shift+E)"
+            title="Cycle source/rendered/preview (Ctrl+Shift+E)"
           >
-            {renderMode === 'source' ? 'Source' : 'Rendered'}
+            {renderMode === 'source' ? 'Source' : renderMode === 'rendered' ? 'Rendered' : 'Preview'}
           </button>
           <button
             onClick={() => {
@@ -445,13 +460,6 @@ export function AppShell() {
             <span className={`tabular-nums${coinPulsing ? ' animate-coin-pulse' : ''}`}>
               {coins.toLocaleString()}
             </span>
-          </button>
-          <button
-            onClick={() => setSnapshotsOpen((prev) => !prev)}
-            className="text-gray-500 hover:text-gray-300 transition-colors"
-            title="Snapshot history (Ctrl+Shift+H)"
-          >
-            History
           </button>
           <VimStatusLine mode={vimCurrentMode} />
         </div>

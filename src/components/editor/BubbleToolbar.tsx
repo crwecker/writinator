@@ -2,11 +2,13 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useCharacterStore } from '../../stores/characterStore'
-import type { TextStyle, HeadingStyle, NamedStyle } from '../../types'
+import type { NamedStyle } from '../../types'
+import { DEFAULT_STYLE_NAMES } from '../../types'
 
 interface BubbleToolbarProps {
   editorView: EditorView | null
   onInsertMarker?: (markerId: string) => void
+  onEditStyles?: () => void
 }
 
 function insertStatMarkerAtSelection(
@@ -213,32 +215,122 @@ function wrapSelection(view: EditorView, before: string, after: string) {
   view.focus()
 }
 
+function parseStyleString(style: string): Record<string, string> {
+  return Object.fromEntries(
+    style.split(';').filter(Boolean).map((s) => {
+      const [k, ...v] = s.split(':')
+      return [k.trim(), v.join(':').trim()]
+    })
+  )
+}
+
+function mergeStyles(existing: string, incoming: string): string {
+  const merged = { ...parseStyleString(existing), ...parseStyleString(incoming) }
+  return Object.entries(merged).map(([k, v]) => `${k}: ${v}`).join('; ')
+}
+
 function wrapLineWithSpanStyle(line: string, style: string): string {
   // If already wrapped in a span, merge styles
   const spanMatch = line.match(/^<span\s+style="([^"]*)">(.*)<\/span>$/)
   if (spanMatch) {
-    const existing = Object.fromEntries(
-      spanMatch[1].split(';').filter(Boolean).map((s) => {
-        const [k, ...v] = s.split(':')
-        return [k.trim(), v.join(':').trim()]
-      })
-    )
-    const incoming = Object.fromEntries(
-      style.split(';').filter(Boolean).map((s) => {
-        const [k, ...v] = s.split(':')
-        return [k.trim(), v.join(':').trim()]
-      })
-    )
-    const merged = { ...existing, ...incoming }
-    const mergedStyle = Object.entries(merged).map(([k, v]) => `${k}: ${v}`).join('; ')
-    return `<span style="${mergedStyle}">${spanMatch[2]}</span>`
+    return `<span style="${mergeStyles(spanMatch[1], style)}">${spanMatch[2]}</span>`
   }
   return `<span style="${style}">${line}</span>`
+}
+
+// Find innermost span pair (style attr only) in `lineText` that fully contains
+// the selection range [selStart, selEnd] (line-relative). Returns null if none.
+function findEnclosingStyleSpan(
+  lineText: string,
+  selStart: number,
+  selEnd: number
+): { start: number; openEnd: number; closeStart: number; closeEnd: number; style: string } | null {
+  const tagRegex = /<span\s+style="([^"]*)">|<\/span>/g
+  type Open = { start: number; openEnd: number; style: string }
+  const stack: Open[] = []
+  const pairs: Array<{ start: number; openEnd: number; closeStart: number; closeEnd: number; style: string }> = []
+  let m: RegExpExecArray | null
+  while ((m = tagRegex.exec(lineText)) !== null) {
+    if (m[1] !== undefined) {
+      stack.push({ start: m.index, openEnd: m.index + m[0].length, style: m[1] })
+    } else {
+      const o = stack.pop()
+      if (o) {
+        pairs.push({
+          start: o.start,
+          openEnd: o.openEnd,
+          closeStart: m.index,
+          closeEnd: m.index + m[0].length,
+          style: o.style,
+        })
+      }
+    }
+  }
+  // pairs are in innermost-first order (close tags complete from the inside out)
+  return pairs.find((p) => selStart >= p.openEnd && selEnd <= p.closeStart) ?? null
 }
 
 function wrapWithSpanStyle(view: EditorView, style: string) {
   const { from, to } = view.state.selection.main
   if (from === to) return
+  const doc = view.state.doc
+  const startLine = doc.lineAt(from)
+  const endLine = doc.lineAt(to)
+
+  // Single-line: check if selection is inside an existing span and merge instead of nest
+  if (startLine.number === endLine.number) {
+    const lineText = startLine.text
+    const selStart = from - startLine.from
+    const selEnd = to - startLine.from
+    const enclosing = findEnclosingStyleSpan(lineText, selStart, selEnd)
+    if (enclosing) {
+      const mergedStyle = mergeStyles(enclosing.style, style)
+      const inner = lineText.slice(enclosing.openEnd, enclosing.closeStart)
+      const prefix = inner.slice(0, selStart - enclosing.openEnd)
+      const selected = inner.slice(selStart - enclosing.openEnd, selEnd - enclosing.openEnd)
+      const suffix = inner.slice(selEnd - enclosing.openEnd)
+
+      if (prefix === '' && suffix === '') {
+        // Selection covers entire span content: replace only the opening tag's style
+        const newOpen = `<span style="${mergedStyle}">`
+        view.dispatch({
+          changes: {
+            from: startLine.from + enclosing.start,
+            to: startLine.from + enclosing.openEnd,
+            insert: newOpen,
+          },
+          selection: {
+            anchor: startLine.from + enclosing.start + newOpen.length,
+            head: startLine.from + enclosing.start + newOpen.length + selected.length,
+          },
+        })
+      } else {
+        // Split: prefix keeps original style, selection gets merged, suffix keeps original
+        const parts: string[] = []
+        if (prefix) parts.push(`<span style="${enclosing.style}">${prefix}</span>`)
+        const selectedSpan = `<span style="${mergedStyle}">${selected}</span>`
+        const selSpanStartOffset = parts.reduce((n, p) => n + p.length, 0) + `<span style="${mergedStyle}">`.length
+        parts.push(selectedSpan)
+        if (suffix) parts.push(`<span style="${enclosing.style}">${suffix}</span>`)
+        const replacement = parts.join('')
+        const replStart = startLine.from + enclosing.start
+        view.dispatch({
+          changes: {
+            from: replStart,
+            to: startLine.from + enclosing.closeEnd,
+            insert: replacement,
+          },
+          selection: {
+            anchor: replStart + selSpanStartOffset,
+            head: replStart + selSpanStartOffset + selected.length,
+          },
+        })
+      }
+      view.focus()
+      return
+    }
+  }
+
   const selected = view.state.sliceDoc(from, to)
   const lines = selected.split('\n')
   const wrapped = lines.map((line) =>
@@ -393,7 +485,7 @@ function stripBlockPrefixes(view: EditorView) {
   view.focus()
 }
 
-function styleToCSS(style: TextStyle | HeadingStyle | NamedStyle): string {
+function styleToCSS(style: NamedStyle): string {
   const parts: string[] = []
   if (style.fontFamily) parts.push(`font-family: ${style.fontFamily}`)
   if (style.fontSize) parts.push(`font-size: ${style.fontSize}px`)
@@ -435,9 +527,15 @@ function wrapWithSpanClass(view: EditorView, className: string) {
   view.focus()
 }
 
-export default function BubbleToolbar({ editorView, onInsertMarker }: BubbleToolbarProps) {
+export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles }: BubbleToolbarProps) {
   const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
-  const namedStyles = documentStyles?.namedStyles
+  const namedStyles: Record<string, NamedStyle> | undefined = documentStyles
+    ? Object.fromEntries(
+        Object.entries(documentStyles).filter(
+          ([k]) => !(DEFAULT_STYLE_NAMES as readonly string[]).includes(k)
+        )
+      )
+    : undefined
   const characters = useCharacterStore((s) => s.characters)
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
   const [statblockPickerOpen, setStatblockPickerOpen] = useState(false)
@@ -541,29 +639,6 @@ export default function BubbleToolbar({ editorView, onInsertMarker }: BubbleTool
 
       <div className="mx-1 h-5 w-px bg-gray-700" />
 
-      <ToolbarButton
-        onClick={() => prependLineWith(editorView, '# ')}
-        title="Heading 1"
-      >
-        H1
-      </ToolbarButton>
-
-      <ToolbarButton
-        onClick={() => prependLineWith(editorView, '## ')}
-        title="Heading 2"
-      >
-        H2
-      </ToolbarButton>
-
-      <ToolbarButton
-        onClick={() => prependLineWith(editorView, '### ')}
-        title="Heading 3"
-      >
-        H3
-      </ToolbarButton>
-
-      <div className="mx-1 h-5 w-px bg-gray-700" />
-
       {/* Alignment */}
       <ToolbarButton
         onClick={() => setAlignment(editorView, 'left')}
@@ -621,9 +696,28 @@ export default function BubbleToolbar({ editorView, onInsertMarker }: BubbleTool
         ))}
       </select>
 
+      {/* Color picker */}
+      <label
+        title="Text color"
+        onMouseDown={(e) => e.preventDefault()}
+        className="relative flex flex-col items-center justify-center cursor-pointer rounded px-1.5 py-1 text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+      >
+        <span className="text-sm font-semibold leading-none">A</span>
+        <span className="mt-0.5 block h-0.5 w-3.5 rounded-sm bg-gradient-to-r from-red-500 via-yellow-400 to-blue-500" />
+        <input
+          type="color"
+          onChange={(e) => {
+            wrapWithSpanStyle(editorView, `color: ${e.target.value}`)
+            editorView.focus()
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        />
+      </label>
+
       {/* Styles dropdown — default document styles + named styles */}
       {(() => {
-        const defaultStyles: { key: string; label: string; style: TextStyle | HeadingStyle | NamedStyle | undefined }[] = [
+        const defaultStyles: { key: string; label: string; style: NamedStyle | undefined }[] = [
           { key: 'body', label: 'Body', style: documentStyles?.body },
           { key: 'h1', label: 'Heading 1', style: documentStyles?.h1 },
           { key: 'h2', label: 'Heading 2', style: documentStyles?.h2 },
@@ -640,7 +734,9 @@ export default function BubbleToolbar({ editorView, onInsertMarker }: BubbleTool
               onChange={(e) => {
                 if (!e.target.value) return
                 const val = e.target.value
-                if (val.startsWith('named:')) {
+                if (val === '__edit__') {
+                  onEditStyles?.()
+                } else if (val.startsWith('named:')) {
                   wrapWithSpanClass(editorView, val.slice(6))
                 } else if (val === 'blockquote') {
                   toggleBlockPrefix(editorView, '> ')
@@ -677,6 +773,8 @@ export default function BubbleToolbar({ editorView, onInsertMarker }: BubbleTool
               {hasNamed && Object.keys(namedStyles!).map((name) => (
                 <option key={name} value={`named:${name}`}>{name}</option>
               ))}
+              {onEditStyles && <option disabled>───</option>}
+              {onEditStyles && <option value="__edit__">Edit Styles…</option>}
             </select>
           </>
         )

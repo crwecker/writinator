@@ -3,18 +3,21 @@ import type { EditorView } from '@codemirror/view'
 import { useCharacterStore } from '../../stores/characterStore'
 import { useDocumentStore } from '../../stores/documentStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { checkConsistency, computeStateAt } from '../../lib/characterState'
+import { checkConsistency, computeStateAt, getDocumentTreeOrder } from '../../lib/characterState'
+import { extractMarkers } from '../../lib/markerUtils'
 import { ProgressionGraph } from './ProgressionGraph'
 import type {
   Character,
   CharacterState,
   ConsistencyIssue,
   StatDefinition,
+  StatDelta,
+  StatDeltaOp,
   StatModifier,
   StatValue,
 } from '../../types'
 
-type PanelTab = 'stats' | 'graph' | 'issues'
+type PanelTab = 'stats' | 'graph' | 'issues' | 'changes'
 
 interface Props {
   open: boolean
@@ -362,7 +365,6 @@ function CharacterSection({ character, computed }: SectionProps) {
 }
 
 export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null)
   const characters = useCharacterStore((s) => s.characters)
   const markers = useCharacterStore((s) => s.markers)
   const removeMarkerFromStore = useCharacterStore((s) => s.removeMarker)
@@ -380,38 +382,6 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
     return characters[0].id
   }, [characters, graphCharacterIdRaw])
 
-  // Close on Escape
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  // Close on click outside (registered via setTimeout to avoid the same
-  // mousedown that opened the panel closing it).
-  useEffect(() => {
-    if (!open) return
-    const timer = setTimeout(() => {
-      function onClick(e: MouseEvent) {
-        if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-          onClose()
-        }
-      }
-      document.addEventListener('mousedown', onClick)
-      cleanup = () => document.removeEventListener('mousedown', onClick)
-    }, 0)
-    let cleanup: (() => void) | null = null
-    return () => {
-      clearTimeout(timer)
-      if (cleanup) cleanup()
-    }
-  }, [open, onClose])
 
   const issues = useMemo<ConsistencyIssue[]>(() => {
     if (!book) return []
@@ -430,13 +400,32 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
     return map
   }, [characters, markers, book, activeDocumentId, cursorOffset])
 
+  const jumpToMarker = (docId: string, offset: number) => {
+    if (!editorView) return
+    if (docId !== activeDocumentId) {
+      setActiveDocument(docId)
+      setTimeout(() => {
+        const v = editorView
+        if (!v) return
+        const len = v.state.doc.length
+        const pos = Math.min(offset, len)
+        v.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+        v.focus()
+      }, 30)
+    } else {
+      const len = editorView.state.doc.length
+      const pos = Math.min(offset, len)
+      editorView.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+      editorView.focus()
+    }
+  }
+
   if (!open) return null
 
   return (
     <div
-      ref={panelRef}
       data-testid="character-panel"
-      className="fixed right-0 top-0 bottom-0 z-50 w-[320px] max-w-[90vw] bg-gray-900 border-l border-gray-700 shadow-2xl flex flex-col"
+      className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[320px] shrink-0 overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
@@ -456,6 +445,13 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
         </TabButton>
         <TabButton active={tab === 'graph'} onClick={() => setTab('graph')} testId="character-panel-tab-graph">
           Graph
+        </TabButton>
+        <TabButton
+          active={tab === 'changes'}
+          onClick={() => setTab('changes')}
+          testId="character-panel-tab-changes"
+        >
+          Changes
         </TabButton>
         <TabButton
           active={tab === 'issues'}
@@ -485,24 +481,44 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
             )}
           </div>
         ) : tab === 'stats' ? (
-          !book || !activeDocumentId ? (
-            <div className="text-center text-xs text-gray-500 py-8">
-              Open a document to see live-computed state.
-            </div>
-          ) : (
-            characters.map((c) => {
-              const computed = computedPerCharacter.get(c.id)
-              if (!computed) return null
-              return (
-                <CharacterSection key={c.id} character={c} computed={computed} />
-              )
-            })
-          )
+          <>
+            {!book || !activeDocumentId ? (
+              <div className="text-center text-xs text-gray-500 py-8">
+                Open a document to see live-computed state.
+              </div>
+            ) : (
+              characters.map((c) => {
+                const computed = computedPerCharacter.get(c.id)
+                if (!computed) return null
+                return (
+                  <CharacterSection key={c.id} character={c} computed={computed} />
+                )
+              })
+            )}
+            {onOpenCharacterSheet && (
+              <div className="pt-3">
+                <button
+                  data-testid="character-panel-new-character"
+                  onClick={onOpenCharacterSheet}
+                  className="w-full text-xs text-gray-300 border border-gray-700 hover:border-gray-500 hover:text-gray-100 rounded px-2 py-1.5 transition-colors"
+                >
+                  + New Character
+                </button>
+              </div>
+            )}
+          </>
         ) : tab === 'graph' ? (
           <GraphTab
             characters={characters}
             graphCharacterId={graphCharacterId}
             setGraphCharacterId={setGraphCharacterId}
+          />
+        ) : tab === 'changes' ? (
+          <ChangesTab
+            book={book}
+            characters={characters}
+            markers={markers}
+            onJumpToMarker={jumpToMarker}
           />
         ) : (
           <IssuesTab
@@ -510,26 +526,7 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
             characters={characters}
             book={book}
             editorView={editorView}
-            onJumpToMarker={(docId, offset) => {
-              if (!editorView) return
-              if (docId !== activeDocumentId) {
-                setActiveDocument(docId)
-                // Defer selection dispatch to let the editor swap docs.
-                setTimeout(() => {
-                  const v = editorView
-                  if (!v) return
-                  const len = v.state.doc.length
-                  const pos = Math.min(offset, len)
-                  v.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
-                  v.focus()
-                }, 30)
-              } else {
-                const len = editorView.state.doc.length
-                const pos = Math.min(offset, len)
-                editorView.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
-                editorView.focus()
-              }
-            }}
+            onJumpToMarker={jumpToMarker}
             onRemoveOrphanFromText={(markerId, documentId) => {
               if (!book || !editorView) return
               const d = book.documents.find((x) => x.id === documentId)
@@ -834,5 +831,150 @@ function IssueButton({
     >
       {children}
     </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Changes tab
+// ---------------------------------------------------------------------------
+
+function summarizeOp(op: StatDeltaOp, character: Character | undefined): string {
+  const statName = (id: string) =>
+    character?.stats.find((s) => s.id === id)?.name ?? id
+  switch (op.kind) {
+    case 'adjust': {
+      const sign = op.delta >= 0 ? '+' : ''
+      const attr = op.attributeKey ? ` ${op.attributeKey}` : ''
+      return `${statName(op.statId)}${attr} ${sign}${op.delta}`
+    }
+    case 'set':
+      return `${statName(op.statId)} = ${formatValue(op.value)}`
+    case 'maxAdjust': {
+      const sign = op.delta >= 0 ? '+' : ''
+      return `${statName(op.statId)} max ${sign}${op.delta}`
+    }
+    case 'listAdd':
+      return `${statName(op.statId)} + ${op.items.join(', ') || '(none)'}`
+    case 'listRemove':
+      return `${statName(op.statId)} − ${op.items.join(', ') || '(none)'}`
+    case 'equip':
+      return `Equip ${op.slot}: ${op.itemName ?? (op.itemId || '(item)')}`
+    case 'unequip':
+      return `Unequip ${op.slot}`
+    case 'buffApply':
+      return `Buff + ${op.buffName ?? op.buffId}`
+    case 'buffRemove':
+      return `Buff − ${op.buffId}`
+    case 'rankChange':
+      return op.direction === 'set'
+        ? `${statName(op.statId)} = ${op.value ?? ''}`
+        : `${statName(op.statId)} rank ${op.direction}`
+  }
+}
+
+interface ChangeEntry {
+  markerId: string
+  documentId: string
+  documentName: string
+  offset: number
+  deltas: StatDelta[]
+}
+
+function ChangesTab({
+  book,
+  characters,
+  markers,
+  onJumpToMarker,
+}: {
+  book: import('../../types').Book | null
+  characters: Character[]
+  markers: Record<string, StatDelta[]>
+  onJumpToMarker: (documentId: string, offset: number) => void
+}) {
+  const entries = useMemo<ChangeEntry[]>(() => {
+    const out: ChangeEntry[] = []
+    if (!book) return out
+    for (const doc of getDocumentTreeOrder(book)) {
+      const extracted = extractMarkers(doc.content ?? '')
+      for (const marker of extracted) {
+        if (marker.kind !== 'delta') continue
+        const deltas = markers[marker.id]
+        if (!deltas || deltas.length === 0) continue
+        out.push({
+          markerId: marker.id,
+          documentId: doc.id,
+          documentName: doc.name,
+          offset: marker.offset,
+          deltas,
+        })
+      }
+    }
+    return out
+  }, [book, markers])
+
+  if (!book) {
+    return <div className="text-center text-xs text-gray-500 py-8">No active book.</div>
+  }
+  if (entries.length === 0) {
+    return (
+      <div
+        data-testid="character-panel-changes-empty"
+        className="text-center text-xs text-gray-500 py-8"
+      >
+        No stat changes in this book yet.
+      </div>
+    )
+  }
+
+  const charById = new Map(characters.map((c) => [c.id, c]))
+  let lastDocId: string | null = null
+
+  return (
+    <div className="space-y-2" data-testid="character-panel-changes">
+      {entries.map((entry) => {
+        const newDoc = entry.documentId !== lastDocId
+        lastDocId = entry.documentId
+        return (
+          <div key={entry.markerId}>
+            {newDoc && (
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 pt-2 pb-1">
+                {entry.documentName}
+              </div>
+            )}
+            <button
+              data-testid="character-panel-change-row"
+              onClick={() => onJumpToMarker(entry.documentId, entry.offset)}
+              className="w-full text-left px-2 py-1.5 bg-gray-800/40 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 rounded transition-colors space-y-1"
+            >
+              {entry.deltas.map((d) => {
+                const c = charById.get(d.characterId)
+                return (
+                  <div key={d.id} className="flex items-baseline gap-1.5 text-[11px]">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0 translate-y-[1px]"
+                      style={{ backgroundColor: c?.color ?? '#6b7280' }}
+                    />
+                    <span className="text-gray-400 shrink-0">
+                      {c?.name ?? 'Unknown'}
+                    </span>
+                    <span className="text-gray-200 truncate">
+                      {summarizeOp(d.op, c)}
+                    </span>
+                  </div>
+                )
+              })}
+              {entry.deltas.some((d) => d.note) && (
+                <div className="text-[10px] text-gray-500 italic truncate pl-3.5">
+                  {entry.deltas
+                    .map((d) => d.note)
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+              )}
+            </button>
+          </div>
+        )
+      })}
+    </div>
   )
 }

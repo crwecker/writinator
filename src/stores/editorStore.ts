@@ -41,7 +41,7 @@ export const useEditorStore = create<EditorState>()(
       fontFamily: 'serif',
       fontSize: 16,
       distractionFree: false,
-      renderMode: 'source',
+      renderMode: 'preview',
       sidebarOpen: true,
       collapsedDocumentIds: [],
       cursorOffset: 0,
@@ -55,8 +55,14 @@ export const useEditorStore = create<EditorState>()(
       toggleDistractionFree: () =>
         set({ distractionFree: !get().distractionFree }),
       setRenderMode: (mode: EditorPreferences['renderMode']) => set({ renderMode: mode }),
-      toggleRenderMode: () =>
-        set({ renderMode: get().renderMode === 'source' ? 'rendered' : 'source' }),
+      toggleRenderMode: () => {
+        const next: Record<EditorPreferences['renderMode'], EditorPreferences['renderMode']> = {
+          source: 'rendered',
+          rendered: 'preview',
+          preview: 'source',
+        }
+        set({ renderMode: next[get().renderMode] })
+      },
       toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
       toggleDocumentCollapsed: (id: string) => {
         const current = get().collapsedDocumentIds

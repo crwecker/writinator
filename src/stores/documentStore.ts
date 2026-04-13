@@ -1,7 +1,30 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { Book, Document, DocumentStyles, GlobalSettings, WritinatorFile } from '../types'
+import type { Book, Document, DocumentStyles, GlobalSettings, NamedStyle, WritinatorFile } from '../types'
+
+function createDefaultDocumentStyles(): DocumentStyles {
+  return {
+    body: {},
+    h1: {},
+    h2: {},
+    h3: {},
+    blockquote: {},
+    code: {},
+  }
+}
+
+/**
+ * Flatten the old DocumentStyles shape (body/h1/.../namedStyles) into the flat Record<string, NamedStyle>.
+ */
+function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  // Already flat: no `namedStyles` key, or no nested object matching old shape
+  if (!('namedStyles' in obj)) return obj as DocumentStyles
+  const { namedStyles, ...rest } = obj as { namedStyles?: Record<string, NamedStyle> } & Record<string, NamedStyle>
+  return { ...(rest as Record<string, NamedStyle>), ...(namedStyles ?? {}) }
+}
 import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
 import { useImageRevealStore } from './imageRevealStore'
@@ -41,6 +64,7 @@ interface DocumentState {
   // Global settings
   setGlobalSettings: (settings: GlobalSettings) => void
   updateGlobalSettings: (patch: Partial<GlobalSettings>) => void
+  renameStyle: (oldName: string, newName: string) => void
 }
 
 function generateId(): string {
@@ -142,6 +166,7 @@ export const useDocumentStore = create<DocumentState>()(
             updatedAt: timestamp,
           },
           activeDocumentId: documentId,
+          globalSettings: { documentStyles: createDefaultDocumentStyles() },
         })
       },
 
@@ -478,6 +503,40 @@ export const useDocumentStore = create<DocumentState>()(
         set({ globalSettings: { ...existing, ...patch } })
       },
 
+      renameStyle: (oldName: string, newName: string) => {
+        if (!oldName || !newName || oldName === newName) return
+        get()._flushContentUpdate()
+        const { book, globalSettings } = get()
+        const existingStyles = globalSettings.documentStyles ?? {}
+        if (!(oldName in existingStyles) && !book) return
+        // Rename in styles map (no-op if target key already exists)
+        let nextStyles = existingStyles
+        if (oldName in existingStyles && !(newName in existingStyles)) {
+          const { [oldName]: renamed, ...rest } = existingStyles
+          nextStyles = { ...rest, [newName]: renamed }
+        }
+        // Rewrite class="oldName" references in all documents (any tag/attrs)
+        const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const classRegex = new RegExp(`class="${escaped}"`, 'g')
+        const needle = `class="${oldName}"`
+        const nextBook = book
+          ? {
+              ...book,
+              documents: book.documents.map((doc) => {
+                if (!doc.content || !doc.content.includes(needle)) return doc
+                const updated = doc.content.replace(classRegex, `class="${newName}"`)
+                if (updated === doc.content) return doc
+                return { ...doc, content: updated, updatedAt: now() }
+              }),
+              updatedAt: now(),
+            }
+          : book
+        set({
+          globalSettings: { ...globalSettings, documentStyles: nextStyles },
+          ...(nextBook ? { book: nextBook } : {}),
+        })
+      },
+
       _flushContentUpdate: () => {
         const { _contentUpdateTimer, _pendingContent, book, activeDocumentId } = get()
         if (_contentUpdateTimer) {
@@ -504,7 +563,7 @@ export const useDocumentStore = create<DocumentState>()(
     }),
     {
       name: 'writinator-document',
-      version: 1,
+      version: 2,
       storage: localforageStorage,
       partialize: (state) =>
         ({
@@ -519,6 +578,14 @@ export const useDocumentStore = create<DocumentState>()(
           const documentStyles = state.documentStyles as DocumentStyles | undefined
           delete state.documentStyles
           state.globalSettings = { documentStyles } as GlobalSettings
+        }
+        if (version < 2) {
+          // v1→v2: flatten DocumentStyles shape (body/h1/.../namedStyles → flat record)
+          const state = persisted as Record<string, unknown>
+          const gs = state.globalSettings as GlobalSettings | undefined
+          if (gs?.documentStyles) {
+            gs.documentStyles = flattenDocumentStyles(gs.documentStyles)
+          }
         }
         // Ensure book.documents exists (old data may use 'chapters')
         const state = persisted as Record<string, unknown>

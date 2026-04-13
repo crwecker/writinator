@@ -14,6 +14,8 @@ const actionOrder: ActionName[] = [
   'saveToDisk',
   'closeBook',
   'snapshotHistory',
+  'toggleCharacterPanel',
+  'insertStatMarker',
 ]
 
 const vimShortcuts = [

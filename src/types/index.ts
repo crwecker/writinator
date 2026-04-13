@@ -75,10 +75,6 @@ export interface TextStyle {
   letterSpacing?: string     // CSS letter-spacing (e.g. '0.02em')
 }
 
-export interface HeadingStyle extends TextStyle {
-  fontWeight?: string        // e.g. '700', '600'
-}
-
 export interface NamedStyle extends TextStyle {
   fontWeight?: string
   fontStyle?: string           // 'italic' | 'normal'
@@ -86,22 +82,16 @@ export interface NamedStyle extends TextStyle {
   backgroundColor?: string     // for highlights
 }
 
-export interface DocumentStyles {
-  body?: TextStyle
-  h1?: HeadingStyle
-  h2?: HeadingStyle
-  h3?: HeadingStyle
-  blockquote?: TextStyle
-  code?: TextStyle
-  namedStyles?: Record<string, NamedStyle>
-}
+export type DocumentStyles = Record<string, NamedStyle>
+
+export const DEFAULT_STYLE_NAMES = ['body', 'h1', 'h2', 'h3', 'blockquote', 'code'] as const
 
 export interface EditorPreferences {
   vimMode: boolean
   fontFamily: 'serif' | 'sans' | 'mono'
   fontSize: number
   distractionFree: boolean
-  renderMode: 'source' | 'rendered'
+  renderMode: 'source' | 'rendered' | 'preview'
   sidebarOpen: boolean
   collapsedDocumentIds: string[]
 }

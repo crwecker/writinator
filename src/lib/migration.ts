@@ -4,10 +4,29 @@ import type {
   Document,
   DocumentStyles,
   GlobalSettings,
+  NamedStyle,
   Snapshot,
   StatDelta,
   WritinatorFile,
 } from '../types'
+
+/**
+ * Flatten old DocumentStyles shape (body/h1/.../namedStyles) into flat Record<string, NamedStyle>.
+ */
+function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  if (!('namedStyles' in obj)) return obj as DocumentStyles
+  const { namedStyles, ...rest } = obj as { namedStyles?: Record<string, NamedStyle> } & Record<string, NamedStyle>
+  return { ...(rest as Record<string, NamedStyle>), ...(namedStyles ?? {}) }
+}
+
+function flattenGlobalSettings(gs: GlobalSettings | undefined): GlobalSettings {
+  if (!gs) return {}
+  return gs.documentStyles
+    ? { ...gs, documentStyles: flattenDocumentStyles(gs.documentStyles) }
+    : gs
+}
 
 // Shape of the old format (pre-v2): a plain Book with `chapters` instead of `documents`
 interface OldChapter {
@@ -73,7 +92,7 @@ function migrateOldBook(old: OldBook): WritinatorFile {
 
   const globalSettings: GlobalSettings = {}
   if (old.documentStyles) {
-    globalSettings.documentStyles = old.documentStyles
+    globalSettings.documentStyles = flattenDocumentStyles(old.documentStyles)
   }
 
   const book: Book = {
@@ -108,7 +127,7 @@ export function migrateFile(data: unknown): WritinatorFile {
       version: 3,
       book: data.book as Book,
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
-      globalSettings: (data.globalSettings ?? {}) as GlobalSettings,
+      globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: (data.characters ?? []) as Character[],
       markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
     }
@@ -120,7 +139,7 @@ export function migrateFile(data: unknown): WritinatorFile {
       version: 3,
       book: data.book as Book,
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
-      globalSettings: (data.globalSettings ?? {}) as GlobalSettings,
+      globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: [],
       markers: {},
     }

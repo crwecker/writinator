@@ -16,8 +16,8 @@ type OpKind = StatDeltaOp['kind']
 
 const OP_KINDS: OpKind[] = [
   'adjust',
-  'set',
   'maxAdjust',
+  'set',
   'listAdd',
   'listRemove',
   'equip',
@@ -26,6 +26,19 @@ const OP_KINDS: OpKind[] = [
   'buffRemove',
   'rankChange',
 ]
+
+const OP_KIND_LABELS: Record<OpKind, string> = {
+  adjust: 'adjust',
+  maxAdjust: 'adjust max',
+  set: 'set',
+  listAdd: 'list add',
+  listRemove: 'list remove',
+  equip: 'equip',
+  unequip: 'unequip',
+  buffApply: 'apply buff',
+  buffRemove: 'remove buff',
+  rankChange: 'rank change',
+}
 
 interface Props {
   open: boolean
@@ -79,7 +92,9 @@ function defaultOpFor(kind: OpKind, character: Character | undefined): StatDelta
   switch (kind) {
     case 'adjust': {
       const s = firstStatOfType(character, ['number', 'numberWithMax', 'attributeSet'])
-      return { kind: 'adjust', statId: s?.id ?? '', delta: 0 }
+      const attributeKey =
+        s?.type === 'attributeSet' ? s.attributeKeys?.[0] : undefined
+      return { kind: 'adjust', statId: s?.id ?? '', delta: 0, attributeKey }
     }
     case 'set': {
       const s = character?.stats[0]
@@ -148,7 +163,22 @@ export function DeltaEditorModal({
     setConfirmDelete(false)
     const existing = markerId ? markers[markerId] : undefined
     if (existing && existing.length > 0) {
-      setDrafts(existing.map((d) => ({ ...d })))
+      setDrafts(
+        existing.map((d) => {
+          const op = d.op
+          if (op.kind === 'adjust' && !op.attributeKey) {
+            const char = characters.find((c) => c.id === d.characterId)
+            const stat = char?.stats.find((s) => s.id === op.statId)
+            if (stat?.type === 'attributeSet') {
+              return {
+                ...d,
+                op: { ...op, attributeKey: stat.attributeKeys?.[0] },
+              }
+            }
+          }
+          return { ...d }
+        }),
+      )
     } else {
       const firstChar = characters[0]
       setDrafts([
@@ -422,7 +452,7 @@ function DeltaRow({ draft, characters, onChange, onRemove, canRemove }: DeltaRow
           >
             {OP_KINDS.map((k) => (
               <option key={k} value={k}>
-                {k}
+                {OP_KIND_LABELS[k]}
               </option>
             ))}
           </select>
@@ -529,7 +559,12 @@ function AdjustParams({
           value={op.statId}
           onChange={(e) => {
             if (op.kind === 'adjust') {
-              onChange({ ...op, statId: e.target.value, attributeKey: undefined })
+              const nextStat = stats.find((s) => s.id === e.target.value)
+              const nextAttrKey =
+                nextStat?.type === 'attributeSet'
+                  ? nextStat.attributeKeys?.[0]
+                  : undefined
+              onChange({ ...op, statId: e.target.value, attributeKey: nextAttrKey })
             } else {
               onChange({ ...op, statId: e.target.value })
             }

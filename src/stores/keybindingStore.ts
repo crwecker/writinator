@@ -10,6 +10,7 @@ export type ActionName =
   | 'snapshotHistory'
   | 'toggleRenderMode'
   | 'toggleCharacterPanel'
+  | 'insertStatMarker'
 
 export interface KeyCombo {
   key: string  // e.g. 'f', 's', 'h'
@@ -28,8 +29,9 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   saveToDisk: 'Save to disk',
   closeBook: 'Close Book',
   snapshotHistory: 'Snapshot history',
-  toggleRenderMode: 'Toggle source/rendered',
+  toggleRenderMode: 'Cycle source/rendered/preview',
   toggleCharacterPanel: 'Toggle Character Panel',
+  insertStatMarker: 'Insert stat change',
 }
 
 export const DEFAULT_KEYMAP: KeyMap = {
@@ -40,6 +42,7 @@ export const DEFAULT_KEYMAP: KeyMap = {
   snapshotHistory: { key: 'h', ctrl: true, shift: true },
   toggleRenderMode: { key: 'e', ctrl: true, shift: true },
   toggleCharacterPanel: { key: 'c', ctrl: true, shift: true },
+  insertStatMarker: { key: '.', ctrl: true, shift: true },
 }
 
 export function comboToString(combo: KeyCombo): string {

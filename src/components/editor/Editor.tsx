@@ -69,8 +69,8 @@ function makeDocStylesTheme(styles: DocumentStyles | undefined): Extension {
 }
 
 // StateEffect and StateField for render mode so the decoration plugin can read it synchronously
-const setRenderModeEffect = StateEffect.define<'source' | 'rendered'>()
-const renderModeField = StateField.define<'source' | 'rendered'>({
+const setRenderModeEffect = StateEffect.define<'source' | 'rendered' | 'preview'>()
+const renderModeField = StateField.define<'source' | 'rendered' | 'preview'>({
   create: () => useEditorStore.getState().renderMode,
   update(value, tr) {
     for (const e of tr.effects) {
@@ -86,7 +86,8 @@ function markdownDecorations(view: EditorView): DecorationSet {
   const doc = view.state.doc
   const mode = view.state.field(renderModeField)
   const cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number
-  const isRendered = mode === 'rendered'
+  const isRendered = mode === 'rendered' || mode === 'preview'
+  const alwaysHide = mode === 'preview'
 
   // Cache document styles for heading overrides
   const docStyles = useDocumentStore.getState().globalSettings.documentStyles
@@ -121,7 +122,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
       })
 
       // In rendered mode on non-cursor lines, hide the "# " prefix
-      if (isRendered && !isCursorLine) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
         const prefixLen = headingMatch[0].length // e.g. "## " = 3
         decorations.push({
           from: line.from,
@@ -137,7 +138,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
     while ((match = boldItalicRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && !isCursorLine) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
         decorations.push({
           from: matchStart,
           to: matchStart + 3,
@@ -167,7 +168,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
     while ((match = boldRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && !isCursorLine) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
         // Replace opening **
         decorations.push({
           from: matchStart,
@@ -201,7 +202,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
     while ((match = italicRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && !isCursorLine) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
         decorations.push({
           from: matchStart,
           to: matchStart + 1,
@@ -231,7 +232,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
     while ((match = strikeRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && !isCursorLine) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
         decorations.push({
           from: matchStart,
           to: matchStart + 2,
@@ -261,7 +262,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
     while ((match = codeRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && !isCursorLine) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
         decorations.push({
           from: matchStart,
           to: matchStart + 1,
@@ -297,7 +298,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
           deco: Decoration.line({ attributes: { style: `text-align: ${alignment};` } }),
         })
       }
-      if (isRendered && !isCursorLine) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
         decorations.push({
           from: line.from,
           to: line.from + alignMatch[0].length,
@@ -306,74 +307,61 @@ function markdownDecorations(view: EditorView): DecorationSet {
       }
     }
 
-    // Inline <span style="...">...</span> for font overrides
-    const spanRegex = /<span\s+style="([^"]*)">(.*?)<\/span>/g
-    while ((match = spanRegex.exec(text)) !== null) {
-      const matchStart = line.from + match.index
-      const matchEnd = matchStart + match[0].length
-      // The opening tag: <span style="...">
-      const openTag = match[0].indexOf('>') + 1 // length of opening tag
-      const openTagEnd = matchStart + openTag
-      // The closing tag: </span>
-      const closeTagLen = '</span>'.length
-      const closeTagStart = matchEnd - closeTagLen
-
-      if (isRendered && !isCursorLine) {
-        // Replace opening <span style="...">
-        decorations.push({
-          from: matchStart,
-          to: openTagEnd,
-          deco: Decoration.replace({}),
-        })
-        // Mark inner content with the inline style
-        decorations.push({
-          from: openTagEnd,
-          to: closeTagStart,
-          deco: Decoration.mark({ attributes: { style: match[1] } }),
-        })
-        // Replace closing </span>
-        decorations.push({
-          from: closeTagStart,
-          to: matchEnd,
-          deco: Decoration.replace({}),
+    // Span tags (style/class) with proper nesting support.
+    // Tokenize all <span ...> / </span> tags, pair them via a stack so that
+    // nested spans get their own decorations and the innermost style wins.
+    const spanTagRegex = /<span\s+(style|class)="([^"]*)">|<\/span>/g
+    type SpanOpen = { start: number; openEnd: number; kind: 'style' | 'class'; value: string }
+    const spanStack: SpanOpen[] = []
+    const spanPairs: Array<{ open: SpanOpen; closeStart: number; closeEnd: number }> = []
+    while ((match = spanTagRegex.exec(text)) !== null) {
+      const tokenStart = match.index
+      const tokenEnd = tokenStart + match[0].length
+      if (match[1]) {
+        spanStack.push({
+          start: tokenStart,
+          openEnd: tokenEnd,
+          kind: match[1] as 'style' | 'class',
+          value: match[2],
         })
       } else {
-        decorations.push({
-          from: matchStart,
-          to: matchEnd,
-          deco: Decoration.mark({ attributes: { style: match[1] } }),
-        })
+        const open = spanStack.pop()
+        if (open) {
+          spanPairs.push({ open, closeStart: tokenStart, closeEnd: tokenEnd })
+        }
       }
     }
 
-    // Named style spans: <span class="styleName">text</span>
-    const classSpanRegex = /<span\s+class="([^"]*)">(.*?)<\/span>/g
-    while ((match = classSpanRegex.exec(text)) !== null) {
-      const className = match[1]
-      const namedStyle = docStyles?.namedStyles?.[className]
-      if (!namedStyle) continue // unknown style, skip
+    // Process inner-most pairs last so their decorations sort after outer ones.
+    // spanPairs from the stack-based scan already lists inner pairs before outer pairs.
+    for (const { open, closeStart, closeEnd } of spanPairs) {
+      const matchStart = line.from + open.start
+      const openTagEnd = line.from + open.openEnd
+      const closeTagStart = line.from + closeStart
+      const matchEnd = line.from + closeEnd
 
-      const matchStart = line.from + match.index
-      const matchEnd = matchStart + match[0].length
-      const openTag = match[0].indexOf('>') + 1
-      const openTagEnd = matchStart + openTag
-      const closeTagLen = '</span>'.length
-      const closeTagStart = matchEnd - closeTagLen
+      let cssString: string | null = null
+      if (open.kind === 'style') {
+        cssString = open.value
+      } else {
+        const namedStyle = docStyles?.[open.value]
+        if (namedStyle) {
+          const cssProps: string[] = []
+          if (namedStyle.fontFamily) cssProps.push(`font-family: ${namedStyle.fontFamily}`)
+          if (namedStyle.fontSize) cssProps.push(`font-size: ${namedStyle.fontSize}px`)
+          if (namedStyle.lineHeight) cssProps.push(`line-height: ${namedStyle.lineHeight}`)
+          if (namedStyle.color) cssProps.push(`color: ${namedStyle.color}`)
+          if (namedStyle.letterSpacing) cssProps.push(`letter-spacing: ${namedStyle.letterSpacing}`)
+          if (namedStyle.fontWeight) cssProps.push(`font-weight: ${namedStyle.fontWeight}`)
+          if (namedStyle.fontStyle) cssProps.push(`font-style: ${namedStyle.fontStyle}`)
+          if (namedStyle.textDecoration) cssProps.push(`text-decoration: ${namedStyle.textDecoration}`)
+          if (namedStyle.backgroundColor) cssProps.push(`background-color: ${namedStyle.backgroundColor}`)
+          cssString = cssProps.join('; ') + ';'
+        }
+      }
+      if (cssString === null) continue
 
-      // Convert NamedStyle to CSS string
-      const cssProps: string[] = []
-      if (namedStyle.fontFamily) cssProps.push(`font-family: ${namedStyle.fontFamily}`)
-      if (namedStyle.fontSize) cssProps.push(`font-size: ${namedStyle.fontSize}px`)
-      if (namedStyle.lineHeight) cssProps.push(`line-height: ${namedStyle.lineHeight}`)
-      if (namedStyle.color) cssProps.push(`color: ${namedStyle.color}`)
-      if (namedStyle.letterSpacing) cssProps.push(`letter-spacing: ${namedStyle.letterSpacing}`)
-      if (namedStyle.fontWeight) cssProps.push(`font-weight: ${namedStyle.fontWeight}`)
-      if (namedStyle.fontStyle) cssProps.push(`font-style: ${namedStyle.fontStyle}`)
-      if (namedStyle.textDecoration) cssProps.push(`text-decoration: ${namedStyle.textDecoration}`)
-      if (namedStyle.backgroundColor) cssProps.push(`background-color: ${namedStyle.backgroundColor}`)
-      const cssString = cssProps.join('; ') + ';'
-
-      if (isRendered && !isCursorLine) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
         decorations.push({
           from: matchStart,
           to: openTagEnd,

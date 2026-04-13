@@ -283,23 +283,23 @@ export function ShopPanel() {
   ]
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Sub-tabs */}
-      <div className="flex shrink-0 border-b border-gray-700">
+    <div className="flex h-full">
+      {/* Left sidebar menu */}
+      <nav className="shrink-0 w-44 border-r border-gray-700 bg-gray-900/60 py-3">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
+            className={`w-full text-left px-4 py-2 text-sm font-medium transition-colors border-l-2 ${
               activeTab === tab.id
-                ? 'bg-gray-700 text-gray-200 border-b-2 border-amber-400'
-                : 'bg-gray-800/60 text-gray-500 hover:text-gray-300 border-b-2 border-transparent'
+                ? 'bg-gray-800 text-amber-200 border-amber-400'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 border-transparent'
             }`}
           >
             {tab.label}
           </button>
         ))}
-      </div>
+      </nav>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">

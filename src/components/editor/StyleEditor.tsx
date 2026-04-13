@@ -1,184 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
+import type { EditorView } from '@codemirror/view'
 import { useDocumentStore } from '../../stores/documentStore'
-import type { TextStyle, HeadingStyle, NamedStyle } from '../../types'
+import type { NamedStyle } from '../../types'
+import { DEFAULT_STYLE_NAMES } from '../../types'
 
 interface Props {
   open: boolean
   onClose: () => void
-}
-
-function TextStyleFields({
-  label,
-  style,
-  onChange,
-}: {
-  label: string
-  style: TextStyle | undefined
-  onChange: (patch: TextStyle) => void
-}) {
-  return (
-    <div className="space-y-2">
-      <span className="text-[10px] uppercase tracking-wider text-gray-500">{label}</span>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="space-y-0.5">
-          <span className="text-[10px] text-gray-500">Font family</span>
-          <input
-            type="text"
-            value={style?.fontFamily ?? ''}
-            onChange={(e) => onChange({ fontFamily: e.target.value || undefined })}
-            placeholder="'Lora', serif"
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-          />
-        </label>
-        <label className="space-y-0.5">
-          <span className="text-[10px] text-gray-500">Font size (px)</span>
-          <input
-            type="number"
-            min={10}
-            max={48}
-            value={style?.fontSize ?? ''}
-            onChange={(e) => onChange({ fontSize: e.target.value ? Number(e.target.value) : undefined })}
-            placeholder="16"
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-          />
-        </label>
-        <label className="space-y-0.5">
-          <span className="text-[10px] text-gray-500">Line height</span>
-          <input
-            type="number"
-            min={1.0}
-            max={3.0}
-            step={0.1}
-            value={style?.lineHeight ?? ''}
-            onChange={(e) => onChange({ lineHeight: e.target.value ? Number(e.target.value) : undefined })}
-            placeholder="1.75"
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-          />
-        </label>
-        <label className="space-y-0.5">
-          <span className="text-[10px] text-gray-500">Color</span>
-          <input
-            type="text"
-            value={style?.color ?? ''}
-            onChange={(e) => onChange({ color: e.target.value || undefined })}
-            placeholder="#E6E6E6"
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-          />
-        </label>
-        <label className="space-y-0.5 col-span-2">
-          <span className="text-[10px] text-gray-500">Letter spacing</span>
-          <input
-            type="text"
-            value={style?.letterSpacing ?? ''}
-            onChange={(e) => onChange({ letterSpacing: e.target.value || undefined })}
-            placeholder="0.02em"
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-          />
-        </label>
-      </div>
-    </div>
-  )
-}
-
-function HeadingStyleFields({
-  label,
-  style,
-  onChange,
-}: {
-  label: string
-  style: HeadingStyle | undefined
-  onChange: (patch: HeadingStyle) => void
-}) {
-  const [collapsed, setCollapsed] = useState(true)
-
-  return (
-    <div>
-      <button
-        onClick={() => setCollapsed((p) => !p)}
-        className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-gray-500 hover:text-gray-300 transition-colors w-full text-left py-1"
-      >
-        <span className="text-[8px]">{collapsed ? '\u25B6' : '\u25BC'}</span>
-        {label}
-      </button>
-      {!collapsed && (
-        <div className="space-y-2 mt-1">
-          <div className="grid grid-cols-2 gap-2">
-            <label className="space-y-0.5">
-              <span className="text-[10px] text-gray-500">Font family</span>
-              <input
-                type="text"
-                value={style?.fontFamily ?? ''}
-                onChange={(e) => onChange({ fontFamily: e.target.value || undefined })}
-                placeholder="'Lora', serif"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-              />
-            </label>
-            <label className="space-y-0.5">
-              <span className="text-[10px] text-gray-500">Font size (px)</span>
-              <input
-                type="number"
-                min={10}
-                max={48}
-                value={style?.fontSize ?? ''}
-                onChange={(e) => onChange({ fontSize: e.target.value ? Number(e.target.value) : undefined })}
-                placeholder="24"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-              />
-            </label>
-            <label className="space-y-0.5">
-              <span className="text-[10px] text-gray-500">Line height</span>
-              <input
-                type="number"
-                min={1.0}
-                max={3.0}
-                step={0.1}
-                value={style?.lineHeight ?? ''}
-                onChange={(e) => onChange({ lineHeight: e.target.value ? Number(e.target.value) : undefined })}
-                placeholder="1.3"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-              />
-            </label>
-            <label className="space-y-0.5">
-              <span className="text-[10px] text-gray-500">Font weight</span>
-              <select
-                value={style?.fontWeight ?? ''}
-                onChange={(e) => onChange({ fontWeight: e.target.value || undefined })}
-                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-              >
-                <option value="">Default</option>
-                <option value="400">400</option>
-                <option value="500">500</option>
-                <option value="600">600</option>
-                <option value="700">700</option>
-                <option value="800">800</option>
-                <option value="900">900</option>
-              </select>
-            </label>
-            <label className="space-y-0.5">
-              <span className="text-[10px] text-gray-500">Color</span>
-              <input
-                type="text"
-                value={style?.color ?? ''}
-                onChange={(e) => onChange({ color: e.target.value || undefined })}
-                placeholder="#E6E6E6"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-              />
-            </label>
-            <label className="space-y-0.5">
-              <span className="text-[10px] text-gray-500">Letter spacing</span>
-              <input
-                type="text"
-                value={style?.letterSpacing ?? ''}
-                onChange={(e) => onChange({ letterSpacing: e.target.value || undefined })}
-                placeholder="0.02em"
-                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-gray-400"
-              />
-            </label>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  editorView?: EditorView | null
 }
 
 function NamedStyleFields({
@@ -363,15 +192,15 @@ function NamedStyleFields({
   )
 }
 
-export function StyleEditor({ open, onClose }: Props) {
+export function StyleEditor({ open, onClose, editorView }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   const documentStyles = useDocumentStore((s) => s.globalSettings.documentStyles)
   const updateGlobalSettings = useDocumentStore((s) => s.updateGlobalSettings)
-  const updateDocumentStyles = (patch: Partial<import('../../types').DocumentStyles>) => {
-    const existing = useDocumentStore.getState().globalSettings.documentStyles ?? {}
-    updateGlobalSettings({ documentStyles: { ...existing, ...patch } })
+  const renameStyle = useDocumentStore((s) => s.renameStyle)
+
+  const setStyles = (next: Record<string, NamedStyle>) => {
+    updateGlobalSettings({ documentStyles: next })
   }
-  const clearDocumentStyles = () => updateGlobalSettings({ documentStyles: undefined })
 
   // Close on Escape
   useEffect(() => {
@@ -397,6 +226,8 @@ export function StyleEditor({ open, onClose }: Props) {
 
   if (!open) return null
 
+  const styles = documentStyles ?? {}
+
   return (
     <div
       ref={panelRef}
@@ -404,7 +235,7 @@ export function StyleEditor({ open, onClose }: Props) {
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-        <span className="text-sm font-medium text-gray-200">Document Styles</span>
+        <span className="text-sm font-medium text-gray-200">Styles</span>
         <button
           onClick={onClose}
           className="text-gray-500 hover:text-gray-300 text-xs"
@@ -414,110 +245,69 @@ export function StyleEditor({ open, onClose }: Props) {
       </div>
 
       {/* Scrollable body */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-5">
-        {/* Body text */}
-        <TextStyleFields
-          label="Body text"
-          style={documentStyles?.body}
-          onChange={(patch) => updateDocumentStyles({ body: { ...documentStyles?.body, ...patch } })}
-        />
-
-        {/* Headings */}
-        <div className="space-y-1">
-          <span className="text-[10px] uppercase tracking-wider text-gray-500">Headings</span>
-          <div className="space-y-1 pl-1 border-l border-gray-800">
-            <HeadingStyleFields
-              label="H1"
-              style={documentStyles?.h1}
-              onChange={(patch) => updateDocumentStyles({ h1: { ...documentStyles?.h1, ...patch } })}
-            />
-            <HeadingStyleFields
-              label="H2"
-              style={documentStyles?.h2}
-              onChange={(patch) => updateDocumentStyles({ h2: { ...documentStyles?.h2, ...patch } })}
-            />
-            <HeadingStyleFields
-              label="H3"
-              style={documentStyles?.h3}
-              onChange={(patch) => updateDocumentStyles({ h3: { ...documentStyles?.h3, ...patch } })}
-            />
-          </div>
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        <div className="flex items-center justify-end">
+          <button
+            onClick={() => {
+              let idx = 1
+              while (styles[`style-${idx}`]) idx++
+              const newName = `style-${idx}`
+              setStyles({ ...styles, [newName]: {} })
+            }}
+            className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            + Add Style
+          </button>
         </div>
-
-        {/* Blockquote */}
-        <TextStyleFields
-          label="Blockquote"
-          style={documentStyles?.blockquote}
-          onChange={(patch) => updateDocumentStyles({ blockquote: { ...documentStyles?.blockquote, ...patch } })}
-        />
-
-        {/* Code */}
-        <TextStyleFields
-          label="Code"
-          style={documentStyles?.code}
-          onChange={(patch) => updateDocumentStyles({ code: { ...documentStyles?.code, ...patch } })}
-        />
-
-        {/* Named Styles */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider text-gray-500">Named Styles</span>
-            <button
-              onClick={() => {
-                const existing = documentStyles?.namedStyles ?? {}
-                let idx = 1
-                while (existing[`style-${idx}`]) idx++
-                const newName = `style-${idx}`
-                updateDocumentStyles({
-                  namedStyles: { ...existing, [newName]: {} },
-                })
-              }}
-              className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors"
-            >
-              + Add Style
-            </button>
-          </div>
-          <div className="space-y-1 pl-1 border-l border-gray-800">
-            {Object.entries(documentStyles?.namedStyles ?? {}).map(([name, style]) => (
-              <NamedStyleFields
-                key={name}
-                name={name}
-                style={style}
-                onChange={(patch) => {
-                  const existing = documentStyles?.namedStyles ?? {}
-                  updateDocumentStyles({
-                    namedStyles: { ...existing, [name]: { ...style, ...patch } },
-                  })
-                }}
-                onRename={(newName) => {
-                  const existing = documentStyles?.namedStyles ?? {}
-                  if (newName === name || existing[newName]) return
-                  const { [name]: _, ...rest } = existing; void _
-                  updateDocumentStyles({
-                    namedStyles: { ...rest, [newName]: style },
-                  })
-                }}
-                onDelete={() => {
-                  const existing = documentStyles?.namedStyles ?? {}
-                  const { [name]: _, ...rest } = existing; void _
-                  useDocumentStore.getState().updateGlobalSettings({
-                    documentStyles: { ...documentStyles, namedStyles: rest },
-                  })
-                }}
-              />
-            ))}
-          </div>
+        <div className="space-y-1 pl-1 border-l border-gray-800">
+          {(() => {
+            const existingKeys = Object.keys(styles)
+            const defaultsMissing = DEFAULT_STYLE_NAMES.filter(
+              (name) => !existingKeys.includes(name)
+            )
+            const orderedKeys = [
+              ...DEFAULT_STYLE_NAMES.filter((n) => existingKeys.includes(n)),
+              ...defaultsMissing,
+              ...existingKeys.filter(
+                (k) => !(DEFAULT_STYLE_NAMES as readonly string[]).includes(k)
+              ),
+            ]
+            return orderedKeys.map((name) => {
+              const style = styles[name] ?? {}
+              return (
+                <NamedStyleFields
+                  key={name}
+                  name={name}
+                  style={style}
+                  onChange={(patch) => {
+                    setStyles({ ...styles, [name]: { ...style, ...patch } })
+                  }}
+                  onRename={(newName) => {
+                    if (newName === name || styles[newName]) return
+                    renameStyle(name, newName)
+                    // Resync the CodeMirror buffer with the (possibly) rewritten active doc
+                    if (editorView) {
+                      const store = useDocumentStore.getState()
+                      const active = store.book?.documents?.find(
+                        (d) => d.id === store.activeDocumentId
+                      )
+                      const content = active?.content ?? ''
+                      if (content !== editorView.state.doc.toString()) {
+                        editorView.dispatch({
+                          changes: { from: 0, to: editorView.state.doc.length, insert: content },
+                        })
+                      }
+                    }
+                  }}
+                  onDelete={() => {
+                    const { [name]: _, ...rest } = styles; void _
+                    setStyles(rest)
+                  }}
+                />
+              )
+            })
+          })()}
         </div>
-      </div>
-
-      {/* Actions */}
-      <div className="px-4 py-3 border-t border-gray-700">
-        <button
-          onClick={clearDocumentStyles}
-          className="w-full px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 border border-gray-700 hover:border-gray-600 rounded transition-colors"
-        >
-          Clear All Styles
-        </button>
       </div>
     </div>
   )
