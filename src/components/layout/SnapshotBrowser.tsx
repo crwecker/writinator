@@ -2,21 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import type { Snapshot } from '../../types'
 import { getSnapshots } from '../../stores/snapshotStore'
 import { useStoryletStore } from '../../stores/storyletStore'
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
-    ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-}
+import { formatTime } from '../../lib/formatTime'
 
 const triggerLabel: Record<Snapshot['trigger'], string> = {
   manual: 'save',

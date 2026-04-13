@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins, Send } from 'lucide-react'
+import { BookOpenCheck, Coins, Send } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -14,6 +14,7 @@ import { quickSave, saveAsNewFile } from '../../lib/fileSystem'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { SnapshotBrowser } from './SnapshotBrowser'
+import { PublishedSnapshotsBrowser } from './PublishedSnapshotsBrowser'
 import { PublishModal } from './PublishModal'
 import { StyleEditor } from '../editor/StyleEditor'
 import { AdventurersGuild, type GuildTab } from '../quests/AdventurersGuild'
@@ -40,6 +41,7 @@ export function AppShell() {
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const editorViewRef = useRef<EditorView | null>(null)
   const [snapshotsOpen, setSnapshotsOpen] = useState(false)
+  const [publishedSnapshotsOpen, setPublishedSnapshotsOpen] = useState(false)
   const [publishModalOpen, setPublishModalOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [guildOpen, setGuildOpen] = useState(false)
@@ -162,6 +164,13 @@ export function AppShell() {
       if (matchesEvent(km.snapshotHistory, e)) {
         e.preventDefault()
         setSnapshotsOpen((prev) => !prev)
+        setPublishedSnapshotsOpen(false)
+        return
+      }
+      if (km.openPublishedSnapshots && matchesEvent(km.openPublishedSnapshots, e)) {
+        e.preventDefault()
+        setPublishedSnapshotsOpen((prev) => !prev)
+        setSnapshotsOpen(false)
         return
       }
       if (km.publishStorylet && matchesEvent(km.publishStorylet, e)) {
@@ -347,7 +356,20 @@ export function AppShell() {
               <Send size={12} /> Publish
             </button>
             <button
-              onClick={() => setSnapshotsOpen((prev) => !prev)}
+              onClick={() => {
+                setPublishedSnapshotsOpen((prev) => !prev)
+                setSnapshotsOpen(false)
+              }}
+              className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs flex items-center gap-1"
+              title="Published versions (Ctrl+Shift+L)"
+            >
+              <BookOpenCheck size={12} /> Published
+            </button>
+            <button
+              onClick={() => {
+                setSnapshotsOpen((prev) => !prev)
+                setPublishedSnapshotsOpen(false)
+              }}
               className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
               title="Snapshot history (Ctrl+Shift+H)"
             >
@@ -382,6 +404,10 @@ export function AppShell() {
             open={snapshotsOpen}
             onClose={() => setSnapshotsOpen(false)}
             onRestore={handleRestoreSnapshot}
+          />
+          <PublishedSnapshotsBrowser
+            open={publishedSnapshotsOpen}
+            onClose={() => setPublishedSnapshotsOpen(false)}
           />
           <PublishModal
             open={publishModalOpen}
