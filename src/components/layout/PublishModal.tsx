@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { createPublishedSnapshot } from '../../stores/publishedSnapshotStore'
+import { usePublishSyncStore } from '../../stores/publishSyncStore'
 
 interface Props {
   open: boolean
@@ -88,6 +89,11 @@ export function PublishModal({ open, onClose }: Props) {
         lastPublishedAt: snapshot.publishedAt,
         lastPublishedSnapshotId: snapshot.id,
       })
+
+      // Immediately zero out the sync indicator for this storylet.
+      const { setLastPublishedContent, setNeedsSync } = usePublishSyncStore.getState()
+      setLastPublishedContent(activeStoryletId, content)
+      setNeedsSync(activeStoryletId, false)
 
       onClose()
     } finally {

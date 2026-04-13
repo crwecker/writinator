@@ -4,6 +4,7 @@ import { ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
 import { getIconComponent } from '../../lib/icons'
 import { AppearancePicker } from './AppearancePicker'
 import { useStoryletStore } from '../../stores/storyletStore'
+import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import type { Storylet } from '../../types'
 
 export type DropIndicator = 'insert-before' | 'insert-after' | 'reparent' | 'invalid' | null
@@ -52,6 +53,8 @@ export function TreeNode({
   const [appearancePickerRect, setAppearancePickerRect] = useState({ top: 0, left: 0 })
   const inputRef = useRef<HTMLInputElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
+
+  const needsSync = usePublishSyncStore((s) => s.needsSync[storylet.id] ?? false)
 
   const {
     attributes,
@@ -229,7 +232,15 @@ export function TreeNode({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="truncate flex-1" style={storylet.color ? { color: storylet.color } : undefined}>{storylet.name}</span>
+          <span className="flex items-center flex-1 min-w-0 gap-1">
+            <span className="truncate" style={storylet.color ? { color: storylet.color } : undefined}>{storylet.name}</span>
+            {needsSync && (
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"
+                title="Edited since publish — needs Royal Road sync"
+              />
+            )}
+          </span>
         )}
 
         {/* Right zone: action buttons (visible on hover) */}

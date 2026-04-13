@@ -24,6 +24,8 @@ import { CharacterSheetModal } from '../characters/CharacterSheetModal'
 import { CharacterPanel } from '../characters/CharacterPanel'
 import { DeltaEditorModal } from '../characters/DeltaEditorModal'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
+import { usePublishSyncStore } from '../../stores/publishSyncStore'
+import { getPublishedSnapshots } from '../../stores/publishedSnapshotStore'
 import { SubStoryletLinks } from '../editor/SubStoryletLinks'
 import { LandingPage } from './LandingPage'
 import { RewardToast } from '../quests/RewardToast'
@@ -273,6 +275,51 @@ export function AppShell() {
     setRetroactiveGrantApplied()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Populate the publish-sync cache whenever the book reference changes (covers both initial
+  // hydration and any subsequent content edits, since updateStoryletContent replaces the book
+  // reference).
+  useEffect(() => {
+    if (!book) return
+
+    let cancelled = false
+    const { setNeedsSync, setLastPublishedContent } = usePublishSyncStore.getState()
+
+    for (const storylet of book.storylets) {
+      const { lastPublishedSnapshotId } = storylet
+
+      if (!lastPublishedSnapshotId) {
+        // Never published — ensure the dot is off.
+        setNeedsSync(storylet.id, false)
+        continue
+      }
+
+      const cachedContent = usePublishSyncStore.getState().lastPublishedContent[storylet.id]
+
+      if (cachedContent !== undefined) {
+        // We already have the published content cached; compare synchronously.
+        setNeedsSync(storylet.id, (storylet.content ?? '') !== cachedContent)
+      } else {
+        // Need to fetch from localforage the first time.
+        const id = storylet.id
+        const currentContent = storylet.content ?? ''
+        const targetSnapshotId = lastPublishedSnapshotId
+        getPublishedSnapshots(id)
+          .then((snaps) => {
+            if (cancelled) return
+            const match = snaps.find((s) => s.id === targetSnapshotId)
+            if (!match) return
+            setLastPublishedContent(id, match.content)
+            setNeedsSync(id, currentContent !== match.content)
+          })
+          .catch(() => {/* storage errors are non-fatal */})
+      }
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [book])
 
   const showSidebar = sidebarOpen && !distractionFree
 

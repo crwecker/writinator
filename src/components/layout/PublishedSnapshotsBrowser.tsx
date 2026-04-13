@@ -7,6 +7,7 @@ import {
   deletePublishedSnapshot,
 } from '../../stores/publishedSnapshotStore'
 import { useStoryletStore } from '../../stores/storyletStore'
+import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import { formatTime } from '../../lib/formatTime'
 import { countWords } from '../../lib/words'
 import { computeDiff } from '../../lib/diff'
@@ -121,6 +122,18 @@ export function PublishedSnapshotsBrowser({ open, onClose }: Props) {
       setDeleteConfirmId(snapshotId)
       return
     }
+
+    // Check if we're deleting the snapshot that is marked as the latest published one.
+    // If so, evict the cache so the AppShell effect re-resolves on next book change.
+    const storylet = useStoryletStore
+      .getState()
+      .book?.storylets.find((s) => s.id === activeStoryletId)
+    if (storylet?.lastPublishedSnapshotId === snapshotId) {
+      const { evictLastPublishedContent, setNeedsSync } = usePublishSyncStore.getState()
+      evictLastPublishedContent(activeStoryletId)
+      setNeedsSync(activeStoryletId, false)
+    }
+
     await deletePublishedSnapshot(activeStoryletId, snapshotId)
     const updated = await getPublishedSnapshots(activeStoryletId)
     setSnapshots(updated)
@@ -143,6 +156,12 @@ export function PublishedSnapshotsBrowser({ open, onClose }: Props) {
       lastPublishedAt: snapshot.publishedAt,
       lastPublishedSnapshotId: snapshot.id,
     })
+
+    // Update sync cache so the dot clears immediately.
+    const { setLastPublishedContent, setNeedsSync } = usePublishSyncStore.getState()
+    setLastPublishedContent(activeStoryletId, content)
+    setNeedsSync(activeStoryletId, false)
+
     const updated = await getPublishedSnapshots(activeStoryletId)
     setSnapshots(updated)
   }
