@@ -501,8 +501,6 @@ export function AppShell() {
           />
         </div>
 
-        {!distractionFree && <ImageRevealPanel />}
-
         {publishedSnapshotsOpen && !distractionFree && (
           <PublishedSnapshotsBrowser
             onOpenPublishModal={() => setPublishModalOpen(true)}
@@ -523,6 +521,8 @@ export function AppShell() {
           />
         )}
       </div>
+
+      {!distractionFree && <ImageRevealPanel />}
 
       <JourneyBar bookWordCount={bookWordCount} />
 

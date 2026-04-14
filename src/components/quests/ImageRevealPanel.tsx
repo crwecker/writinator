@@ -196,40 +196,6 @@ function ProgressBar({ session, showText = true }: ProgressBarProps) {
   )
 }
 
-// -----------
-
-interface PanelHeaderProps {
-  title: string
-  onBack?: () => void
-  onCollapse: () => void
-}
-
-function PanelHeader({ title, onBack, onCollapse }: PanelHeaderProps) {
-  return (
-    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0">
-      <div className="flex items-center gap-2">
-        {onBack && (
-          <button
-            onClick={onBack}
-            className="text-gray-500 hover:text-gray-300 text-sm leading-none"
-            title="Back to list"
-          >
-            &#8592;
-          </button>
-        )}
-        <span className="text-xs text-gray-300 font-medium">{title}</span>
-      </div>
-      <button
-        onClick={onCollapse}
-        className="text-gray-500 hover:text-gray-400 text-xs"
-        title="Minimize"
-      >
-        &#x2015;
-      </button>
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // Collapsed thumbnail
 // ---------------------------------------------------------------------------
@@ -356,31 +322,6 @@ function ConsumableButtons({ inventory, onUse }: ConsumableButtonsProps) {
 }
 
 // ---------------------------------------------------------------------------
-// RPG info row (weapon + coin estimate)
-// ---------------------------------------------------------------------------
-
-interface RpgInfoProps {
-  session: ImageRevealSession
-  weaponId: string
-}
-
-function RpgInfo({ session, weaponId }: RpgInfoProps) {
-  const weaponItem = getItemById(weaponId)
-  const multiplier = getWeaponMultiplier(weaponId)
-  const coinEstimate = calculateBaseReward(session.wordGoal, multiplier)
-
-  return (
-    <div className="flex items-center justify-between text-[10px] text-gray-500">
-      {weaponItem ? (
-        <span>{weaponItem.icon} {weaponItem.name} ({multiplier}x)</span>
-      ) : (
-        <span />
-      )}
-      <span className="text-amber-400">~{coinEstimate} coins</span>
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // Result overlay — timed success
 // ---------------------------------------------------------------------------
@@ -505,7 +446,6 @@ export function ImageRevealPanel() {
   const [loadedImages, setLoadedImages] = useState<LoadedImages>({})
   const [celebrationQueue, setCelebrationQueue] = useState<ImageRevealSession[]>([])
   const [timedResultQueue, setTimedResultQueue] = useState<TimedResultSnapshot[]>([])
-  const [abandonConfirmId, setAbandonConfirmId] = useState<string | null>(null)
 
   const loadingRef = useRef<Set<string>>(new Set())
 
@@ -669,11 +609,6 @@ export function ImageRevealPanel() {
     }
   }
 
-  const handleAbandon = (sessionId: string) => {
-    useImageRevealStore.getState().abandonSession(sessionId)
-    setAbandonConfirmId(null)
-  }
-
   const handlePauseResume = () => {
     if (isPaused) {
       useImageRevealStore.getState().resumeTimer()
@@ -809,18 +744,20 @@ export function ImageRevealPanel() {
   // EXPANDED — all sessions at full size, pinned as right sidebar
   // ==================================================================
   return (
-    <aside className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-80 shrink-0 overflow-hidden animate-fade-in">
-        <PanelHeader
-          title="Image Quests"
-          onCollapse={collapse}
-        />
+    <aside className="relative flex flex-col bg-gray-900 border-t border-gray-700 w-full shrink-0 overflow-hidden animate-fade-in">
+        <button
+          onClick={collapse}
+          className="absolute top-1 right-2 z-10 text-gray-500 hover:text-gray-300 text-xs leading-none p-1"
+          title="Minimize"
+        >
+          &#x2015;
+        </button>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex overflow-x-auto">
           {activeSessions.map((session) => {
             const image = loadedImages[session.id]
             const remaining = Math.max(session.wordGoal - session.wordsWritten, 0)
             const isTimed = session.timeMinutes !== undefined
-            const isAbandonConfirm = abandonConfirmId === session.id
 
             // For timed sessions, calculate difficulty and reward preview
             const difficulty = isTimed
@@ -828,135 +765,91 @@ export function ImageRevealPanel() {
               : null
             const difficultyColorClass = difficulty ? getDifficultyColor(difficulty) : ''
 
+            const weaponItem = getItemById(equippedWeapon)
+            const weaponMultiplier = getWeaponMultiplier(equippedWeapon)
+            const coinEstimate = calculateBaseReward(session.wordGoal, weaponMultiplier)
+            const textShadow = '[text-shadow:0_1px_2px_rgba(0,0,0,0.95)]'
+
             return (
               <div
                 key={session.id}
-                className="border-b border-gray-800 last:border-b-0"
+                className="shrink-0 w-[280px] border-r border-gray-800 last:border-r-0"
               >
-                <div className="px-3 pt-3">
+                {/* Image with overlaid text */}
+                <div className="relative">
                   <DetailCanvas session={session} image={image} />
-                </div>
 
-                <div className="px-3 py-2 space-y-2">
-                  {/* Word progress */}
-                  <ProgressBar session={session} showText={false} />
-                  <div className="flex items-center justify-between text-[10px] text-gray-500 tabular-nums">
-                    <span>
-                      {session.wordsWritten.toLocaleString()} / {session.wordGoal.toLocaleString()}
-                    </span>
-                    <span>
-                      {remaining.toLocaleString()} left
-                    </span>
-                  </div>
-
-                  {/* RPG info — always shown */}
-                  <RpgInfo session={session} weaponId={equippedWeapon} />
-
-                  {/* Timer section — only for timed sessions */}
+                  {/* Top-left: difficulty + timer (timed only) */}
                   {isTimed && (
-                    <div className="space-y-2 pt-1 border-t border-gray-800">
-                      {/* Difficulty badge */}
+                    <div className="absolute top-1 left-2 flex flex-col items-start gap-0.5">
                       {difficulty && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-gray-500">Difficulty</span>
-                          <span className={`text-[10px] font-medium ${difficultyColorClass}`}>
-                            {getDifficultyLabel(difficulty)}
-                          </span>
-                        </div>
+                        <span className={`text-[10px] font-medium ${difficultyColorClass} ${textShadow}`}>
+                          {getDifficultyLabel(difficulty)}
+                        </span>
                       )}
-
-                      {/* Timer display */}
-                      <SessionTimer
-                        session={session}
-                        isPaused={isPaused}
-                        pauseStartedAt={pauseStartedAt}
-                      />
-
-                      {/* Armor time bonus info if equipped */}
-                      {(() => {
-                        const bonus = getArmorTimeBonus(equippedArmor)
-                        const armorItem = getItemById(equippedArmor)
-                        if (bonus <= 0 || !armorItem) return null
-                        return (
-                          <p className="text-[10px] text-gray-600">
-                            {armorItem.icon} {armorItem.name} (+{Math.round(bonus * 100)}% time)
-                          </p>
-                        )
-                      })()}
-
-                      {/* Consumables */}
-                      <ConsumableButtons
-                        inventory={consumableInventory}
-                        onUse={handleUseConsumable}
-                      />
-
-                      {/* Pause/Resume + Abandon */}
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          onClick={handlePauseResume}
-                          className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-2 py-1.5 transition-colors"
-                        >
-                          {isPaused ? '\u25B6 Resume' : '\u23F8 Pause'}
-                        </button>
-
-                        {!isAbandonConfirm ? (
-                          <button
-                            onClick={() => setAbandonConfirmId(session.id)}
-                            className="text-xs text-red-400 hover:text-red-300 transition-colors px-2 py-1.5"
-                          >
-                            Abandon
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-red-400">Abandon?</span>
-                            <button
-                              onClick={() => handleAbandon(session.id)}
-                              className="text-[10px] bg-red-900 hover:bg-red-800 text-red-300 rounded px-1.5 py-1 transition-colors"
-                            >
-                              Yes
-                            </button>
-                            <button
-                              onClick={() => setAbandonConfirmId(null)}
-                              className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-400 rounded px-1.5 py-1 transition-colors"
-                            >
-                              No
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      <span className={textShadow}>
+                        <SessionTimer
+                          session={session}
+                          isPaused={isPaused}
+                          pauseStartedAt={pauseStartedAt}
+                          compact
+                        />
+                      </span>
                     </div>
                   )}
 
-                  {/* Abandon button for non-timed sessions */}
-                  {!isTimed && (
-                    <div className="flex justify-end pt-1">
-                      {!isAbandonConfirm ? (
-                        <button
-                          onClick={() => setAbandonConfirmId(session.id)}
-                          className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
-                        >
-                          Abandon
-                        </button>
+                  {/* Bottom gradient with progress + word counts + RPG info */}
+                  <div className="absolute inset-x-0 bottom-0 px-2 pt-6 pb-2 space-y-1 bg-gradient-to-t from-black/85 via-black/55 to-transparent">
+                    <ProgressBar session={session} showText={false} />
+                    <div className={`flex items-center justify-between text-[10px] text-gray-100 tabular-nums ${textShadow}`}>
+                      <span>
+                        {session.wordsWritten.toLocaleString()} / {session.wordGoal.toLocaleString()}
+                      </span>
+                      <span>
+                        {remaining.toLocaleString()} left
+                      </span>
+                    </div>
+                    <div className={`flex items-center justify-between text-[10px] ${textShadow}`}>
+                      {weaponItem ? (
+                        <span className="text-gray-200">{weaponItem.icon} {weaponItem.name} ({weaponMultiplier}x)</span>
                       ) : (
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-red-400">Abandon?</span>
-                          <button
-                            onClick={() => handleAbandon(session.id)}
-                            className="text-[10px] bg-red-900 hover:bg-red-800 text-red-300 rounded px-1.5 py-1 transition-colors"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            onClick={() => setAbandonConfirmId(null)}
-                            className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-400 rounded px-1.5 py-1 transition-colors"
-                          >
-                            No
-                          </button>
-                        </div>
+                        <span />
                       )}
+                      <span className="text-amber-300">~{coinEstimate} coins</span>
                     </div>
-                  )}
+                  </div>
                 </div>
+
+                {/* Controls — only for timed sessions */}
+                {isTimed && (
+                  <div className="px-2 py-2 space-y-2">
+                    {/* Armor time bonus info if equipped */}
+                    {(() => {
+                      const bonus = getArmorTimeBonus(equippedArmor)
+                      const armorItem = getItemById(equippedArmor)
+                      if (bonus <= 0 || !armorItem) return null
+                      return (
+                        <p className="text-[10px] text-gray-600">
+                          {armorItem.icon} {armorItem.name} (+{Math.round(bonus * 100)}% time)
+                        </p>
+                      )
+                    })()}
+
+                    {/* Consumables */}
+                    <ConsumableButtons
+                      inventory={consumableInventory}
+                      onUse={handleUseConsumable}
+                    />
+
+                    {/* Pause/Resume */}
+                    <button
+                      onClick={handlePauseResume}
+                      className="w-full text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-2 py-1.5 transition-colors"
+                    >
+                      {isPaused ? '\u25B6 Resume' : '\u23F8 Pause'}
+                    </button>
+                  </div>
+                )}
               </div>
             )
           })}
