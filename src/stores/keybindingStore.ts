@@ -11,7 +11,7 @@ export type ActionName =
   | 'toggleRenderMode'
   | 'toggleCharacterPanel'
   | 'insertStatMarker'
-  | 'publishStorylet'
+  | 'exportBook'
   | 'findInBook'
 
 export interface KeyCombo {
@@ -29,12 +29,12 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   toggleTypewriter: 'Toggle typewriter mode',
   toggleFileTree: 'Toggle file tree',
   saveToDisk: 'Save to disk',
-  closeBook: 'Close Book',
+  closeBook: 'Open New Book',
   snapshotHistory: 'Snapshot history',
-  toggleRenderMode: 'Cycle Formatting View',
+  toggleRenderMode: 'Cycle Presentation',
   toggleCharacterPanel: 'Toggle Character Panel',
   insertStatMarker: 'Insert stat change',
-  publishStorylet: 'Toggle publish panel',
+  exportBook: 'Export book',
   findInBook: 'Find in book',
 }
 
@@ -44,10 +44,10 @@ export const DEFAULT_KEYMAP: KeyMap = {
   saveToDisk: { key: 's', ctrl: true },
   closeBook: { key: 'o', ctrl: true },
   snapshotHistory: { key: 'h', ctrl: true, shift: true },
-  toggleRenderMode: { key: 'e', ctrl: true, shift: true },
+  toggleRenderMode: { key: 'p', ctrl: true, shift: true },
   toggleCharacterPanel: { key: 'c', ctrl: true, shift: true },
   insertStatMarker: { key: '.', ctrl: true, shift: true },
-  publishStorylet: { key: 'p', ctrl: true, shift: true },
+  exportBook: { key: 'e', ctrl: true, shift: true },
   findInBook: { key: 'f', ctrl: true, shift: true },
 }
 
@@ -115,8 +115,16 @@ export const useKeybindingStore = create<KeybindingState>()(
     }),
     {
       name: 'writinator-keybindings',
+      version: 2,
       storage: localforageStorage,
       partialize: (state) => ({ keymap: state.keymap }) as unknown as KeybindingState,
+      // v2: P and E were swapped (P → presentation, E → export), and publishStorylet
+      // was removed. Reset to defaults on upgrade so the new shortcuts take effect
+      // cleanly rather than colliding with pre-existing user bindings.
+      migrate: (_persisted, version) => {
+        if (version < 2) return { keymap: { ...DEFAULT_KEYMAP } } as unknown as KeybindingState
+        return _persisted as KeybindingState
+      },
       // Merge persisted keymap over defaults so new actions added in later
       // versions receive their default bindings without requiring a reset.
       merge: (persisted, current) => {

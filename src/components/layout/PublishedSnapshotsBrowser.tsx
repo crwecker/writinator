@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { ArrowLeft, Copy, RotateCw, Send, Trash2 } from 'lucide-react'
-import type { PublishedSnapshot } from '../../types'
+import type { PublishedSnapshot, Snapshot } from '../../types'
 import {
   getPublishedSnapshots,
   createPublishedSnapshot,
   deletePublishedSnapshot,
 } from '../../stores/publishedSnapshotStore'
+import { getSnapshots } from '../../stores/snapshotStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import { formatTime } from '../../lib/formatTime'
@@ -15,8 +16,18 @@ import { DiffView } from './DiffView'
 import { renderStoryletAsMarkdown, renderStoryletAsHtml } from '../../lib/render'
 import { inlineDocumentStyles } from '../../lib/export'
 
+const snapshotTriggerLabel: Record<Snapshot['trigger'], string> = {
+  manual: 'save',
+  switch: 'switch',
+  auto: 'auto',
+  closeBook: 'close',
+  bulkReplace: 'replace',
+}
+
 interface Props {
   onOpenPublishModal: () => void
+  onRestoreSnapshot: (content: string) => void
+  onClose: () => void
 }
 
 type CopyFormat = 'markdown' | 'html'
@@ -36,10 +47,12 @@ function computeWordDelta(
   return { insertedWords, deletedWords }
 }
 
-export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
+export function PublishedSnapshotsBrowser({ onOpenPublishModal, onRestoreSnapshot, onClose }: Props) {
   const [snapshots, setSnapshots] = useState<PublishedSnapshot[]>([])
+  const [autoSnapshots, setAutoSnapshots] = useState<Snapshot[]>([])
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [previewId, setPreviewId] = useState<string | null>(null)
+  const [snapshotPreviewId, setSnapshotPreviewId] = useState<string | null>(null)
   const [copyFormat, setCopyFormat] = useState<CopyFormat>('markdown')
   const [copiedFrom, setCopiedFrom] = useState<CopiedFrom>(null)
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -72,9 +85,25 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
     }
   }, [activeStoryletId, lastPublishedSnapshotId])
 
+  // Load auto-snapshots whenever the active storylet changes
+  useEffect(() => {
+    if (!activeStoryletId) return
+    let cancelled = false
+    getSnapshots(activeStoryletId)
+      .then((snaps) => {
+        if (cancelled) return
+        setAutoSnapshots(snaps)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [activeStoryletId, lastPublishedSnapshotId])
+
   // Reset preview when switching storylets
   useEffect(() => {
     setPreviewId(null)
+    setSnapshotPreviewId(null)
   }, [activeStoryletId])
 
   // Flush pending editor content when entering preview so the diff is current
@@ -100,13 +129,17 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
         e.preventDefault()
         e.stopPropagation()
         setPreviewId(null)
+      } else if (snapshotPreviewId !== null) {
+        e.preventDefault()
+        e.stopPropagation()
+        setSnapshotPreviewId(null)
       } else if (deleteConfirmId !== null) {
         setDeleteConfirmId(null)
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [deleteConfirmId, previewId])
+  }, [deleteConfirmId, previewId, snapshotPreviewId])
 
   async function handleDelete(snapshotId: string) {
     if (!activeStoryletId) return
@@ -205,6 +238,9 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
   }
 
   const previewEntry = previewId ? snapshots.find((s) => s.id === previewId) ?? null : null
+  const snapshotPreviewEntry = snapshotPreviewId
+    ? autoSnapshots.find((s) => s.id === snapshotPreviewId) ?? null
+    : null
 
   return (
     <div className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[380px] shrink-0 overflow-hidden">
@@ -237,8 +273,16 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
               )}
             </div>
           </div>
+        ) : snapshotPreviewEntry ? (
+          <button
+            onClick={() => setSnapshotPreviewId(null)}
+            className="flex items-center gap-1.5 text-gray-400 hover:text-gray-200 text-xs transition-colors"
+          >
+            <ArrowLeft size={13} />
+            Back
+          </button>
         ) : (
-          <span className="text-sm font-medium text-gray-200">Publish</span>
+          <span className="text-sm font-medium text-gray-200">History</span>
         )}
         {previewEntry ? (
           <button
@@ -247,20 +291,39 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
           >
             List
           </button>
-        ) : (
+        ) : snapshotPreviewEntry ? (
           <button
-            onClick={onOpenPublishModal}
-            disabled={!activeStoryletId}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs text-emerald-300 hover:text-emerald-200 border border-emerald-700 hover:border-emerald-500 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            title="Publish current storylet content"
+            onClick={() => {
+              onRestoreSnapshot(snapshotPreviewEntry.content)
+              setSnapshotPreviewId(null)
+            }}
+            className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-medium"
           >
-            <Send size={12} />
-            Publish
+            Restore
           </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenPublishModal}
+              disabled={!activeStoryletId}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs text-emerald-300 hover:text-emerald-200 border border-emerald-700 hover:border-emerald-500 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Publish current storylet content"
+            >
+              <Send size={12} />
+              Publish
+            </button>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-300 text-xs"
+            >
+              Close
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Format toggle — always visible below the header */}
+      {/* Format toggle — hidden when viewing a snapshot preview */}
+      {!snapshotPreviewEntry && (
       <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800">
         <span className="text-[11px] text-gray-500 shrink-0">Copy format:</span>
         <div className="flex items-center gap-1">
@@ -286,8 +349,19 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
           </button>
         </div>
       </div>
+      )}
 
-      {previewEntry ? (
+      {snapshotPreviewEntry ? (
+        /* ── Snapshot preview view ── */
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-400">
+            {formatTime(snapshotPreviewEntry.timestamp)} &middot; {snapshotPreviewEntry.wordCount.toLocaleString()} words
+          </div>
+          <pre className="flex-1 overflow-auto px-4 py-3 text-sm text-gray-300 whitespace-pre-wrap font-serif leading-relaxed">
+            {snapshotPreviewEntry.content}
+          </pre>
+        </div>
+      ) : previewEntry ? (
         /* ── Preview / diff view ── */
         <div className="flex-1 flex flex-col min-h-0">
           {/* Snapshot metadata */}
@@ -326,8 +400,11 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
       ) : (
         /* ── List view ── */
         <div className="flex-1 overflow-y-auto">
+          <div className="px-4 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 bg-gray-950/40 border-b border-gray-800">
+            Published
+          </div>
           {snapshots.length === 0 ? (
-            <div className="px-4 py-8 text-center text-gray-500 text-sm">
+            <div className="px-4 py-6 text-center text-gray-500 text-sm">
               No published versions yet.
             </div>
           ) : (
@@ -423,6 +500,33 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
                 </div>
               )
             })
+          )}
+
+          <div className="px-4 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 bg-gray-950/40 border-y border-gray-800">
+            Snapshots
+          </div>
+          {autoSnapshots.length === 0 ? (
+            <div className="px-4 py-6 text-center text-gray-500 text-sm">
+              No snapshots yet. Snapshots are created on save, storylet switch, and every 5 minutes.
+            </div>
+          ) : (
+            autoSnapshots.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSnapshotPreviewId(s.id)}
+                className="w-full text-left px-4 py-2.5 hover:bg-gray-800 border-b border-gray-800 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-300">{formatTime(s.timestamp)}</span>
+                  <span className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded font-mono">
+                    {snapshotTriggerLabel[s.trigger]}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {s.wordCount.toLocaleString()} words
+                </div>
+              </button>
+            ))
           )}
         </div>
       )}

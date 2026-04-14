@@ -6,14 +6,13 @@ import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
 import VimStatusLine from '../editor/VimStatusLine'
 import type { VimMode } from '../editor/VimStatusLine'
-import { ShortcutsMenu } from './ShortcutsMenu'
-import { ExportMenu } from './ExportMenu'
+import { ExportDialog } from './ExportDialog'
+import { HamburgerMenu, type MenuAction } from './HamburgerMenu'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { quickSave, saveAsNewFile } from '../../lib/fileSystem'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
-import { SnapshotBrowser } from './SnapshotBrowser'
 import { FindInBook } from './FindInBook'
 import { PublishedSnapshotsBrowser } from './PublishedSnapshotsBrowser'
 import { PublishModal } from './PublishModal'
@@ -43,10 +42,10 @@ export function AppShell() {
   const [vimCurrentMode, setVimCurrentMode] = useState<VimMode>('NORMAL')
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const editorViewRef = useRef<EditorView | null>(null)
-  const [snapshotsOpen, setSnapshotsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [publishedSnapshotsOpen, setPublishedSnapshotsOpen] = useState(false)
   const [publishModalOpen, setPublishModalOpen] = useState(false)
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [styleEditorOpen, setStyleEditorOpen] = useState(false)
   const [guildOpen, setGuildOpen] = useState(false)
   const [guildTab, setGuildTab] = useState<GuildTab>('board')
@@ -155,6 +154,33 @@ export function AppShell() {
     useStoryletStore.getState().updateStoryletContent(content)
   }, [editorView])
 
+  const handleInsertStatMarker = useCallback(() => {
+    const view = editorViewRef.current
+    if (!view) return
+    const { to } = view.state.selection.main
+    const markerId = crypto.randomUUID()
+    view.dispatch({
+      changes: { from: to, to, insert: `<!-- stat:${markerId} -->` },
+    })
+    setDeltaEditorState({ open: true, markerId, mode: 'create' })
+  }, [])
+
+  const handleSaveToDisk = useCallback(() => {
+    const state = useStoryletStore.getState()
+    state._flushContentUpdate()
+    const { book: currentBook, activeStoryletId: docId, globalSettings } = useStoryletStore.getState()
+    if (!currentBook) return
+    const storylet = docId ? currentBook.storylets.find((d) => d.id === docId) : null
+    const snapshotPromise = storylet?.content
+      ? createSnapshot(docId!, storylet.content, 'manual')
+      : Promise.resolve(null)
+    snapshotPromise.then(() =>
+      quickSave(currentBook, globalSettings).then((saved) => {
+        if (!saved) saveAsNewFile(currentBook, globalSettings)
+      })
+    )
+  }, [])
+
   // Global keyboard shortcuts (driven by keybinding store)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -172,14 +198,12 @@ export function AppShell() {
       }
       if (matchesEvent(km.snapshotHistory, e)) {
         e.preventDefault()
-        setSnapshotsOpen((prev) => !prev)
-        setPublishedSnapshotsOpen(false)
+        setPublishedSnapshotsOpen((prev) => !prev)
         return
       }
-      if (km.publishStorylet && matchesEvent(km.publishStorylet, e)) {
+      if (km.exportBook && matchesEvent(km.exportBook, e)) {
         e.preventDefault()
-        setPublishedSnapshotsOpen((prev) => !prev)
-        setSnapshotsOpen(false)
+        setExportDialogOpen((prev) => !prev)
         return
       }
       if (matchesEvent(km.toggleFileTree, e)) {
@@ -189,20 +213,7 @@ export function AppShell() {
       }
       if (matchesEvent(km.saveToDisk, e)) {
         e.preventDefault()
-        const state = useStoryletStore.getState()
-        state._flushContentUpdate()
-        const { book: currentBook, activeStoryletId: docId, globalSettings } = useStoryletStore.getState()
-        if (currentBook) {
-          const storylet = docId ? currentBook.storylets.find((d) => d.id === docId) : null
-          const snapshotPromise = storylet?.content
-            ? createSnapshot(docId!, storylet.content, 'manual')
-            : Promise.resolve(null)
-          snapshotPromise.then(() =>
-            quickSave(currentBook, globalSettings).then((saved) => {
-              if (!saved) saveAsNewFile(currentBook, globalSettings)
-            })
-          )
-        }
+        handleSaveToDisk()
         return
       }
       if (matchesEvent(km.toggleRenderMode, e)) {
@@ -221,21 +232,15 @@ export function AppShell() {
         return
       }
       if (km.insertStatMarker && matchesEvent(km.insertStatMarker, e)) {
-        const view = editorViewRef.current
-        if (!view) return
+        if (!editorViewRef.current) return
         e.preventDefault()
-        const { to } = view.state.selection.main
-        const markerId = crypto.randomUUID()
-        view.dispatch({
-          changes: { from: to, to, insert: `<!-- stat:${markerId} -->` },
-        })
-        setDeltaEditorState({ open: true, markerId, mode: 'create' })
+        handleInsertStatMarker()
         return
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [toggleDistractionFree, toggleRenderMode])
+  }, [toggleDistractionFree, toggleRenderMode, handleSaveToDisk, handleInsertStatMarker])
 
   // Auto-snapshot every 5 minutes
   useEffect(() => {
@@ -323,6 +328,19 @@ export function AppShell() {
 
   const showSidebar = sidebarOpen && !distractionFree
 
+  const hamburgerItems: MenuAction[] = [
+    { action: 'exportBook', label: 'Export book…', onSelect: () => setExportDialogOpen(true) },
+    { action: 'saveToDisk', label: 'Save to disk', onSelect: handleSaveToDisk },
+    { action: 'toggleTypewriter', label: 'Toggle typewriter mode', onSelect: toggleDistractionFree },
+    { action: 'toggleRenderMode', label: 'Cycle presentation', onSelect: toggleRenderMode },
+    { action: 'toggleFileTree', label: 'Toggle file tree', onSelect: () => useEditorStore.getState().toggleSidebar() },
+    { action: 'findInBook', label: 'Find in book', onSelect: () => setFindOpen((prev) => !prev) },
+    { action: 'snapshotHistory', label: 'History', onSelect: () => setPublishedSnapshotsOpen((prev) => !prev) },
+    { action: 'toggleCharacterPanel', label: 'Character stats', onSelect: () => setCharacterPanelOpen((p) => !p) },
+    { action: 'insertStatMarker', label: 'Insert stat change', onSelect: handleInsertStatMarker },
+    { action: 'closeBook', label: 'Open new book', onSelect: () => { void useStoryletStore.getState().closeBook() } },
+  ]
+
   if (!hasHydrated) return null
   if (!book) return <LandingPage />
 
@@ -393,17 +411,6 @@ export function AppShell() {
           </div>
 
           <div className="flex items-center gap-1">
-            <ExportMenu />
-            <button
-              onClick={() => {
-                setPublishedSnapshotsOpen((prev) => !prev)
-                setSnapshotsOpen(false)
-              }}
-              className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
-              title="Publish panel (Ctrl+Shift+P)"
-            >
-              Publish
-            </button>
             <button
               onClick={() => setFindOpen((prev) => !prev)}
               className="text-gray-500 hover:text-gray-300 transition-colors px-1.5 py-0.5"
@@ -412,16 +419,21 @@ export function AppShell() {
               <Search size={13} />
             </button>
             <button
-              onClick={() => {
-                setSnapshotsOpen((prev) => !prev)
-                setPublishedSnapshotsOpen(false)
-              }}
+              data-testid="character-panel-button"
+              onClick={() => setCharacterPanelOpen((p) => !p)}
               className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
-              title="Snapshot history (Ctrl+Shift+H)"
+              title="Character stats panel (Ctrl+Shift+C)"
+            >
+              Stats
+            </button>
+            <button
+              onClick={() => setPublishedSnapshotsOpen((prev) => !prev)}
+              className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
+              title="History — published versions & snapshots (Ctrl+Shift+H)"
             >
               History
             </button>
-            <ShortcutsMenu />
+            <HamburgerMenu items={hamburgerItems} />
           </div>
         </div>
       )}
@@ -446,11 +458,6 @@ export function AppShell() {
             onInsertMarker={handleInsertMarker}
             onEditStyles={() => setStyleEditorOpen(true)}
           />
-          <SnapshotBrowser
-            open={snapshotsOpen}
-            onClose={() => setSnapshotsOpen(false)}
-            onRestore={handleRestoreSnapshot}
-          />
           <FindInBook
             open={findOpen}
             onClose={() => setFindOpen(false)}
@@ -459,6 +466,10 @@ export function AppShell() {
           <PublishModal
             open={publishModalOpen}
             onClose={() => setPublishModalOpen(false)}
+          />
+          <ExportDialog
+            open={exportDialogOpen}
+            onClose={() => setExportDialogOpen(false)}
           />
           <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} editorView={editorView} />
 
@@ -495,6 +506,8 @@ export function AppShell() {
         {publishedSnapshotsOpen && !distractionFree && (
           <PublishedSnapshotsBrowser
             onOpenPublishModal={() => setPublishModalOpen(true)}
+            onRestoreSnapshot={handleRestoreSnapshot}
+            onClose={() => setPublishedSnapshotsOpen(false)}
           />
         )}
 
@@ -523,14 +536,6 @@ export function AppShell() {
         <span className="mx-1.5 text-gray-600">|</span>
         <DailyTarget bookWordCount={bookWordCount} />
         <div className="flex items-center gap-3">
-          <button
-            data-testid="character-panel-button"
-            onClick={() => setCharacterPanelOpen((p) => !p)}
-            className="text-gray-500 hover:text-gray-300 transition-colors"
-            title="Character stats panel (Ctrl+Shift+C)"
-          >
-            Stats
-          </button>
           <button
             onClick={() => {
               setGuildTab('board')
