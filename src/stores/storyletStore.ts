@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { Book, Storylet, DocumentStyles, GlobalSettings, NamedStyle, WritinatorFile } from '../types'
+import type { Book, Storylet, DocumentStyles, GlobalSettings, NamedStyle, ReplaceScope, SearchOptions, WritinatorFile } from '../types'
+import { compileQuery, MAX_MATCHES_PER_STORYLET } from '../lib/bookSearch'
 
 function createDefaultDocumentStyles(): DocumentStyles {
   return {
@@ -70,6 +71,12 @@ interface StoryletState {
   updateGlobalSettings: (patch: Partial<GlobalSettings>) => void
   renameStyle: (oldName: string, newName: string) => void
   replaceInlineStyleInOtherDocs: (styleString: string, className: string) => number
+  replaceAllInBook: (
+    options: SearchOptions,
+    replacement: string,
+    scope: ReplaceScope,
+    targetStoryletId?: string,
+  ) => { storyletsChanged: number; matchesReplaced: number }
 }
 
 function generateId(): string {
@@ -592,6 +599,67 @@ export const useStoryletStore = create<StoryletState>()(
         if (total === 0) return 0
         set({ book: { ...book, storylets: nextStorylets, updatedAt: now() } })
         return total
+      },
+
+      replaceAllInBook: (
+        options: SearchOptions,
+        replacement: string,
+        scope: ReplaceScope,
+        targetStoryletId?: string,
+      ) => {
+        get()._flushContentUpdate()
+        const { book } = get()
+        if (!book) return { storyletsChanged: 0, matchesReplaced: 0 }
+        const compiled = compileQuery(options)
+        if ('error' in compiled) return { storyletsChanged: 0, matchesReplaced: 0 }
+        const { regex } = compiled
+        const timestamp = now()
+        let storyletsChanged = 0
+        let matchesReplaced = 0
+        const nextStorylets = book.storylets.map((storylet) => {
+          if (scope === 'storylet' && storylet.id !== targetStoryletId) return storylet
+          if (!storylet.content) return storylet
+          // Build a fresh scanner so we don't mutate `regex.lastIndex` across storylets,
+          // and so we can cap the number of replacements per storylet.
+          const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
+          const scanner = new RegExp(regex.source, flags)
+          const original = storylet.content
+          let cursor = 0
+          let count = 0
+          let out = ''
+          let m: RegExpExecArray | null
+          while ((m = scanner.exec(original)) !== null) {
+            const start = m.index
+            const end = start + m[0].length
+            out += original.slice(cursor, start)
+            out += replacement
+            cursor = end
+            count++
+            if (count >= MAX_MATCHES_PER_STORYLET) break
+            // Avoid infinite loops on zero-width matches.
+            if (m[0].length === 0) {
+              scanner.lastIndex = scanner.lastIndex + 1
+            }
+          }
+          if (count === 0) return storylet
+          out += original.slice(cursor)
+          if (out === original) return storylet
+          storyletsChanged++
+          matchesReplaced += count
+          return {
+            ...storylet,
+            content: out,
+            updatedAt: timestamp,
+            docVersion: (storylet.docVersion ?? 0) + 1,
+          }
+        })
+        if (storyletsChanged === 0) {
+          return { storyletsChanged: 0, matchesReplaced: 0 }
+        }
+        set({
+          book: { ...book, storylets: nextStorylets, updatedAt: timestamp },
+        })
+        return { storyletsChanged, matchesReplaced }
       },
 
       _flushContentUpdate: () => {

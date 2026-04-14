@@ -9,6 +9,13 @@ export interface Storylet {
   updatedAt: string
   lastPublishedAt?: string
   lastPublishedSnapshotId?: string
+  /**
+   * Bumped on external bulk mutations (e.g. Find-in-Book replace) so the
+   * editor view can reload the document even when the active storylet id
+   * hasn't changed. Defaults to 0 for storylets persisted before this field
+   * was introduced.
+   */
+  docVersion?: number
 }
 
 export interface PublishedSnapshot {
@@ -77,7 +84,54 @@ export interface Snapshot {
   content: string
   wordCount: number
   timestamp: string
-  trigger: 'manual' | 'switch' | 'auto' | 'closeBook'
+  trigger: 'manual' | 'switch' | 'auto' | 'closeBook' | 'bulkReplace'
+}
+
+// ---------------------------------------------------------------------------
+// Find in Book — Phase 1: search types
+// ---------------------------------------------------------------------------
+
+export interface SearchOptions {
+  query: string
+  caseSensitive: boolean
+  wholeWord: boolean
+  regex: boolean
+}
+
+export interface SearchMatch {
+  storyletId: string
+  start: number
+  end: number
+  lineSnippet: string
+  matchIndexInSnippet: [number, number]
+}
+
+export interface StoryletSearchResult {
+  storyletId: string
+  storyletName: string
+  matches: SearchMatch[]
+}
+
+export type ReplaceScope = 'storylet' | 'book'
+
+/**
+ * A single match's before/after snippet used by the replace preview modal.
+ * `before` is the existing line snippet (with match offsets); `after` is what
+ * the snippet will look like once the replacement is applied.
+ */
+export interface ReplacePreviewMatch {
+  start: number
+  end: number
+  beforeSnippet: string
+  beforeMatchRange: [number, number]
+  afterSnippet: string
+  afterReplacementRange: [number, number]
+}
+
+export interface ReplacePreview {
+  storyletId: string
+  storyletName: string
+  matches: ReplacePreviewMatch[]
 }
 
 export interface TextStyle {
