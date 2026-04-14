@@ -11,6 +11,7 @@ export function countWords(text: string | null): number {
  */
 export function extractWords(text: string | null | undefined): string {
   if (!text) return ''
-  const matches = text.toLowerCase().match(/[\p{L}\p{N}']+/gu)
+  const stripped = text.replace(/<!--\s*stat:[A-Za-z0-9-]+\s*-->/g, '')
+  const matches = stripped.toLowerCase().match(/[\p{L}\p{N}']+/gu)
   return matches ? matches.join(' ') : ''
 }
