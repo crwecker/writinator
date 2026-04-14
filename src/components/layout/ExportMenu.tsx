@@ -10,9 +10,9 @@ import {
   exportAsEpub,
   exportAsZip,
 } from '../../lib/export'
-import type { Book } from '../../types'
+import type { Book, DocumentStyles } from '../../types'
 
-type ExportFn = (book: Book) => void | Promise<void>
+type ExportFn = (book: Book, documentStyles?: DocumentStyles) => void | Promise<void>
 
 const formats: { label: string; action: ExportFn }[] = [
   { label: 'Markdown (.md)', action: exportAsMarkdown },
@@ -75,9 +75,10 @@ export function ExportMenu() {
                 if (!book) return
                 useStoryletStore.getState()._flushContentUpdate()
                 const currentBook = useStoryletStore.getState().book!
+                const docStyles = useStoryletStore.getState().globalSettings.documentStyles
                 setExporting(fmt.label)
                 try {
-                  await fmt.action(currentBook)
+                  await fmt.action(currentBook, docStyles)
                 } finally {
                   setExporting(null)
                   setOpen(false)
@@ -99,9 +100,10 @@ export function ExportMenu() {
                 if (!book) return
                 useStoryletStore.getState()._flushContentUpdate()
                 const currentBook = useStoryletStore.getState().book!
+                const docStyles = useStoryletStore.getState().globalSettings.documentStyles
                 setExporting(fmt.label)
                 try {
-                  await exportAsZip(currentBook, fmt.format)
+                  await exportAsZip(currentBook, fmt.format, docStyles)
                 } finally {
                   setExporting(null)
                   setOpen(false)

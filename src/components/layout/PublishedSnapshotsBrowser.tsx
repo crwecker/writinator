@@ -13,6 +13,7 @@ import { countWords } from '../../lib/words'
 import { computeDiff } from '../../lib/diff'
 import { DiffView } from './DiffView'
 import { renderStoryletAsMarkdown, renderStoryletAsHtml } from '../../lib/render'
+import { inlineDocumentStyles } from '../../lib/export'
 
 interface Props {
   onOpenPublishModal: () => void
@@ -176,9 +177,10 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal }: Props) {
     const storylet = book?.storylets.find((s) => s.id === activeStoryletId)
     if (!storylet || !book) return
 
+    const documentStyles = state.globalSettings.documentStyles
     const text =
       copyFormat === 'html'
-        ? renderStoryletAsHtml(storylet, book)
+        ? inlineDocumentStyles(renderStoryletAsHtml(storylet, book), documentStyles)
         : renderStoryletAsMarkdown(storylet, book)
 
     try {

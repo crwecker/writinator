@@ -4,6 +4,7 @@ import {
   getCharacterMarkerContext,
   processCharacterMarkers,
   stripPasteArtifacts,
+  ensureBlockSeparation,
   escapeHtml,
   applyAlignmentMarkers,
   astToHtml,
@@ -34,7 +35,7 @@ export function renderStoryletAsHtml(storylet: Storylet, book: Book): string {
     ? processCharacterMarkers(storylet.content, ctx, 'html')
     : ''
   const content = processed
-    ? applyAlignmentMarkers(astToHtml(parseMarkdown(stripPasteArtifacts(processed))))
+    ? applyAlignmentMarkers(astToHtml(parseMarkdown(ensureBlockSeparation(stripPasteArtifacts(processed)))))
     : ''
   return `${heading}\n${content}`
 }

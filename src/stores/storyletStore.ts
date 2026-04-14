@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
 import type { Book, Storylet, DocumentStyles, GlobalSettings, NamedStyle, ReplaceScope, SearchOptions, WritinatorFile } from '../types'
-import { compileQuery, MAX_MATCHES_PER_STORYLET } from '../lib/bookSearch'
+import { compileQuery, interpretReplacementEscapes, MAX_MATCHES_PER_STORYLET } from '../lib/bookSearch'
 
 function createDefaultDocumentStyles(): DocumentStyles {
   return {
@@ -613,6 +613,7 @@ export const useStoryletStore = create<StoryletState>()(
         const compiled = compileQuery(options)
         if ('error' in compiled) return { storyletsChanged: 0, matchesReplaced: 0 }
         const { regex } = compiled
+        const effectiveReplacement = interpretReplacementEscapes(replacement, options.regex)
         const timestamp = now()
         let storyletsChanged = 0
         let matchesReplaced = 0
@@ -632,7 +633,7 @@ export const useStoryletStore = create<StoryletState>()(
             const start = m.index
             const end = start + m[0].length
             out += original.slice(cursor, start)
-            out += replacement
+            out += effectiveReplacement
             cursor = end
             count++
             if (count >= MAX_MATCHES_PER_STORYLET) break

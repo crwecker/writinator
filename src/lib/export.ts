@@ -3,6 +3,8 @@ import type {
   Book,
   Character,
   CharacterState,
+  DocumentStyles,
+  NamedStyle,
   Storylet,
   EquippedItem,
   StatDelta,
@@ -31,6 +33,86 @@ function sanitizeFilename(name: string): string {
  *  them to styled elements. */
 export function stripPasteArtifacts(content: string): string {
   return content.replace(/\{align:(\w+)\}\s*/g, '<!--align:$1-->')
+}
+
+/** Insert blank lines between consecutive non-empty lines so markdown treats
+ *  each as its own block. The editor stores lines separated by single `\n`
+ *  and adds vertical space visually via CSS, so without this preprocessing
+ *  adjacent lines collapse into one paragraph. Preserves code fences, lists,
+ *  blockquotes, tables, and indented code blocks. */
+export function ensureBlockSeparation(content: string): string {
+  const lines = content.replace(/\r\n?/g, '\n').split('\n')
+  const out: string[] = []
+  let inCodeFence = false
+  const listPrefix = /^\s*(?:[-*+]|\d+[.)])\s+/
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    out.push(line)
+    if (/^(?:```|~~~)/.test(line.trim())) {
+      inCodeFence = !inCodeFence
+      continue
+    }
+    if (inCodeFence) continue
+    const next = lines[i + 1]
+    if (next === undefined) continue
+    if (line.trim() === '' || next.trim() === '') continue
+    if (listPrefix.test(line) && (listPrefix.test(next) || /^\s{2,}\S/.test(next))) continue
+    if (/^\s*>/.test(line) && /^\s*>/.test(next)) continue
+    if (/^\s*\|/.test(line) && /^\s*\|/.test(next)) continue
+    if (/^ {4,}/.test(line) && /^ {4,}/.test(next)) continue
+    out.push('')
+  }
+  return out.join('\n')
+}
+
+/** Convert a NamedStyle to a CSS declaration block (no braces). */
+export function namedStyleToCss(style: NamedStyle): string {
+  const props: string[] = []
+  if (style.fontFamily) props.push(`font-family: ${style.fontFamily}`)
+  if (style.fontSize) props.push(`font-size: ${style.fontSize}px`)
+  if (style.lineHeight) props.push(`line-height: ${style.lineHeight}`)
+  if (style.color) props.push(`color: ${style.color}`)
+  if (style.letterSpacing) props.push(`letter-spacing: ${style.letterSpacing}`)
+  if (style.fontWeight) props.push(`font-weight: ${style.fontWeight}`)
+  if (style.fontStyle) props.push(`font-style: ${style.fontStyle}`)
+  if (style.textDecoration) props.push(`text-decoration: ${style.textDecoration}`)
+  if (style.backgroundColor) props.push(`background-color: ${style.backgroundColor}`)
+  return props.join('; ')
+}
+
+// CSS class selector for a style name. Class names with spaces become
+// multi-class selectors (`.Foo.Bar`); other CSS-unsafe chars are escaped.
+function styleNameToSelector(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => '.' + part.replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c))
+    .join('')
+}
+
+/** Build a CSS stylesheet from documentStyles. Includes rules for both
+ *  default style slots (body/h1/h2/h3/blockquote/code) applied to their
+ *  semantic tags, and for user-defined named styles applied as classes. */
+export function buildDocumentStylesCss(styles: DocumentStyles | undefined): string {
+  if (!styles) return ''
+  const rules: string[] = []
+  const tagMap: Record<string, string> = {
+    body: 'body',
+    h1: 'h1',
+    h2: 'h2',
+    h3: 'h3',
+    blockquote: 'blockquote',
+    code: 'code, pre',
+  }
+  for (const [name, style] of Object.entries(styles)) {
+    if (!style) continue
+    const decl = namedStyleToCss(style)
+    if (!decl) continue
+    const selector = tagMap[name] ?? styleNameToSelector(name)
+    if (!selector) continue
+    rules.push(`${selector} { ${decl}; }`)
+  }
+  return rules.join('\n')
 }
 
 // ─── Character marker processing ────────────────────────
@@ -261,13 +343,75 @@ export function processCharacterMarkers(
  *  strip remaining known HTML tags (keeping text content), convert {align:X}
  *  to markers. Preserves <<text>> and bare < since those aren't matched. */
 function preprocessForEpub(content: string): string {
-  return content
+  // Placeholder class-spans so the generic strip below doesn't eat them.
+  const spanOpenStash: string[] = []
+  let out = content
     .replace(/\{align:(\w+)\}\s*/g, '%%ALIGN:$1%%\n')
     // Convert monospace spans to backtick-wrapped inline code
     .replace(/<span\s+style="[^"]*(?:monospace|Courier|JetBrains Mono)[^"]*">([\s\S]*?)<\/span>/gi,
       (_m, text: string) => '`' + text + '`')
+    // Stash class-based spans before the generic tag strip
+    .replace(/<span\s+class="([^"]*)">/gi, (_m, cls: string) => {
+      spanOpenStash.push(cls)
+      return `%%SPAN_OPEN_${spanOpenStash.length - 1}%%`
+    })
+    .replace(/<\/span>/gi, '%%SPAN_CLOSE%%')
     // Strip all remaining known HTML tags
     .replace(/<\/?(span|div|font|center|a|b|i|u|em|strong|sup|sub|s|br|hr|img|table|tr|td|th|thead|tbody|tfoot|col|colgroup|caption|ul|ol|li|dl|dt|dd|p|pre|code|blockquote|section|article|header|footer|nav|main|aside|details|summary|figure|figcaption|mark|abbr|cite|small|big|ruby|rt|wbr|iframe|object|embed|source|audio|video|picture|svg|path|rect|circle|g)\b[^>]*\/?>/gi, '\n')
+  out = out
+    .replace(/%%SPAN_OPEN_(\d+)%%/g, (_m, i: string) => {
+      const cls = spanOpenStash[Number(i)] ?? ''
+      return `<span class="${cls.replace(/"/g, '&quot;')}">`
+    })
+    .replace(/%%SPAN_CLOSE%%/g, '</span>')
+  return out
+}
+
+/** Rewrite class-based named-style references in HTML into inline `style="…"`
+ *  attributes so the output survives copy/paste into editors that don't run a
+ *  separate stylesheet (Royal Road, emails, Notion, etc.). Handles both
+ *  `<span class="X">` and default style slots (h1/h2/h3/blockquote/code/pre). */
+export function inlineDocumentStyles(
+  html: string,
+  styles: DocumentStyles | undefined
+): string {
+  if (!styles) return html
+  let out = html.replace(/<span\s+class="([^"]+)">/g, (whole, cls: string) => {
+    // class attribute may be multi-token (e.g., "System Message"); try the
+    // full string first, then fall back to individual tokens.
+    const candidates = [cls, ...cls.split(/\s+/).filter(Boolean)]
+    for (const name of candidates) {
+      const style = styles[name]
+      if (!style) continue
+      const css = namedStyleToCss(style)
+      if (css) return `<span style="${css}">`
+    }
+    return whole
+  })
+  const tagMap: Record<string, string[]> = {
+    h1: ['h1'],
+    h2: ['h2'],
+    h3: ['h3'],
+    blockquote: ['blockquote'],
+    code: ['code', 'pre'],
+  }
+  for (const [key, tags] of Object.entries(tagMap)) {
+    const style = styles[key]
+    if (!style) continue
+    const css = namedStyleToCss(style)
+    if (!css) continue
+    for (const tag of tags) {
+      const re = new RegExp(`<${tag}(\\s[^>]*)?>`, 'g')
+      out = out.replace(re, (m, attrs: string | undefined) => {
+        const a = attrs ?? ''
+        if (/\sstyle="/i.test(a)) {
+          return m.replace(/style="([^"]*)"/i, (_s, existing: string) => `style="${css}; ${existing}"`)
+        }
+        return `<${tag}${a} style="${css}">`
+      })
+    }
+  }
+  return out
 }
 
 /** Convert <!--align:X--> comments into styled wrappers on the next element */
@@ -484,10 +628,12 @@ function blockToHtml(node: Content): string {
   }
 }
 
-export function exportAsHtml(book: Book): void {
+export function exportAsHtml(book: Book, documentStyles?: DocumentStyles): void {
   const body = book.storylets
     .map((s) => renderStoryletAsHtml(s, book))
     .join('\n\n')
+
+  const userStyles = buildDocumentStylesCss(documentStyles)
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -503,6 +649,7 @@ export function exportAsHtml(book: Book): void {
   pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow-x: auto; }
   blockquote { border-left: 3px solid #ddd; margin-left: 0; padding-left: 1rem; color: #555; }
   del { color: #999; }
+${userStyles}
 </style>
 </head>
 <body>
@@ -988,7 +1135,7 @@ export async function exportAsPdf(book: Book): Promise<void> {
 
 // ─── EPUB Export (JSZip-based) ─────────────────────────
 
-export async function exportAsEpub(book: Book): Promise<void> {
+export async function exportAsEpub(book: Book, documentStyles?: DocumentStyles): Promise<void> {
   const zip = new JSZip()
 
   // mimetype must be first file, uncompressed
@@ -1029,7 +1176,7 @@ export async function exportAsEpub(book: Book): Promise<void> {
     // Make XHTML-safe: self-close void elements
     html = html.replace(/<br>/g, '<br/>').replace(/<hr>/g, '<hr/>')
     // Escape any < that isn't part of a valid XHTML tag or closing tag
-    html = html.replace(/<(?!\/?(?:p|h[1-6]|strong|em|del|code|pre|ol|ul|li|blockquote|hr|br|div)\b[^>]*\/?>)/g, '&lt;')
+    html = html.replace(/<(?!\/?(?:p|h[1-6]|strong|em|del|code|pre|ol|ul|li|blockquote|hr|br|div|span)\b[^>]*\/?>)/g, '&lt;')
     html = applyEpubAlignment(html)
     return html
   }
@@ -1060,7 +1207,8 @@ h3, h4, h5, h6 { margin-top: 1.5em; }
 code { background: #f4f4f4; padding: 0.15em 0.4em; font-size: 0.9em; }
 pre { background: #f4f4f4; padding: 1em; overflow-x: auto; }
 blockquote { border-left: 3px solid #ddd; margin-left: 0; padding-left: 1em; color: #555; }
-del { color: #999; }`
+del { color: #999; }
+${buildDocumentStylesCss(documentStyles)}`
   zip.file('OEBPS/style.css', css)
 
   // Title page
@@ -1157,20 +1305,62 @@ ${spineItems}
 
 // ─── ZIP Export ────────────────────────────────────────
 
-function formatStoryletContent(doc: Storylet, format: 'md' | 'txt' | 'html'): string {
-  const content = doc.content || ''
-  if (format === 'html') {
-    return `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${escapeHtml(doc.name)}</title></head><body><h1>${escapeHtml(doc.name)}</h1><pre>${escapeHtml(content)}</pre></body></html>`
+function renderStoryletForZip(
+  doc: Storylet,
+  book: Book,
+  format: 'md' | 'txt' | 'html',
+  userStylesCss: string
+): string {
+  if (!doc.content) {
+    if (format === 'html') {
+      return `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${escapeHtml(doc.name)}</title><style>${userStylesCss}</style></head><body><h1>${escapeHtml(doc.name)}</h1></body></html>`
+    }
+    return `# ${doc.name}\n`
   }
-  return content
+  const ctx = getCharacterMarkerContext(book, doc.id)
+  if (format === 'md') {
+    const processed = processCharacterMarkers(doc.content, ctx, 'markdown')
+    return `# ${doc.name}\n\n${stripPasteArtifacts(processed)}`
+  }
+  if (format === 'txt') {
+    const processed = processCharacterMarkers(doc.content, ctx, 'plain')
+    const text = astToPlainText(parseMarkdown(stripPasteArtifacts(processed)))
+    return `${doc.name}\n\n${text}`
+  }
+  const processed = processCharacterMarkers(doc.content, ctx, 'html')
+  const body = applyAlignmentMarkers(astToHtml(parseMarkdown(ensureBlockSeparation(stripPasteArtifacts(processed)))))
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${escapeHtml(doc.name)}</title>
+<style>
+  body { max-width: 800px; margin: 2rem auto; padding: 0 1rem; font-family: 'Georgia', serif; line-height: 1.8; color: #222; }
+  h1 { text-align: center; margin-bottom: 2rem; }
+  code { background: #f4f4f4; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+  pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+  blockquote { border-left: 3px solid #ddd; margin-left: 0; padding-left: 1rem; color: #555; }
+  del { color: #999; }
+${userStylesCss}
+</style>
+</head>
+<body>
+<h1>${escapeHtml(doc.name)}</h1>
+${body}
+</body>
+</html>`
 }
 
-export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Promise<void> {
+export async function exportAsZip(
+  book: Book,
+  format: 'md' | 'txt' | 'html',
+  documentStyles?: DocumentStyles
+): Promise<void> {
   const zip = new JSZip()
   const rootFolder = zip.folder(sanitizeFilename(book.title))!
 
   const ext = format === 'md' ? '.md' : format === 'txt' ? '.txt' : '.html'
-  const zipFormat: StatblockExportFormat = format === 'md' ? 'markdown' : format === 'txt' ? 'plain' : 'html'
+  const userStylesCss = buildDocumentStylesCss(documentStyles)
 
   function addStorylets(parentId: string | undefined, folder: JSZip) {
     const children = book.storylets.filter(d => d.parentId === parentId)
@@ -1182,12 +1372,7 @@ export async function exportAsZip(book: Book, format: 'md' | 'txt' | 'html'): Pr
       usedNames.set(name, count + 1)
       if (count > 0) name = `${name} (${count + 1})`
 
-      const ctx = getCharacterMarkerContext(book, doc.id)
-      const processedDoc: Storylet = {
-        ...doc,
-        content: doc.content ? processCharacterMarkers(doc.content, ctx, zipFormat) : '',
-      }
-      const content = formatStoryletContent(processedDoc, format)
+      const content = renderStoryletForZip(doc, book, format, userStylesCss)
       folder.file(name + ext, content)
 
       const hasChildren = book.storylets.some(d => d.parentId === doc.id)

@@ -225,7 +225,7 @@ export function FindInBook({ open, onClose, editorView }: Props) {
           type="text"
           value={replacement}
           onChange={(e) => setReplacement(e.target.value)}
-          placeholder="Replace with..."
+          placeholder={regex ? 'Replace with... (\\n, \\t supported)' : 'Replace with...'}
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white outline-none focus:border-blue-500 w-full"
         />
         <div className="flex items-center gap-1.5">

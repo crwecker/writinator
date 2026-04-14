@@ -133,6 +133,29 @@ export function searchStorylet(
 }
 
 /**
+ * In regex mode, interpret common backslash escapes in the replacement string
+ * (`\n`, `\r`, `\t`, `\\`, `\0`). Mirrors VS Code's behavior: a single-line
+ * replacement input can still produce multi-line output. Unknown escapes are
+ * left untouched. In non-regex mode, the replacement is used literally.
+ */
+export function interpretReplacementEscapes(
+  replacement: string,
+  regexMode: boolean,
+): string {
+  if (!regexMode) return replacement
+  return replacement.replace(/\\(.)/g, (_, c: string) => {
+    switch (c) {
+      case 'n': return '\n'
+      case 'r': return '\r'
+      case 't': return '\t'
+      case '\\': return '\\'
+      case '0': return '\0'
+      default: return '\\' + c
+    }
+  })
+}
+
+/**
  * Expand a regex match's replacement string. Supports `$&` (whole match) and
  * `$1`-`$9` numbered backreferences — same subset replaceAll uses. We hand-roll
  * this so the preview's `after` snippet matches what String.replace would
@@ -225,9 +248,10 @@ export function computeReplacePreview(
     const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
     const scanner = new RegExp(regex.source, flags)
     const matches: ReplacePreviewMatch[] = []
+    const effectiveReplacement = interpretReplacementEscapes(replacement, options.regex)
     let m: RegExpExecArray | null
     while ((m = scanner.exec(storylet.content)) !== null) {
-      matches.push(buildPreviewMatch(storylet.content, m, replacement))
+      matches.push(buildPreviewMatch(storylet.content, m, effectiveReplacement))
       if (matches.length >= MAX_MATCHES_PER_STORYLET) break
       if (m[0].length === 0) {
         scanner.lastIndex = scanner.lastIndex + 1
