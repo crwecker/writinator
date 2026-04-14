@@ -32,7 +32,7 @@ import { LandingPage } from './LandingPage'
 import { RewardToast } from '../quests/RewardToast'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
-import { countWords } from '../../lib/words'
+import { countWords, extractWords } from '../../lib/words'
 import { JourneyBar } from './JourneyBar'
 import { DailyTarget } from './DailyTarget'
 import { MilestoneFlash } from './MilestoneFlash'
@@ -298,7 +298,7 @@ export function AppShell() {
 
       if (cachedContent !== undefined) {
         // We already have the published content cached; compare synchronously.
-        setNeedsSync(storylet.id, (storylet.content ?? '') !== cachedContent)
+        setNeedsSync(storylet.id, extractWords(storylet.content) !== extractWords(cachedContent))
       } else {
         // Need to fetch from localforage the first time.
         const id = storylet.id
@@ -310,7 +310,7 @@ export function AppShell() {
             const match = snaps.find((s) => s.id === targetSnapshotId)
             if (!match) return
             setLastPublishedContent(id, match.content)
-            setNeedsSync(id, currentContent !== match.content)
+            setNeedsSync(id, extractWords(currentContent) !== extractWords(match.content))
           })
           .catch(() => {/* storage errors are non-fatal */})
       }
