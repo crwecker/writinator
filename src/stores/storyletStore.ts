@@ -45,9 +45,9 @@ interface StoryletState {
   _pendingContent: string | null
 
   // Book CRUD
-  createBook: (title: string) => void
+  createBook: (title: string) => Promise<void>
   closeBook: () => Promise<void>
-  loadFile: (file: WritinatorFile) => void
+  loadFile: (file: WritinatorFile) => Promise<void>
   renameBook: (title: string) => void
 
   // Storylet CRUD
@@ -175,7 +175,12 @@ export const useStoryletStore = create<StoryletState>()(
       _contentUpdateTimer: null,
       _pendingContent: null,
 
-      createBook: (title: string) => {
+      createBook: async (title: string) => {
+        // Orphan-snapshot the current book before wiping state
+        const existingBook = get().book
+        if (existingBook) {
+          await snapshotBook(existingBook, 'orphan')
+        }
         const timestamp = now()
         const storyletId = generateId()
         set({
@@ -199,7 +204,13 @@ export const useStoryletStore = create<StoryletState>()(
         })
       },
 
-      loadFile: (file: WritinatorFile) => {
+      loadFile: async (file: WritinatorFile) => {
+        // Orphan-snapshot the current book before wiping state
+        // Note: these snapshots will be cleared by loadSnapshotsFromFile — acceptable per plan
+        const existingBook = get().book
+        if (existingBook) {
+          await snapshotBook(existingBook, 'orphan')
+        }
         get()._flushContentUpdate()
         set({
           book: file.book,
@@ -768,6 +779,22 @@ export const useStoryletStore = create<StoryletState>()(
         }
         // useStoryletStore is defined by the time this callback fires (zustand defers it)
         useStoryletStore.setState({ hasHydrated: true })
+        // After hydration, attempt to restore file handle and reconcile with disk.
+        // Dynamic imports used to avoid circular dependency: storyletStore → fileSystem → storyletStore.
+        if (state?.book) {
+          queueMicrotask(async () => {
+            try {
+              const { restoreStoredFileHandleFromRecents } = await import('../lib/fileSystem')
+              const restored = await restoreStoredFileHandleFromRecents()
+              if (!restored) return
+              const { reconcileWithFile } = await import('../lib/reconcile')
+              const result = await reconcileWithFile()
+              console.log('[storyletStore] post-hydrate reconcile:', result.kind)
+            } catch (err) {
+              console.warn('[storyletStore] post-hydrate reconcile failed:', err)
+            }
+          })
+        }
       },
     }
   )

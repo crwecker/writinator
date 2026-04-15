@@ -1,10 +1,16 @@
 import type { Book, GlobalSettings, WritinatorFile } from '../types'
 import { migrateFile } from './migration'
 import { getAllSnapshots } from '../stores/snapshotStore'
+import { snapshotBook } from '../stores/snapshotStore'
 import { getAllPublishedSnapshots } from '../stores/publishedSnapshotStore'
 import { useRecentFilesStore } from '../stores/recentFilesStore'
 import { useCharacterStore } from '../stores/characterStore'
 import { useStoryletStore } from '../stores/storyletStore'
+
+// queryPermission is not yet in TypeScript lib types for File System Access API
+interface FileSystemHandleWithQueryPermission extends FileSystemFileHandle {
+  queryPermission(descriptor: { mode: 'read' | 'readwrite' }): Promise<PermissionState>
+}
 
 const FILE_EXTENSION = '.writinator'
 const MIME_TYPE = 'application/json'
@@ -109,6 +115,13 @@ async function openWithFileSystemAccess(): Promise<WritinatorFile | null> {
     ],
     multiple: false,
   })
+
+  // Orphan-snapshot the current book before replacing it
+  const currentBook = useStoryletStore.getState().book
+  if (currentBook) {
+    await snapshotBook(currentBook, 'orphan')
+  }
+
   storedFileHandle = handle
   useRecentFilesStore.getState().addRecent({
     handle,
@@ -131,6 +144,11 @@ function openWithFileInput(): Promise<WritinatorFile | null> {
         resolve(null)
         return
       }
+      // Orphan-snapshot the current book before replacing it
+      const currentBook = useStoryletStore.getState().book
+      if (currentBook) {
+        await snapshotBook(currentBook, 'orphan')
+      }
       const text = await file.text()
       resolve(parseFileJSON(text))
     }
@@ -148,6 +166,37 @@ export function clearFileHandle(): void {
 
 export function hasFileHandle(): boolean {
   return storedFileHandle !== null
+}
+
+export function setStoredFileHandle(handle: FileSystemFileHandle | null): void {
+  storedFileHandle = handle
+}
+
+export function getStoredFileHandle(): FileSystemFileHandle | null {
+  return storedFileHandle
+}
+
+/**
+ * Checks the most-recent entry in recentFilesStore. If the handle already has
+ * 'granted' readwrite permission (no user gesture required), sets storedFileHandle
+ * and returns true. Does NOT call requestPermission — that requires a user gesture.
+ */
+export async function restoreStoredFileHandleFromRecents(): Promise<boolean> {
+  const { recentFiles } = useRecentFilesStore.getState()
+  if (recentFiles.length === 0) return false
+  const mostRecent = recentFiles[0]
+  if (!mostRecent.handle) return false
+  try {
+    const handleWithQuery = mostRecent.handle as FileSystemHandleWithQueryPermission
+    const permission = await handleWithQuery.queryPermission({ mode: 'readwrite' })
+    if (permission === 'granted') {
+      storedFileHandle = mostRecent.handle
+      return true
+    }
+    return false
+  } catch {
+    return false
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +241,7 @@ function saveWithDownload(json: string, title: string): void {
   URL.revokeObjectURL(url)
 }
 
-function parseFileJSON(text: string): WritinatorFile | null {
+export function parseFileJSON(text: string): WritinatorFile | null {
   try {
     const data = JSON.parse(text)
     return migrateFile(data)
