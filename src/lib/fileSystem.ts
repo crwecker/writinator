@@ -16,6 +16,11 @@ const FILE_EXTENSION = '.writinator'
 const MIME_TYPE = 'application/json'
 
 let storedFileHandle: FileSystemFileHandle | null = null
+let lastLocalWriteAt = 0
+
+export function getLastLocalWriteAt(): number {
+  return lastLocalWriteAt
+}
 
 // ---------------------------------------------------------------------------
 // Handle state observable
@@ -131,6 +136,7 @@ export async function quickSave(
   const writable = await storedFileHandle.createWritable()
   await writable.write(json)
   await writable.close()
+  lastLocalWriteAt = Date.now()
   useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now())
   return true
 }
@@ -281,6 +287,7 @@ async function saveWithFileSystemAccess(
   const writable = await storedFileHandle!.createWritable()
   await writable.write(json)
   await writable.close()
+  lastLocalWriteAt = Date.now()
 }
 
 function saveWithDownload(json: string, title: string): void {

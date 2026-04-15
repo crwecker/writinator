@@ -10,7 +10,8 @@ import { ExportDialog } from './ExportDialog'
 import { HamburgerMenu, type MenuAction } from './HamburgerMenu'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { quickSave, saveAsNewFile } from '../../lib/fileSystem'
+import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt, clearFileHandle } from '../../lib/fileSystem'
+import { reconcileWithFile } from '../../lib/reconcile'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { FindInBook } from './FindInBook'
@@ -188,7 +189,7 @@ export function AppShell() {
     function handleKeyDown(e: KeyboardEvent) {
       const km = useKeybindingStore.getState().keymap
 
-      if (matchesEvent(km.toggleTypewriter, e)) {
+      if (km.toggleTypewriter && matchesEvent(km.toggleTypewriter, e)) {
         e.preventDefault()
         toggleDistractionFree()
         return
@@ -198,7 +199,7 @@ export function AppShell() {
         setFindOpen((prev) => !prev)
         return
       }
-      if (matchesEvent(km.snapshotHistory, e)) {
+      if (km.snapshotHistory && matchesEvent(km.snapshotHistory, e)) {
         e.preventDefault()
         setPublishedSnapshotsOpen((prev) => !prev)
         return
@@ -208,22 +209,22 @@ export function AppShell() {
         setExportDialogOpen((prev) => !prev)
         return
       }
-      if (matchesEvent(km.toggleFileTree, e)) {
+      if (km.toggleFileTree && matchesEvent(km.toggleFileTree, e)) {
         e.preventDefault()
         useEditorStore.getState().toggleSidebar()
         return
       }
-      if (matchesEvent(km.saveToDisk, e)) {
+      if (km.saveToDisk && matchesEvent(km.saveToDisk, e)) {
         e.preventDefault()
         handleSaveToDisk()
         return
       }
-      if (matchesEvent(km.toggleRenderMode, e)) {
+      if (km.toggleRenderMode && matchesEvent(km.toggleRenderMode, e)) {
         e.preventDefault()
         toggleRenderMode()
         return
       }
-      if (matchesEvent(km.closeBook, e)) {
+      if (km.closeBook && matchesEvent(km.closeBook, e)) {
         e.preventDefault()
         void useStoryletStore.getState().closeBook()
         return
@@ -258,6 +259,57 @@ export function AppShell() {
       }
     }, 5 * 60 * 1000)
     return () => clearInterval(interval)
+  }, [])
+
+  // mtime poll — detect external edits to the connected file and reconcile
+  useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | null = null
+    let lastSeenMtime = 0
+    const TOLERANCE_MS = 200
+
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') return
+      const handle = getStoredFileHandle()
+      if (!handle) return
+      try {
+        const f = await handle.getFile()
+        const mtime = f.lastModified
+        if (lastSeenMtime === 0) { lastSeenMtime = mtime; return }
+        if (mtime > lastSeenMtime) {
+          const lastLocal = getLastLocalWriteAt()
+          // If the mtime is within tolerance of our last local write, it was us.
+          if (Math.abs(mtime - lastLocal) < TOLERANCE_MS || mtime <= lastLocal) {
+            lastSeenMtime = mtime
+            return
+          }
+          lastSeenMtime = mtime
+          await reconcileWithFile()
+        }
+      } catch {
+        // Handle may have been revoked — ignore
+      }
+    }
+
+    const start = () => {
+      if (intervalId != null) return
+      intervalId = setInterval(() => { void tick() }, 3000)
+      void tick()
+    }
+    const stop = () => {
+      if (intervalId != null) { clearInterval(intervalId); intervalId = null }
+    }
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') start()
+      else stop()
+    }
+
+    start()
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [])
 
   // Coin pulse animation when balance changes
@@ -333,6 +385,7 @@ export function AppShell() {
   const hamburgerItems: MenuAction[] = [
     { action: 'exportBook', label: 'Export book…', onSelect: () => setExportDialogOpen(true) },
     { action: 'saveToDisk', label: 'Save to disk', onSelect: handleSaveToDisk },
+    { action: 'disconnectFile', label: 'Disconnect file', onSelect: () => { clearFileHandle() } },
     { action: 'toggleTypewriter', label: 'Toggle typewriter mode', onSelect: toggleDistractionFree },
     { action: 'toggleRenderMode', label: 'Cycle presentation', onSelect: toggleRenderMode },
     { action: 'toggleFileTree', label: 'Toggle file tree', onSelect: () => useEditorStore.getState().toggleSidebar() },

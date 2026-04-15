@@ -120,7 +120,7 @@ export function HamburgerMenu({ items }: Props) {
                   }`}
                   title="Click to rebind"
                 >
-                  {isEditing ? 'Press key…' : comboToString(keymap[item.action])}
+                  {isEditing ? 'Press key…' : (keymap[item.action] ? comboToString(keymap[item.action]!) : '—')}
                 </button>
               </div>
             )

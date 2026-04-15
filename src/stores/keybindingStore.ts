@@ -13,6 +13,8 @@ export type ActionName =
   | 'insertStatMarker'
   | 'exportBook'
   | 'findInBook'
+  | 'disconnectFile'
+  | 'openFile'
 
 export interface KeyCombo {
   key: string  // e.g. 'f', 's', 'h'
@@ -21,7 +23,7 @@ export interface KeyCombo {
   alt?: boolean
 }
 
-export type KeyMap = Record<ActionName, KeyCombo>
+export type KeyMap = Partial<Record<ActionName, KeyCombo>>
 
 const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
 
@@ -36,6 +38,8 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   insertStatMarker: 'Insert stat change',
   exportBook: 'Export book',
   findInBook: 'Find in book',
+  disconnectFile: 'Disconnect file',
+  openFile: 'Open file',
 }
 
 export const DEFAULT_KEYMAP: KeyMap = {
