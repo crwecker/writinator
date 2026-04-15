@@ -2,6 +2,7 @@ import type { WritinatorFile } from '../types'
 import { getStoredFileHandle, parseFileJSON } from './fileSystem'
 import { createSnapshot } from '../stores/snapshotStore'
 import { useStoryletStore } from '../stores/storyletStore'
+import { showToast } from '../stores/genericToastStore'
 
 export type ReconcileResult =
   | { kind: 'in-sync' }
@@ -54,6 +55,7 @@ export async function reconcileWithFile(): Promise<ReconcileResult> {
           .filter((s) => s.content && s.content.trim() !== '')
           .map((s) => createSnapshot(s.id, s.content!, 'fileOnReconnect'))
       )
+      showToast('File on disk had different content — saved as snapshot', 'warning')
       result = { kind: 'diverged', file, localCounter, fileCounter }
     }
 

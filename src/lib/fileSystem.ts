@@ -17,6 +17,55 @@ const MIME_TYPE = 'application/json'
 
 let storedFileHandle: FileSystemFileHandle | null = null
 
+// ---------------------------------------------------------------------------
+// Handle state observable
+// ---------------------------------------------------------------------------
+
+export type HandleState = {
+  hasHandle: boolean
+  name: string | null
+  permission: 'granted' | 'prompt' | 'denied' | 'unknown'
+}
+
+let handleState: HandleState = { hasHandle: false, name: null, permission: 'unknown' }
+const handleListeners = new Set<() => void>()
+
+export function subscribeHandle(fn: () => void): () => void {
+  handleListeners.add(fn)
+  return () => handleListeners.delete(fn)
+}
+
+export function getHandleState(): HandleState {
+  return handleState
+}
+
+function notifyHandleChange(): void {
+  if (!storedFileHandle) {
+    handleState = { hasHandle: false, name: null, permission: 'unknown' }
+    for (const fn of handleListeners) fn()
+    return
+  }
+
+  // Snapshot synchronous fields immediately so subscribers see hasHandle/name right away
+  handleState = { hasHandle: true, name: storedFileHandle.name, permission: 'unknown' }
+  for (const fn of handleListeners) fn()
+
+  // Resolve permission asynchronously (fire-and-forget)
+  const handle = storedFileHandle
+  ;(handle as FileSystemHandleWithQueryPermission)
+    .queryPermission({ mode: 'readwrite' })
+    .then((perm) => {
+      // Only update if handle hasn't changed since the async call began
+      if (storedFileHandle === handle) {
+        handleState = { ...handleState, permission: perm as HandleState['permission'] }
+        for (const fn of handleListeners) fn()
+      }
+    })
+    .catch(() => {
+      // queryPermission not supported — leave as 'unknown'
+    })
+}
+
 /**
  * Whether the browser supports the File System Access API
  * (Chrome, Edge, Opera — not Firefox or Safari as of 2025)
@@ -123,6 +172,7 @@ async function openWithFileSystemAccess(): Promise<WritinatorFile | null> {
   }
 
   storedFileHandle = handle
+  notifyHandleChange()
   useRecentFilesStore.getState().addRecent({
     handle,
     name: handle.name,
@@ -162,6 +212,7 @@ function openWithFileInput(): Promise<WritinatorFile | null> {
 
 export function clearFileHandle(): void {
   storedFileHandle = null
+  notifyHandleChange()
 }
 
 export function hasFileHandle(): boolean {
@@ -170,6 +221,7 @@ export function hasFileHandle(): boolean {
 
 export function setStoredFileHandle(handle: FileSystemFileHandle | null): void {
   storedFileHandle = handle
+  notifyHandleChange()
 }
 
 export function getStoredFileHandle(): FileSystemFileHandle | null {
@@ -191,6 +243,7 @@ export async function restoreStoredFileHandleFromRecents(): Promise<boolean> {
     const permission = await handleWithQuery.queryPermission({ mode: 'readwrite' })
     if (permission === 'granted') {
       storedFileHandle = mostRecent.handle
+      notifyHandleChange()
       return true
     }
     return false
@@ -217,6 +270,7 @@ async function saveWithFileSystemAccess(
         },
       ],
     })
+    notifyHandleChange()
     useRecentFilesStore.getState().addRecent({
       handle: storedFileHandle,
       name: storedFileHandle.name,

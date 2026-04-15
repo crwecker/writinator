@@ -29,6 +29,8 @@ import { getPublishedSnapshots } from '../../stores/publishedSnapshotStore'
 import { SubStoryletLinks } from '../editor/SubStoryletLinks'
 import { LandingPage } from './LandingPage'
 import { RewardToast } from '../quests/RewardToast'
+import { GenericToast } from './GenericToast'
+import { FileConnectionBanner } from './FileConnectionBanner'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords, extractWords } from '../../lib/words'
@@ -347,11 +349,14 @@ export function AppShell() {
   return (
     <>
     <RewardToast />
+    <GenericToast />
     <MilestoneFlash />
     <WriteathonCompleteCelebration />
     <div className="flex flex-col h-screen w-screen bg-bg-darker text-gray-200 overflow-hidden">
       {/* Top bar — hidden in distraction-free mode */}
       {!distractionFree && (
+        <>
+        <FileConnectionBanner />
         <div className="flex items-center justify-between border-b border-gray-700 bg-bg-dark px-4 py-1.5 text-sm shrink-0">
           <div className="flex items-center gap-1.5 min-w-0 max-w-md">
             <button
@@ -436,6 +441,7 @@ export function AppShell() {
             <HamburgerMenu items={hamburgerItems} />
           </div>
         </div>
+        </>
       )}
 
       {/* Main content: Sidebar + Editor */}
