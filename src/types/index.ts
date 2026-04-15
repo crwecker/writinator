@@ -84,7 +84,7 @@ export interface Snapshot {
   content: string
   wordCount: number
   timestamp: string
-  trigger: 'manual' | 'switch' | 'auto' | 'closeBook' | 'bulkReplace'
+  trigger: 'manual' | 'switch' | 'auto' | 'closeBook' | 'bulkReplace' | 'orphan' | 'fileOnReconnect'
 }
 
 // ---------------------------------------------------------------------------
@@ -168,13 +168,14 @@ export interface GlobalSettings {
 }
 
 export interface WritinatorFile {
-  version: 5
+  version: 6
   book: Book
   snapshots: Record<string, Snapshot[]>         // keyed by storylet ID
   publishedSnapshots: Record<string, PublishedSnapshot[]>  // keyed by storylet ID
   globalSettings: GlobalSettings
   characters: Character[]
   markers: Record<string, StatDelta[]>          // keyed by marker UUID
+  saveCounter: number
 }
 
 // ---------------------------------------------------------------------------

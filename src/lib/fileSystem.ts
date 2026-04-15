@@ -4,6 +4,7 @@ import { getAllSnapshots } from '../stores/snapshotStore'
 import { getAllPublishedSnapshots } from '../stores/publishedSnapshotStore'
 import { useRecentFilesStore } from '../stores/recentFilesStore'
 import { useCharacterStore } from '../stores/characterStore'
+import { useStoryletStore } from '../stores/storyletStore'
 
 const FILE_EXTENSION = '.writinator'
 const MIME_TYPE = 'application/json'
@@ -29,14 +30,16 @@ export async function saveFile(
   const snapshots = await getAllSnapshots()
   const publishedSnapshots = await getAllPublishedSnapshots()
   const { characters, markers } = useCharacterStore.getState()
+  const currentCounter = useStoryletStore.getState().lastSavedCounter
   const file: WritinatorFile = {
-    version: 5,
+    version: 6,
     book,
     snapshots,
     publishedSnapshots,
     globalSettings,
     characters,
     markers,
+    saveCounter: currentCounter + 1,
   }
   const json = JSON.stringify(file, null, 2)
 
@@ -45,6 +48,7 @@ export async function saveFile(
   } else {
     saveWithDownload(json, book.title)
   }
+  useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now())
 }
 
 export async function quickSave(
@@ -56,20 +60,23 @@ export async function quickSave(
   const snapshots = await getAllSnapshots()
   const publishedSnapshots = await getAllPublishedSnapshots()
   const { characters, markers } = useCharacterStore.getState()
+  const currentCounter = useStoryletStore.getState().lastSavedCounter
   const file: WritinatorFile = {
-    version: 5,
+    version: 6,
     book,
     snapshots,
     publishedSnapshots,
     globalSettings,
     characters,
     markers,
+    saveCounter: currentCounter + 1,
   }
   const json = JSON.stringify(file, null, 2)
 
   const writable = await storedFileHandle.createWritable()
   await writable.write(json)
   await writable.close()
+  useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now())
   return true
 }
 

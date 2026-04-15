@@ -10,6 +10,8 @@ const triggerLabel: Record<Snapshot['trigger'], string> = {
   auto: 'auto',
   closeBook: 'close',
   bulkReplace: 'replace',
+  orphan: 'orphan',
+  fileOnReconnect: 'reconnect',
 }
 
 interface Props {

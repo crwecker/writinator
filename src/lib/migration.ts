@@ -120,7 +120,8 @@ function v3BookToV4(book: LegacyV3Book): Book {
   }
 }
 
-type V4File = Omit<WritinatorFile, 'version' | 'publishedSnapshots'> & { version: 4 }
+type V4File = Omit<WritinatorFile, 'version' | 'publishedSnapshots' | 'saveCounter'> & { version: 4 }
+type V5File = Omit<WritinatorFile, 'version' | 'saveCounter'> & { version: 5 }
 
 function migrateOldBook(old: OldBook): V4File {
   const storylets: Storylet[] = old.chapters.map((ch) => ({
@@ -155,7 +156,7 @@ function migrateOldBook(old: OldBook): V4File {
   }
 }
 
-function migrateToV5(v4: V4File): WritinatorFile {
+function migrateToV5(v4: V4File): V5File {
   return {
     version: 5,
     book: v4.book,
@@ -167,17 +168,55 @@ function migrateToV5(v4: V4File): WritinatorFile {
   }
 }
 
+function isV6File(data: Record<string, unknown>): boolean {
+  return (
+    data.version === 6 &&
+    typeof data.saveCounter === 'number' &&
+    isRecord(data.book) &&
+    typeof (data.book as Record<string, unknown>).id === 'string' &&
+    typeof (data.book as Record<string, unknown>).title === 'string' &&
+    Array.isArray((data.book as Record<string, unknown>).storylets)
+  )
+}
+
+function migrateToV6(v5: V5File): WritinatorFile {
+  return {
+    version: 6,
+    book: v5.book,
+    snapshots: v5.snapshots,
+    publishedSnapshots: v5.publishedSnapshots,
+    globalSettings: v5.globalSettings,
+    characters: v5.characters,
+    markers: v5.markers,
+    saveCounter: 0,
+  }
+}
+
 /**
- * Migrate any file data (old/v2/v3/v4/v5) into a v5 WritinatorFile.
+ * Migrate any file data (old/v2/v3/v4/v5/v6) into a v6 WritinatorFile.
  */
 export function migrateFile(data: unknown): WritinatorFile {
   if (!isRecord(data)) {
     throw new Error('Invalid file: expected a JSON object')
   }
 
-  // v5 — already current
-  if (isV5File(data)) {
+  // v6 — already current
+  if (isV6File(data)) {
     return {
+      version: 6,
+      book: data.book as Book,
+      snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
+      publishedSnapshots: (data.publishedSnapshots ?? {}) as Record<string, PublishedSnapshot[]>,
+      globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
+      characters: (data.characters ?? []) as Character[],
+      markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
+      saveCounter: data.saveCounter as number,
+    }
+  }
+
+  // v5 → v6: add saveCounter
+  if (isV5File(data)) {
+    return migrateToV6({
       version: 5,
       book: data.book as Book,
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
@@ -185,51 +224,51 @@ export function migrateFile(data: unknown): WritinatorFile {
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: (data.characters ?? []) as Character[],
       markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
-    }
+    })
   }
 
-  // v4 → v5: add publishedSnapshots
+  // v4 → v5 → v6: add publishedSnapshots + saveCounter
   if (isV4File(data)) {
-    return migrateToV5({
+    return migrateToV6(migrateToV5({
       version: 4,
       book: data.book as Book,
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: (data.characters ?? []) as Character[],
       markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
-    })
+    }))
   }
 
-  // v3 → v4 → v5: rename book.documents → book.storylets
+  // v3 → v4 → v5 → v6: rename book.documents → book.storylets
   if (isV3File(data)) {
     const legacyBook = data.book as unknown as LegacyV3Book
-    return migrateToV5({
+    return migrateToV6(migrateToV5({
       version: 4,
       book: v3BookToV4(legacyBook),
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: (data.characters ?? []) as Character[],
       markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
-    })
+    }))
   }
 
-  // v2 → v4 → v5: add empty characters + markers, rename documents → storylets
+  // v2 → v4 → v5 → v6: add empty characters + markers, rename documents → storylets
   if (isV2File(data)) {
     const legacyBook = data.book as unknown as LegacyV3Book
-    return migrateToV5({
+    return migrateToV6(migrateToV5({
       version: 4,
       book: v3BookToV4(legacyBook),
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       globalSettings: flattenGlobalSettings(data.globalSettings as GlobalSettings | undefined),
       characters: [],
       markers: {},
-    })
+    }))
   }
 
-  // Old format: bare Book with chapters → v4 → v5
+  // Old format: bare Book with chapters → v4 → v5 → v6
   if (isOldFormat(data)) {
     const v4 = migrateOldBook(data as OldBook)
-    return migrateToV5(v4)
+    return migrateToV6(migrateToV5(v4))
   }
 
   throw new Error('Invalid file: unrecognized format')

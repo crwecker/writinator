@@ -39,6 +39,8 @@ interface StoryletState {
   activeStoryletId: string | null
   globalSettings: GlobalSettings
   hasHydrated: boolean
+  lastSavedCounter: number
+  lastSavedAt: number | null
   _contentUpdateTimer: ReturnType<typeof setTimeout> | null
   _pendingContent: string | null
 
@@ -65,6 +67,9 @@ interface StoryletState {
   // Content
   updateStoryletContent: (content: string) => void
   _flushContentUpdate: () => void
+
+  // Save tracking
+  setLastSaved: (counter: number, at: number) => void
 
   // Global settings
   setGlobalSettings: (settings: GlobalSettings) => void
@@ -165,6 +170,8 @@ export const useStoryletStore = create<StoryletState>()(
       activeStoryletId: null,
       globalSettings: {},
       hasHydrated: false,
+      lastSavedCounter: 0,
+      lastSavedAt: null,
       _contentUpdateTimer: null,
       _pendingContent: null,
 
@@ -538,6 +545,10 @@ export const useStoryletStore = create<StoryletState>()(
         set({ _contentUpdateTimer: timer, _pendingContent: content })
       },
 
+      setLastSaved: (counter: number, at: number) => {
+        set({ lastSavedCounter: counter, lastSavedAt: at })
+      },
+
       setGlobalSettings: (settings: GlobalSettings) => {
         set({ globalSettings: settings })
       },
@@ -689,13 +700,15 @@ export const useStoryletStore = create<StoryletState>()(
     }),
     {
       name: 'writinator-storylet',
-      version: 3,
+      version: 4,
       storage: localforageStorage,
       partialize: (state) =>
         ({
           book: state.book,
           activeStoryletId: state.activeStoryletId,
           globalSettings: state.globalSettings,
+          lastSavedCounter: state.lastSavedCounter,
+          lastSavedAt: state.lastSavedAt,
         }) as unknown as StoryletState,
       migrate: (persisted, version) => {
         if (version === 0) {
@@ -725,6 +738,12 @@ export const useStoryletStore = create<StoryletState>()(
             book.storylets = book.documents
             delete book.documents
           }
+        }
+        if (version < 4) {
+          // v3→v4: add lastSavedCounter and lastSavedAt defaults
+          const state = persisted as Record<string, unknown>
+          if (!('lastSavedCounter' in state)) state.lastSavedCounter = 0
+          if (!('lastSavedAt' in state)) state.lastSavedAt = null
         }
         // Ensure book.storylets exists (old data may use 'chapters' or 'documents')
         const state = persisted as Record<string, unknown>
