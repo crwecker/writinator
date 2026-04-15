@@ -7,6 +7,7 @@ import {
 } from '../../lib/fileSystem'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useRecentFilesStore } from '../../stores/recentFilesStore'
+import { showToast } from '../../stores/genericToastStore'
 
 // requestPermission is a Chrome-only extension to the File System Access API
 // not yet in the TypeScript lib types.
@@ -40,14 +41,25 @@ export function FileConnectionBanner() {
 
   async function handleReconnect() {
     if (!mostRecent) return
+    const handleWithPermission = mostRecent.handle as FileSystemHandleWithPermission | null
+    if (!handleWithPermission || typeof handleWithPermission.requestPermission !== 'function') {
+      showToast('Saved file reference is no longer valid — please reconnect manually.', 'warning')
+      useRecentFilesStore.getState().removeRecent(mostRecent.name)
+      return
+    }
     try {
-      const handleWithPermission = mostRecent.handle as FileSystemHandleWithPermission
       const permission = await handleWithPermission.requestPermission({ mode: 'readwrite' })
       if (permission === 'granted') {
-        await restoreStoredFileHandleFromRecents()
+        const ok = await restoreStoredFileHandleFromRecents()
+        if (!ok) {
+          showToast('Reconnect completed but the handle could not be restored.', 'warning')
+        }
+      } else {
+        showToast('Permission was not granted.', 'warning')
       }
     } catch (err) {
       console.error('Failed to reconnect file handle:', err)
+      showToast('Failed to reconnect file. See console for details.', 'warning')
     }
   }
 
