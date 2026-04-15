@@ -1,7 +1,7 @@
 import { useRecentFilesStore } from '../../stores/recentFilesStore'
 import { useStoryletStore } from '../../stores/storyletStore'
-import { openFile } from '../../lib/fileSystem'
-import type { WritinatorFile, RecentFile } from '../../types'
+import { openFile, setStoredFileHandle, parseFileJSON } from '../../lib/fileSystem'
+import type { RecentFile } from '../../types'
 
 // requestPermission is a Chrome-only extension to the File System Access API
 // not yet in the TypeScript lib types.
@@ -56,7 +56,8 @@ export function LandingPage() {
     try {
       const result = await openFile()
       if (result !== null) {
-        useStoryletStore.getState().loadFile(result)
+        await useStoryletStore.getState().loadFile(result)
+        useStoryletStore.getState().setLastSaved(result.saveCounter, Date.now())
       }
     } catch {
       // swallow user-cancel errors
@@ -66,6 +67,9 @@ export function LandingPage() {
   async function handleOpenRecent(file: RecentFile) {
     try {
       const handleWithPermission = file.handle as FileSystemHandleWithPermission
+      if (typeof handleWithPermission.requestPermission !== 'function') {
+        throw new Error('Recent file handle is invalid (dead reference)')
+      }
       const permission = await handleWithPermission.requestPermission({ mode: 'readwrite' })
       if (permission !== 'granted') {
         console.warn('Permission not granted for file:', file.name)
@@ -73,8 +77,16 @@ export function LandingPage() {
       }
       const fileData = await file.handle.getFile()
       const text = await fileData.text()
-      const parsed = JSON.parse(text) as WritinatorFile
-      useStoryletStore.getState().loadFile(parsed)
+      const parsed = parseFileJSON(text)
+      if (!parsed) throw new Error('Could not parse file')
+      setStoredFileHandle(file.handle)
+      useRecentFilesStore.getState().addRecent({
+        handle: file.handle,
+        name: file.name,
+        lastOpenedAt: Date.now(),
+      })
+      await useStoryletStore.getState().loadFile(parsed)
+      useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
     } catch (err) {
       console.error('Failed to open recent file:', err)
       useRecentFilesStore.getState().removeRecent(file.name)

@@ -141,12 +141,77 @@ export async function quickSave(
   return true
 }
 
+/**
+ * Opens the save picker. If the picked file already contains a valid
+ * WritinatorFile, does NOT overwrite — instead orphan-snapshots the current
+ * book and loads the file's content. Returns 'saved' if the file was written
+ * or 'loaded' if the file's content was loaded instead of overwritten, or
+ * 'cancelled' if the user cancelled. Null return for unsupported browsers.
+ */
 export async function saveAsNewFile(
   book: Book,
   globalSettings: GlobalSettings
-): Promise<void> {
-  storedFileHandle = null
+): Promise<'saved' | 'loaded' | 'cancelled' | null> {
+  if (!supportsFileSystemAccess()) {
+    storedFileHandle = null
+    notifyHandleChange()
+    await saveFile(book, globalSettings)
+    return 'saved'
+  }
+
+  let handle: FileSystemFileHandle
+  try {
+    handle = await window.showSaveFilePicker({
+      suggestedName: `${sanitizeFilename(book.title)}${FILE_EXTENSION}`,
+      types: [
+        {
+          description: 'Writinator Book',
+          accept: { [MIME_TYPE]: [FILE_EXTENSION] },
+        },
+      ],
+    })
+  } catch {
+    return 'cancelled'
+  }
+
+  // Check if the picked file already contains a valid WritinatorFile.
+  // If so, prefer loading over clobbering.
+  try {
+    const existing = await handle.getFile()
+    if (existing.size > 0) {
+      const text = await existing.text()
+      const parsed = parseFileJSON(text)
+      if (parsed) {
+        const currentBook = useStoryletStore.getState().book
+        if (currentBook) {
+          await snapshotBook(currentBook, 'orphan')
+        }
+        storedFileHandle = handle
+        notifyHandleChange()
+        useRecentFilesStore.getState().addRecent({
+          handle,
+          name: handle.name,
+          lastOpenedAt: Date.now(),
+        })
+        await useStoryletStore.getState().loadFile(parsed)
+        useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
+        return 'loaded'
+      }
+    }
+  } catch (err) {
+    console.warn('saveAsNewFile: could not inspect existing file, proceeding with save:', err)
+  }
+
+  // File is empty or not a Writinator file — safe to write.
+  storedFileHandle = handle
+  notifyHandleChange()
+  useRecentFilesStore.getState().addRecent({
+    handle,
+    name: handle.name,
+    lastOpenedAt: Date.now(),
+  })
   await saveFile(book, globalSettings)
+  return 'saved'
 }
 
 // ---------------------------------------------------------------------------

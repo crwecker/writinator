@@ -3,7 +3,7 @@ import {
   subscribeHandle,
   getHandleState,
   restoreStoredFileHandleFromRecents,
-  saveAsNewFile,
+  openFile,
 } from '../../lib/fileSystem'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useRecentFilesStore } from '../../stores/recentFilesStore'
@@ -20,7 +20,6 @@ export function FileConnectionBanner() {
 
   const handleState = useSyncExternalStore(subscribeHandle, getHandleState)
   const book = useStoryletStore((s) => s.book)
-  const globalSettings = useStoryletStore((s) => s.globalSettings)
   const recentFiles = useRecentFilesStore((s) => s.recentFiles)
 
   // No book loaded — banner is only for active book context
@@ -34,9 +33,18 @@ export function FileConnectionBanner() {
   // Reconnect dismissed for this session
   if (reconnectDismissed && mostRecent) return null
 
-  function handleConnect() {
+  async function handleConnect() {
     if (!book) return
-    void saveAsNewFile(book, globalSettings)
+    try {
+      const parsed = await openFile()
+      if (!parsed) return
+      await useStoryletStore.getState().loadFile(parsed)
+      useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
+      showToast(`Connected to file — your previous work saved as an orphan snapshot.`, 'success')
+    } catch (err) {
+      console.error('Failed to connect file:', err)
+      showToast('Failed to open file. See console for details.', 'warning')
+    }
   }
 
   async function handleReconnect() {
@@ -95,10 +103,10 @@ export function FileConnectionBanner() {
         Not saved to a file — changes live only in browser storage.
       </span>
       <button
-        onClick={handleConnect}
+        onClick={() => { void handleConnect() }}
         className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs transition-colors"
       >
-        Connect file
+        Connect to file…
       </button>
     </div>
   )
