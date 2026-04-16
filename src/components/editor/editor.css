@@ -90,6 +90,24 @@
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* Group fence lines collapse entirely in rendered mode — no row space */
+.cm-line.cm-group-fence-hidden {
+  display: none;
+}
+
+/* Group fence lines in source mode / on cursor line: dim as chrome, tight */
+.cm-line.cm-group-fence {
+  opacity: 0.4;
+  padding-bottom: 0 !important;
+}
+
+/* Inner group lines sit tight (mirrors <br />-joined output) with a subtle
+   left accent so the block reads as one cohesive unit */
+.cm-line.cm-group-inner {
+  padding-bottom: 0 !important;
+  box-shadow: inset 2px 0 0 rgba(110, 231, 183, 0.25);
+}
+
 /* Stat-marker dot widget (rendered in place of `<!-- stat:uuid -->`) */
 .cm-stat-marker-dot {
   display: inline-block;

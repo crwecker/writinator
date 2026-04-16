@@ -141,32 +141,32 @@ function markdownDecorations(view: EditorView): DecorationSet {
     const isCursorLine = i === cursorLine
     const groupRole = groupRoles[i]
 
-    // Group fence lines: hide when rendered, dim as chrome otherwise.
+    // Group fence lines: collapse entire row when rendered, dim as chrome otherwise.
     if (groupRole && (groupRole.kind === 'open' || groupRole.kind === 'close')) {
-      if (isRendered && (alwaysHide || !isCursorLine)) {
-        if (line.to > line.from) {
-          decorations.push({
-            from: line.from,
-            to: line.to,
-            deco: Decoration.replace({}),
-          })
-        }
-      } else {
-        decorations.push({
-          from: line.from,
-          to: line.to,
-          deco: Decoration.mark({ attributes: { style: 'opacity: 0.45;' } }),
-        })
-      }
-    }
-
-    // Inner group lines inherit the group's alignment.
-    if (groupRole && groupRole.kind === 'inner' && groupRole.align && groupRole.align !== 'left') {
+      const fenceClass = isRendered && (alwaysHide || !isCursorLine)
+        ? 'cm-group-fence-hidden'
+        : 'cm-group-fence'
       decorations.push({
         from: line.from,
         to: line.from,
-        deco: Decoration.line({ attributes: { style: `text-align: ${groupRole.align};` } }),
+        deco: Decoration.line({ class: fenceClass }),
       })
+    }
+
+    // Inner group lines: tight spacing + accent via class, plus alignment inheritance.
+    if (groupRole && groupRole.kind === 'inner') {
+      decorations.push({
+        from: line.from,
+        to: line.from,
+        deco: Decoration.line({ class: 'cm-group-inner' }),
+      })
+      if (groupRole.align && groupRole.align !== 'left') {
+        decorations.push({
+          from: line.from,
+          to: line.from,
+          deco: Decoration.line({ attributes: { style: `text-align: ${groupRole.align};` } }),
+        })
+      }
     }
 
     // Headings
