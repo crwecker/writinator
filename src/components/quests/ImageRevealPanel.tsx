@@ -23,7 +23,7 @@ import type { ImageRevealSession, QuestResult } from '../../types'
 // Types
 // ---------------------------------------------------------------------------
 
-type UserView = 'collapsed' | 'expanded'
+type UserView = 'collapsed' | 'mini' | 'expanded'
 
 interface LoadedImages {
   [sessionId: string]: HTMLImageElement
@@ -589,6 +589,7 @@ export function ImageRevealPanel() {
   // Helpers
   // ------------------------------------------------------------------
   const collapse = () => setUserView('collapsed')
+  const minimize = () => setUserView('mini')
   const expand = () => setUserView('expanded')
 
   const dismissCelebration = () => {
@@ -741,12 +742,65 @@ export function ImageRevealPanel() {
   }
 
   // ==================================================================
-  // EXPANDED — all sessions at full size, pinned as right sidebar
+  // MINI — bottom panel with small thumbnails (all sessions)
+  // ==================================================================
+  if (effectiveUserView === 'mini') {
+    return (
+      <aside className="relative flex items-center gap-2 bg-gray-900 border-t border-gray-700 w-full shrink-0 px-2 py-1.5 animate-fade-in">
+        <button
+          onClick={collapse}
+          className="absolute top-1 right-2 z-10 text-gray-500 hover:text-gray-300 text-xs leading-none p-1"
+          title="Minimize to overlay"
+        >
+          &#x2015;
+        </button>
+        <div className="flex items-center gap-2 overflow-x-auto pr-6">
+          {activeSessions.map((session) => {
+            const image = loadedImages[session.id]
+            const pct = Math.round(
+              Math.min(session.wordsWritten / session.wordGoal, 1) * 100,
+            )
+            const isTimedSession = session.timeMinutes !== undefined
+            return (
+              <button
+                key={session.id}
+                onClick={expand}
+                className="group flex items-center gap-2 rounded hover:bg-gray-800 p-1 transition-colors shrink-0"
+                title="Expand image quests"
+              >
+                {image ? (
+                  <CollapsedThumbnail session={session} image={image} />
+                ) : (
+                  <div className="w-16 h-16 rounded bg-gray-800" />
+                )}
+                <div className="flex flex-col items-start gap-0.5 pr-1">
+                  <span className="text-xs text-gray-400 tabular-nums group-hover:text-gray-300">
+                    {pct}%
+                  </span>
+                  {isTimedSession && (
+                    <SessionTimer
+                      session={session}
+                      isPaused={isPaused}
+                      pauseStartedAt={pauseStartedAt}
+                      compact
+                    />
+                  )}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </aside>
+    )
+  }
+
+  // ==================================================================
+  // EXPANDED — all sessions at full size in bottom panel
   // ==================================================================
   return (
     <aside className="relative flex flex-col bg-gray-900 border-t border-gray-700 w-full shrink-0 overflow-hidden animate-fade-in">
         <button
-          onClick={collapse}
+          onClick={minimize}
           className="absolute top-1 right-2 z-10 text-gray-500 hover:text-gray-300 text-xs leading-none p-1"
           title="Minimize"
         >
@@ -775,8 +829,20 @@ export function ImageRevealPanel() {
                 key={session.id}
                 className="shrink-0 w-[280px] border-r border-gray-800 last:border-r-0"
               >
-                {/* Image with overlaid text */}
-                <div className="relative">
+                {/* Image with overlaid text — click to minimize */}
+                <div
+                  className="relative cursor-pointer"
+                  onClick={minimize}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      minimize()
+                    }
+                  }}
+                  title="Minimize image quests"
+                >
                   <DetailCanvas session={session} image={image} />
 
                   {/* Top-left: difficulty + timer (timed only) */}
