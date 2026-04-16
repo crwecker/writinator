@@ -2,9 +2,15 @@ import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, keymap, placeholder, drawSelection, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { EditorState, Compartment, StateField, StateEffect, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import {
+  autocompletion,
+  type CompletionContext,
+  type CompletionResult,
+} from '@codemirror/autocomplete'
 import { markdown } from '@codemirror/lang-markdown'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { vim, getCM as getVimCM, Vim } from '@replit/codemirror-vim'
+import { searchEmojis } from '../../lib/emoji'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { useCharacterStore } from '../../stores/characterStore'
@@ -95,10 +101,73 @@ function markdownDecorations(view: EditorView): DecorationSet {
   // Cache document styles for heading overrides
   const docStyles = useStoryletStore.getState().globalSettings.documentStyles
 
+  // Pre-pass: map each 1-indexed line to its group role so inner lines can
+  // inherit the group's alignment and fence lines can be hidden/dimmed.
+  type GroupRole =
+    | { kind: 'open'; align: string | null }
+    | { kind: 'close'; align: string | null }
+    | { kind: 'inner'; align: string | null }
+    | null
+  const groupRoles: GroupRole[] = new Array(doc.lines + 1).fill(null)
+  {
+    const openRe = /^\{group(?::(center|right|left))?\}\s*$/
+    const closeRe = /^\{\/group\}\s*$/
+    let inGroup = false
+    let groupAlign: string | null = null
+    for (let i = 1; i <= doc.lines; i++) {
+      const t = doc.line(i).text
+      if (!inGroup) {
+        const m = t.match(openRe)
+        if (m) {
+          inGroup = true
+          groupAlign = m[1] ?? null
+          groupRoles[i] = { kind: 'open', align: groupAlign }
+        }
+        continue
+      }
+      if (closeRe.test(t)) {
+        groupRoles[i] = { kind: 'close', align: groupAlign }
+        inGroup = false
+        groupAlign = null
+        continue
+      }
+      groupRoles[i] = { kind: 'inner', align: groupAlign }
+    }
+  }
+
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i)
     const text = line.text
     const isCursorLine = i === cursorLine
+    const groupRole = groupRoles[i]
+
+    // Group fence lines: hide when rendered, dim as chrome otherwise.
+    if (groupRole && (groupRole.kind === 'open' || groupRole.kind === 'close')) {
+      if (isRendered && (alwaysHide || !isCursorLine)) {
+        if (line.to > line.from) {
+          decorations.push({
+            from: line.from,
+            to: line.to,
+            deco: Decoration.replace({}),
+          })
+        }
+      } else {
+        decorations.push({
+          from: line.from,
+          to: line.to,
+          deco: Decoration.mark({ attributes: { style: 'opacity: 0.45;' } }),
+        })
+      }
+    }
+
+    // Inner group lines inherit the group's alignment.
+    if (groupRole && groupRole.kind === 'inner' && groupRole.align && groupRole.align !== 'left') {
+      decorations.push({
+        from: line.from,
+        to: line.from,
+        deco: Decoration.line({ attributes: { style: `text-align: ${groupRole.align};` } }),
+      })
+    }
 
     // Headings
     const headingMatch = text.match(/^(#{1,3})\s/)
@@ -553,6 +622,29 @@ async function pasteStyle(view: EditorView): Promise<boolean> {
   }
 }
 
+// Emoji autocomplete source. Triggers when the cursor is immediately after
+// `:word` — selecting an option replaces the entire `:word` with the emoji
+// character. Typing just `:` alone won't open the menu; the user must type at
+// least one character so shortcodes like `http://` don't flicker the picker.
+function emojiCompletion(context: CompletionContext): CompletionResult | null {
+  const match = context.matchBefore(/:\w+/)
+  if (!match) return null
+  const query = match.text.slice(1)
+  const results = searchEmojis(query, 50)
+  if (!results.length) return null
+  return {
+    from: match.from,
+    to: match.to,
+    options: results.map(({ entry, score }) => ({
+      label: `:${entry.n}:`,
+      displayLabel: `${entry.c}  :${entry.n}:`,
+      apply: entry.c,
+      boost: score,
+    })),
+    validFor: /^:\w*$/,
+  }
+}
+
 // Typewriter mode: scrolls cursor line to vertical center on every update
 function typewriterScroll(): Extension {
   return EditorView.updateListener.of((update) => {
@@ -662,6 +754,11 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
           ...defaultKeymap,
           ...historyKeymap,
         ]),
+        autocompletion({
+          override: [emojiCompletion],
+          icons: false,
+          activateOnTyping: true,
+        }),
         markdown(),
         oneDark,
         renderModeField,

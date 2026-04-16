@@ -434,6 +434,54 @@ function wrapWithSpanStyle(view: EditorView, style: string) {
   view.focus()
 }
 
+function toggleGroup(view: EditorView) {
+  const { from, to } = view.state.selection.main
+  const doc = view.state.doc
+  const startLine = doc.lineAt(from)
+  const endLine = doc.lineAt(to)
+  const openRe = /^\{group(?::(center|right|left))?\}\s*$/
+  const closeRe = /^\{\/group\}\s*$/
+
+  const prevLine = startLine.number > 1 ? doc.line(startLine.number - 1) : null
+  const nextLine = endLine.number < doc.lines ? doc.line(endLine.number + 1) : null
+  if (prevLine && nextLine && openRe.test(prevLine.text) && closeRe.test(nextLine.text)) {
+    const prevDeleteTo = Math.min(prevLine.to + 1, doc.length)
+    const nextDeleteFrom = Math.max(nextLine.from - 1, 0)
+    view.dispatch({
+      changes: [
+        { from: prevLine.from, to: prevDeleteTo, insert: '' },
+        { from: nextDeleteFrom, to: nextLine.to, insert: '' },
+      ],
+    })
+    view.focus()
+    return
+  }
+
+  let firstAlign: string | null | undefined
+  let mixed = false
+  for (let i = startLine.number; i <= endLine.number; i++) {
+    const t = doc.line(i).text
+    if (!t.trim()) continue
+    const m = t.match(/^\{align:(center|right|left)\}\s?/)
+    const a = m ? m[1] : null
+    if (firstAlign === undefined) firstAlign = a
+    else if (firstAlign !== a) {
+      mixed = true
+      break
+    }
+  }
+  const commonAlign = !mixed && firstAlign ? firstAlign : null
+  const openLine = commonAlign ? `{group:${commonAlign}}` : '{group}'
+
+  view.dispatch({
+    changes: [
+      { from: startLine.from, to: startLine.from, insert: `${openLine}\n` },
+      { from: endLine.to, to: endLine.to, insert: `\n{/group}` },
+    ],
+  })
+  view.focus()
+}
+
 function setAlignment(view: EditorView, alignment: 'left' | 'center' | 'right') {
   const { from, to } = view.state.selection.main
   const startLine = view.state.doc.lineAt(from)
@@ -926,6 +974,13 @@ export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles
         title="Align right"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M9 12h12M3 18h18"/></svg>
+      </ToolbarButton>
+
+      <ToolbarButton
+        onClick={() => toggleGroup(editorView)}
+        title="Group lines (toggle {group}…{/group})"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 9h10M7 13h10M7 17h10"/></svg>
       </ToolbarButton>
 
       <div className="mx-1 h-5 w-px bg-gray-700" />

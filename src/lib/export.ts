@@ -35,6 +35,55 @@ export function stripPasteArtifacts(content: string): string {
   return content.replace(/\{align:(\w+)\}\s*/g, '<!--align:$1-->')
 }
 
+/** Collapse {group} / {group:align} ... {/group} regions into a single line
+ *  with <br /> separators so the published HTML renders them as one paragraph
+ *  instead of N. Per-line {align:*} directives inside a group are stripped —
+ *  the group owns alignment. Unclosed groups flush back as-is so in-progress
+ *  edits don't lose content. */
+export function mergeGroupBlocks(content: string): string {
+  const lines = content.replace(/\r\n?/g, '\n').split('\n')
+  const out: string[] = []
+  const openRe = /^\{group(?::(center|right|left))?\}\s*$/
+  const closeRe = /^\{\/group\}\s*$/
+  const innerAlignRe = /^\{align:(?:center|right|left)\}\s?/
+  let inGroup = false
+  let groupAlign: string | null = null
+  let buffer: string[] = []
+
+  for (const line of lines) {
+    if (!inGroup) {
+      const m = line.match(openRe)
+      if (m) {
+        inGroup = true
+        groupAlign = m[1] ?? null
+        buffer = []
+        continue
+      }
+      out.push(line)
+      continue
+    }
+    if (closeRe.test(line)) {
+      const inner = buffer
+        .map((l) => l.replace(innerAlignRe, '').trimEnd())
+        .filter((l) => l.length > 0)
+      if (inner.length > 0) {
+        const prefix = groupAlign ? `{align:${groupAlign}}` : ''
+        out.push(`${prefix}${inner.join('<br />')}`)
+      }
+      inGroup = false
+      groupAlign = null
+      buffer = []
+      continue
+    }
+    buffer.push(line)
+  }
+  if (inGroup) {
+    out.push(groupAlign ? `{group:${groupAlign}}` : '{group}')
+    for (const l of buffer) out.push(l)
+  }
+  return out.join('\n')
+}
+
 /** Insert blank lines between consecutive non-empty lines so markdown treats
  *  each as its own block. The editor stores lines separated by single `\n`
  *  and adds vertical space visually via CSS, so without this preprocessing
