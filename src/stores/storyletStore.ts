@@ -26,7 +26,7 @@ function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
   const { namedStyles, ...rest } = obj as { namedStyles?: Record<string, NamedStyle> } & Record<string, NamedStyle>
   return { ...(rest as Record<string, NamedStyle>), ...(namedStyles ?? {}) }
 }
-import { createSnapshot, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
+import { createSnapshot, getAllSnapshots, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
 import { useImageRevealStore } from './imageRevealStore'
@@ -205,11 +205,23 @@ export const useStoryletStore = create<StoryletState>()(
       },
 
       loadFile: async (file: WritinatorFile) => {
-        // Orphan-snapshot the current book before wiping state
-        // Note: these snapshots will be cleared by loadSnapshotsFromFile — acceptable per plan
         const existingBook = get().book
         if (existingBook) {
           await snapshotBook(existingBook, 'orphan')
+        }
+        // Merge current localforage snapshots (including orphans just created)
+        // into the file's snapshot data so nothing is lost during the wipe.
+        const localSnapshots = await getAllSnapshots()
+        const merged = { ...file.snapshots }
+        for (const [storyletId, local] of Object.entries(localSnapshots)) {
+          const fromFile = merged[storyletId] ?? []
+          const existingIds = new Set(fromFile.map((s) => s.id))
+          const newEntries = local.filter((s) => !existingIds.has(s.id))
+          if (newEntries.length > 0) {
+            merged[storyletId] = [...fromFile, ...newEntries]
+              .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+              .slice(0, 100)
+          }
         }
         get()._flushContentUpdate()
         set({
@@ -217,7 +229,7 @@ export const useStoryletStore = create<StoryletState>()(
           globalSettings: file.globalSettings,
           activeStoryletId: file.book.storylets[0]?.id ?? null,
         })
-        loadSnapshotsFromFile(file.snapshots)
+        loadSnapshotsFromFile(merged)
         loadPublishedSnapshotsFromFile(file.publishedSnapshots ?? {})
         useCharacterStore.getState().loadFromFile(
           file.characters ?? [],
