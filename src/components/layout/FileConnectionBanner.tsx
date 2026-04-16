@@ -30,8 +30,7 @@ export function FileConnectionBanner() {
 
   const mostRecent = recentFiles.length > 0 ? recentFiles[0] : null
 
-  // Reconnect dismissed for this session
-  if (reconnectDismissed && mostRecent) return null
+  // Reconnect dismissed — skip reconnect variant but fall through to untethered
 
   async function handleConnect() {
     if (!book) return
@@ -71,8 +70,8 @@ export function FileConnectionBanner() {
     }
   }
 
-  // Reconnect variant: no current handle but there's a recent file
-  if (!handleState.hasHandle && mostRecent) {
+  // Reconnect variant: no current handle, recent file available, not dismissed
+  if (!handleState.hasHandle && mostRecent && !reconnectDismissed) {
     return (
       <div className="w-full bg-gray-800 border-b border-gray-700 text-gray-200 text-sm px-4 py-2 flex items-center justify-between shrink-0">
         <span className="text-gray-400">
