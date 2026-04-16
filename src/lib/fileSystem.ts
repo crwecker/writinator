@@ -236,6 +236,20 @@ async function openWithFileSystemAccess(): Promise<WritinatorFile | null> {
     multiple: false,
   })
 
+  // Open picker grants read-only. Request readwrite immediately while user
+  // activation is still live, so future saves don't trigger a second dialog.
+  try {
+    const h = handle as FileSystemHandleWithQueryPermission & {
+      requestPermission(d: { mode: 'read' | 'readwrite' }): Promise<PermissionState>
+    }
+    const perm = await h.requestPermission({ mode: 'readwrite' })
+    if (perm !== 'granted') {
+      console.warn('readwrite permission not granted after open picker')
+    }
+  } catch {
+    // requestPermission not supported — fall back to being prompted on first write
+  }
+
   // Orphan-snapshot the current book before replacing it
   const currentBook = useStoryletStore.getState().book
   if (currentBook) {

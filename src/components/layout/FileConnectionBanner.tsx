@@ -40,7 +40,7 @@ export function FileConnectionBanner() {
       if (!parsed) return
       await useStoryletStore.getState().loadFile(parsed)
       useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
-      showToast(`Connected to file — your previous work saved as an orphan snapshot.`, 'success')
+      showToast('Connected to file.', 'success')
     } catch (err) {
       console.error('Failed to connect file:', err)
       showToast('Failed to open file. See console for details.', 'warning')
