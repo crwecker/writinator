@@ -13,7 +13,6 @@ export type ActionName =
   | 'insertStatMarker'
   | 'exportBook'
   | 'findInBook'
-  | 'disconnectFile'
   | 'openFile'
 
 export interface KeyCombo {
@@ -38,7 +37,6 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   insertStatMarker: 'Insert stat change',
   exportBook: 'Export book',
   findInBook: 'Find in book',
-  disconnectFile: 'Disconnect file',
   openFile: 'Open file',
 }
 

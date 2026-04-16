@@ -10,7 +10,7 @@ import { ExportDialog } from './ExportDialog'
 import { HamburgerMenu, type MenuAction } from './HamburgerMenu'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt, clearFileHandle } from '../../lib/fileSystem'
+import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt } from '../../lib/fileSystem'
 import { reconcileWithFile } from '../../lib/reconcile'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
@@ -385,7 +385,6 @@ export function AppShell() {
   const hamburgerItems: MenuAction[] = [
     { action: 'exportBook', label: 'Export book…', onSelect: () => setExportDialogOpen(true) },
     { action: 'saveToDisk', label: 'Save to disk', onSelect: handleSaveToDisk },
-    { action: 'disconnectFile', label: 'Disconnect file', onSelect: () => { clearFileHandle() } },
     { action: 'toggleTypewriter', label: 'Toggle typewriter mode', onSelect: toggleDistractionFree },
     { action: 'toggleRenderMode', label: 'Cycle presentation', onSelect: toggleRenderMode },
     { action: 'toggleFileTree', label: 'Toggle file tree', onSelect: () => useEditorStore.getState().toggleSidebar() },
