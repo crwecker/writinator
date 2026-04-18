@@ -40,7 +40,7 @@ import { JourneyBar } from './JourneyBar'
 import { DailyTarget } from './DailyTarget'
 import { MilestoneFlash } from './MilestoneFlash'
 import { WriteathonCompleteCelebration } from '../quests/WriteathonCompleteCelebration'
-import { MetricsPopover } from './MetricsPopover'
+import { MetricsBar } from './MetricsBar'
 
 export function AppShell() {
   const [wordCount, setWordCount] = useState(0)
@@ -116,9 +116,6 @@ export function AppShell() {
     }
     setEditingStoryletTitle(false)
   }, [storyletTitleValue, activeStoryletId, activeStorylet?.name, renameStorylet])
-
-  const [metricsOpen, setMetricsOpen] = useState(false)
-  const metricsTriggerRef = useRef<HTMLButtonElement>(null)
 
   const handleWordCountChange = useCallback((c: number) => setWordCount(c), [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
@@ -596,24 +593,7 @@ export function AppShell() {
 
       {/* Bottom bar — minimal in distraction-free mode */}
       <div className={`flex items-center justify-between border-t border-gray-700 bg-bg-dark px-4 py-1 text-xs shrink-0 ${distractionFree ? 'opacity-20 hover:opacity-60 transition-opacity' : ''}`}>
-        <div className="relative">
-          <button
-            ref={metricsTriggerRef}
-            data-testid="metrics-bar-trigger"
-            onClick={() => setMetricsOpen((v) => !v)}
-            className="text-gray-500 tabular-nums transition-colors hover:text-gray-300 cursor-pointer"
-            title="Writing metrics"
-          >
-            {wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}
-            <span className="mx-1.5 text-gray-600">|</span>
-            {bookWordCount.toLocaleString()} book
-          </button>
-          <MetricsPopover
-            open={metricsOpen}
-            onClose={() => setMetricsOpen(false)}
-            anchorRef={metricsTriggerRef}
-          />
-        </div>
+        <MetricsBar wordCount={wordCount} bookWordCount={bookWordCount} />
         <DailyTarget bookWordCount={bookWordCount} />
         <div className="flex items-center gap-3">
           <button

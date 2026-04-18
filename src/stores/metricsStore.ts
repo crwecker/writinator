@@ -127,11 +127,16 @@ export const useMetricsStore = create<MetricsState>()(
     {
       name: 'writinator-metrics',
       storage: localforageStorage,
-      version: 0,
+      version: 1,
       migrate: (persisted, version) => {
-        void version
-        // Stub — future versions will populate migration logic here
-        return persisted as MetricsState
+        if (!persisted || typeof persisted !== 'object') return persisted as MetricsState
+        const s = persisted as Partial<MetricsState>
+        if (version < 1) {
+          if (!Array.isArray(s.pinnedMetrics) || s.pinnedMetrics.length === 0) {
+            return { ...s, pinnedMetrics: ['storyletWords', 'bookWords'] as MetricKey[] } as MetricsState
+          }
+        }
+        return s as MetricsState
       },
       partialize: (state) =>
         ({
