@@ -1,4 +1,4 @@
-import type { DailyMetricBucket } from '../types'
+import type { DailyMetricBucket, MetricsState } from '../types'
 
 /**
  * Returns today's date key in YYYY-MM-DD format using local time.
@@ -57,4 +57,16 @@ export function aggregateRange(
  */
 export function formatNumber(n: number): string {
   return n.toLocaleString()
+}
+
+/**
+ * Returns the gross and net totals for the current session.
+ * Returns {gross: 0, net: 0} when no session is active.
+ */
+export function currentSessionTotals(state: MetricsState): {
+  gross: number
+  net: number
+} {
+  if (!state.session) return { gross: 0, net: 0 }
+  return { gross: state.session.gross, net: state.session.net }
 }

@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { MetricKey, MetricsState } from '../types'
+import type { DailyMetricBucket, MetricKey, MetricsState } from '../types'
+import { todayKey } from '../lib/metrics'
 
 const localforageStorage = createJSONStorage<MetricsState>(() => ({
   getItem: async (name: string) => {
@@ -30,10 +31,43 @@ export const useMetricsStore = create<MetricsState>()(
         newCount: number,
         timestamp: number,
       ) => {
-        // Implemented in Phase 2
-        void oldCount
-        void newCount
-        void timestamp
+        const delta = newCount - oldCount
+        if (delta === 0) return
+
+        const key = todayKey(timestamp)
+        const { dayBuckets, session } = get()
+
+        const existing: DailyMetricBucket = dayBuckets[key] ?? {
+          gross: 0,
+          net: 0,
+          minutesActive: 0,
+          lastMinuteIndex: null,
+        }
+
+        const currentMinuteIndex = Math.floor(timestamp / 60_000)
+        const minutesActiveIncrement =
+          existing.lastMinuteIndex !== currentMinuteIndex ? 1 : 0
+
+        const updatedBucket: DailyMetricBucket = {
+          gross: delta > 0 ? existing.gross + delta : existing.gross,
+          net: existing.net + delta,
+          minutesActive: existing.minutesActive + minutesActiveIncrement,
+          lastMinuteIndex: currentMinuteIndex,
+        }
+
+        const updatedSession =
+          session !== null
+            ? {
+                ...session,
+                gross: delta > 0 ? session.gross + delta : session.gross,
+                net: session.net + delta,
+              }
+            : null
+
+        set({
+          dayBuckets: { ...dayBuckets, [key]: updatedBucket },
+          ...(updatedSession !== null ? { session: updatedSession } : {}),
+        })
       },
 
       recordWpmSample: (delta: number, timestamp: number) => {
@@ -88,3 +122,8 @@ export const useMetricsStore = create<MetricsState>()(
     }
   )
 )
+
+if (import.meta.env.DEV) {
+  ;(globalThis as unknown as { __metricsStore?: unknown }).__metricsStore =
+    useMetricsStore
+}

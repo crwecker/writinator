@@ -31,6 +31,7 @@ import { loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
 import { useImageRevealStore } from './imageRevealStore'
 import { useWriteathonStore } from './writeathonStore'
+import { useMetricsStore } from './metricsStore'
 import { useCharacterStore } from './characterStore'
 import { countWords } from '../lib/words'
 
@@ -542,6 +543,7 @@ export const useStoryletStore = create<StoryletState>()(
           if (delta > 0) {
             useImageRevealStore.getState().addWords(delta)
           }
+          useMetricsStore.getState().recordDelta(oldWords, newWords, Date.now())
           set({
             book: {
               ...book,
