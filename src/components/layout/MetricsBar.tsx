@@ -3,6 +3,7 @@ import { useMetricsStore } from '../../stores/metricsStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { getMetricDisplayValue } from '../../lib/metrics'
 import { MetricsPopover } from './MetricsPopover'
+import { MetricsGraphModal } from './MetricsGraphModal'
 import type { MetricKey } from '../../types'
 
 interface MetricsBarProps {
@@ -35,6 +36,7 @@ function pillLabel(key: MetricKey, value: string, wordCount: number): string {
 
 export function MetricsBar({ wordCount, bookWordCount }: MetricsBarProps) {
   const [open, setOpen] = useState(false)
+  const [graphOpen, setGraphOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [, setTick] = useState(0)
 
@@ -109,7 +111,13 @@ export function MetricsBar({ wordCount, bookWordCount }: MetricsBarProps) {
           })
         )}
       </button>
-      <MetricsPopover open={open} onClose={() => setOpen(false)} anchorRef={triggerRef} />
+      <MetricsPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        onShowGraph={() => { setOpen(false); setGraphOpen(true) }}
+      />
+      <MetricsGraphModal open={graphOpen} onClose={() => setGraphOpen(false)} />
     </div>
   )
 }

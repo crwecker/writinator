@@ -21,9 +21,10 @@ interface MetricsPopoverProps {
   open: boolean
   onClose: () => void
   anchorRef: React.RefObject<HTMLElement | null>
+  onShowGraph: () => void
 }
 
-export function MetricsPopover({ open, onClose, anchorRef }: MetricsPopoverProps) {
+export function MetricsPopover({ open, onClose, anchorRef, onShowGraph }: MetricsPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null)
   // Tick state forces re-render every 500ms when open, so WPM stays live
   const [, setTick] = useState(0)
@@ -143,9 +144,12 @@ export function MetricsPopover({ open, onClose, anchorRef }: MetricsPopoverProps
       <div className="my-2 border-t border-gray-800" />
 
       <button
-        disabled
-        title="Coming in phase 6"
-        className="w-full text-left px-3 py-1.5 text-sm text-gray-500 cursor-not-allowed flex items-center gap-2"
+        title="Show metrics graph"
+        className="w-full text-left px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 rounded flex items-center gap-2 transition-colors"
+        onClick={() => {
+          onClose()
+          onShowGraph()
+        }}
       >
         <LineChart size={14} />
         Show graph
