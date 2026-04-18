@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { ImageRevealSession, ActiveEffect } from '../types'
+import type { ActiveEffect, ImageRevealFileData, ImageRevealSession } from '../types'
 import { getWeaponMultiplier, getArmorTimeBonus, getItemById } from '../lib/items'
 import { calculateDifficulty, calculateQuestReward } from '../lib/questRewards'
 import { getTimerState } from '../lib/timer'
@@ -459,3 +459,25 @@ export const useImageRevealStore = create<ImageRevealState>()(
     }
   )
 )
+
+// ---------------------------------------------------------------------------
+// File serialization helpers — used by fileSystem.ts section registry
+// ---------------------------------------------------------------------------
+
+export function serializeImageReveal(): ImageRevealFileData {
+  const { activeSessions, completedSessions, isPaused, pauseStartedAt, activeEffects } =
+    useImageRevealStore.getState()
+  return { activeSessions, completedSessions, isPaused, pauseStartedAt, activeEffects }
+}
+
+export function hydrateImageReveal(data: ImageRevealFileData | undefined): void {
+  if (data === undefined) return
+  // Leave transient timer intervals (managed externally) untouched — only set persisted fields.
+  useImageRevealStore.setState({
+    activeSessions: data.activeSessions,
+    completedSessions: data.completedSessions,
+    isPaused: data.isPaused,
+    pauseStartedAt: data.pauseStartedAt,
+    activeEffects: data.activeEffects,
+  })
+}

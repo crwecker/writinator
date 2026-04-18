@@ -29,10 +29,11 @@ function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
 import { createSnapshot, getAllSnapshots, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
 import { clearFileHandle } from '../lib/fileSystem'
-import { useImageRevealStore } from './imageRevealStore'
-import { useWriteathonStore } from './writeathonStore'
-import { useMetricsStore } from './metricsStore'
+import { useImageRevealStore, hydrateImageReveal } from './imageRevealStore'
+import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
+import { useMetricsStore, hydrateMetrics } from './metricsStore'
 import { useCharacterStore } from './characterStore'
+import { hydratePlayer } from './playerStore'
 import { countWords } from '../lib/words'
 
 interface StoryletState {
@@ -236,6 +237,11 @@ export const useStoryletStore = create<StoryletState>()(
           file.characters ?? [],
           file.markers ?? {}
         )
+        // Hydrate cross-store sections (v7+). Missing sections = no-op, preserving localforage state.
+        hydratePlayer(file.player)
+        hydrateImageReveal(file.quests)
+        hydrateWriteathon(file.writeathon)
+        hydrateMetrics(file.metrics)
       },
 
       renameBook: (title: string) => {

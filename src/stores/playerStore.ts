@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { PlayerStats } from '../types'
+import type { PlayerFileData, PlayerStats } from '../types'
 import { getItemById } from '../lib/items'
 
 interface PlayerState {
@@ -147,3 +147,26 @@ export const usePlayerStore = create<PlayerState>()(
     }
   )
 )
+
+// ---------------------------------------------------------------------------
+// File serialization helpers — used by fileSystem.ts section registry
+// ---------------------------------------------------------------------------
+
+export function serializePlayer(): PlayerFileData {
+  const { coins, ownedItems, equippedWeapon, equippedArmor, consumableInventory, questStats, retroactiveGrantApplied } =
+    usePlayerStore.getState()
+  return { coins, ownedItems, equippedWeapon, equippedArmor, consumableInventory, questStats, retroactiveGrantApplied }
+}
+
+export function hydratePlayer(data: PlayerFileData | undefined): void {
+  if (data === undefined) return
+  usePlayerStore.setState({
+    coins: data.coins,
+    ownedItems: data.ownedItems,
+    equippedWeapon: data.equippedWeapon,
+    equippedArmor: data.equippedArmor,
+    consumableInventory: data.consumableInventory,
+    questStats: data.questStats,
+    retroactiveGrantApplied: data.retroactiveGrantApplied,
+  })
+}

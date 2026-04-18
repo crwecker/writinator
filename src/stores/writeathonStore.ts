@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { WriteathonConfig, WriteathonMilestone, BoardQuest } from '../types'
+import type { BoardQuest, WriteathonConfig, WriteathonFileData, WriteathonMilestone } from '../types'
 import { calculateDailyTarget, createMilestones } from '../lib/writeathon'
 import { usePlayerStore } from './playerStore'
 import { useImageRevealStore } from './imageRevealStore'
@@ -252,3 +252,24 @@ useImageRevealStore.subscribe((state, prevState) => {
     if (quest) completeBoardQuest(quest.id)
   }
 })
+
+// ---------------------------------------------------------------------------
+// File serialization helpers — used by fileSystem.ts section registry
+// ---------------------------------------------------------------------------
+
+export function serializeWriteathon(): WriteathonFileData {
+  const { config, milestones, villagerQuests, activeBoardQuests, dailyQuestAccepted } =
+    useWriteathonStore.getState()
+  return { config, milestones, villagerQuests, activeBoardQuests, dailyQuestAccepted }
+}
+
+export function hydrateWriteathon(data: WriteathonFileData | undefined): void {
+  if (data === undefined) return
+  useWriteathonStore.setState({
+    config: data.config,
+    milestones: data.milestones,
+    villagerQuests: data.villagerQuests,
+    activeBoardQuests: data.activeBoardQuests,
+    dailyQuestAccepted: data.dailyQuestAccepted,
+  })
+}

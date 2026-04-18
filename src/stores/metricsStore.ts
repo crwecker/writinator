@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { DailyMetricBucket, MetricKey, MetricsState } from '../types'
+import type { DailyMetricBucket, MetricKey, MetricsFileData, MetricsState } from '../types'
 import { todayKey } from '../lib/metrics'
 
 const localforageStorage = createJSONStorage<MetricsState>(() => ({
@@ -157,4 +157,23 @@ export const useMetricsStore = create<MetricsState>()(
 if (import.meta.env.DEV) {
   ;(globalThis as unknown as { __metricsStore?: unknown }).__metricsStore =
     useMetricsStore
+}
+
+// ---------------------------------------------------------------------------
+// File serialization helpers — used by fileSystem.ts section registry
+// ---------------------------------------------------------------------------
+
+export function serializeMetrics(): MetricsFileData {
+  const { dayBuckets, session, pinnedMetrics } = useMetricsStore.getState()
+  return { dayBuckets, session, pinnedMetrics }
+}
+
+export function hydrateMetrics(data: MetricsFileData | undefined): void {
+  if (data === undefined) return
+  // wpmSamples is a transient buffer — intentionally NOT cleared here
+  useMetricsStore.setState({
+    dayBuckets: data.dayBuckets,
+    session: data.session,
+    pinnedMetrics: data.pinnedMetrics,
+  })
 }

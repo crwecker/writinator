@@ -6,6 +6,33 @@ import { getAllPublishedSnapshots } from '../stores/publishedSnapshotStore'
 import { useRecentFilesStore } from '../stores/recentFilesStore'
 import { useCharacterStore } from '../stores/characterStore'
 import { useStoryletStore } from '../stores/storyletStore'
+import { serializePlayer, hydratePlayer } from '../stores/playerStore'
+import { serializeImageReveal, hydrateImageReveal } from '../stores/imageRevealStore'
+import { serializeWriteathon, hydrateWriteathon } from '../stores/writeathonStore'
+import { serializeMetrics, hydrateMetrics } from '../stores/metricsStore'
+
+// ---------------------------------------------------------------------------
+// Section registry — add/remove cross-store sections here
+// ---------------------------------------------------------------------------
+
+interface FileSection<K extends keyof WritinatorFile> {
+  key: K
+  serialize: () => NonNullable<WritinatorFile[K]>
+  hydrate: (data: WritinatorFile[K]) => void
+}
+
+// Using a typed tuple so each element retains its specific key type
+const EXTERNAL_SECTIONS: [
+  FileSection<'player'>,
+  FileSection<'quests'>,
+  FileSection<'writeathon'>,
+  FileSection<'metrics'>,
+] = [
+  { key: 'player',     serialize: serializePlayer,     hydrate: hydratePlayer },
+  { key: 'quests',     serialize: serializeImageReveal, hydrate: hydrateImageReveal },
+  { key: 'writeathon', serialize: serializeWriteathon,  hydrate: hydrateWriteathon },
+  { key: 'metrics',    serialize: serializeMetrics,     hydrate: hydrateMetrics },
+]
 
 // queryPermission is not yet in TypeScript lib types for File System Access API
 interface FileSystemHandleWithQueryPermission extends FileSystemFileHandle {
@@ -83,24 +110,41 @@ export function supportsFileSystemAccess(): boolean {
 // Save
 // ---------------------------------------------------------------------------
 
-export async function saveFile(
+/**
+ * Builds the full WritinatorFile object from current store state.
+ * Exported so tests and visual QA can call it without triggering a file picker.
+ */
+export async function buildWritinatorFile(
   book: Book,
-  globalSettings: GlobalSettings
-): Promise<void> {
+  globalSettings: GlobalSettings,
+  saveCounter: number
+): Promise<WritinatorFile> {
   const snapshots = await getAllSnapshots()
   const publishedSnapshots = await getAllPublishedSnapshots()
   const { characters, markers } = useCharacterStore.getState()
-  const currentCounter = useStoryletStore.getState().lastSavedCounter
   const file: WritinatorFile = {
-    version: 6,
+    version: 7,
     book,
     snapshots,
     publishedSnapshots,
     globalSettings,
     characters,
     markers,
-    saveCounter: currentCounter + 1,
+    saveCounter,
   }
+  for (const section of EXTERNAL_SECTIONS) {
+    // Cast required: TypeScript can't narrow the generic K assignment through the loop
+    ;(file[section.key] as WritinatorFile[typeof section.key]) = section.serialize()
+  }
+  return file
+}
+
+export async function saveFile(
+  book: Book,
+  globalSettings: GlobalSettings
+): Promise<void> {
+  const currentCounter = useStoryletStore.getState().lastSavedCounter
+  const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1)
   const json = JSON.stringify(file, null, 2)
 
   if (supportsFileSystemAccess()) {
@@ -117,20 +161,8 @@ export async function quickSave(
 ): Promise<boolean> {
   if (!storedFileHandle) return false
 
-  const snapshots = await getAllSnapshots()
-  const publishedSnapshots = await getAllPublishedSnapshots()
-  const { characters, markers } = useCharacterStore.getState()
   const currentCounter = useStoryletStore.getState().lastSavedCounter
-  const file: WritinatorFile = {
-    version: 6,
-    book,
-    snapshots,
-    publishedSnapshots,
-    globalSettings,
-    characters,
-    markers,
-    saveCounter: currentCounter + 1,
-  }
+  const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1)
   const json = JSON.stringify(file, null, 2)
 
   const writable = await storedFileHandle.createWritable()
@@ -392,4 +424,9 @@ export function parseFileJSON(text: string): WritinatorFile | null {
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_\- ]/g, '').trim() || 'untitled'
+}
+
+if (import.meta.env.DEV) {
+  ;(globalThis as unknown as { __buildWritinatorFile?: unknown }).__buildWritinatorFile =
+    buildWritinatorFile
 }

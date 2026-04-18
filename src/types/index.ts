@@ -167,8 +167,44 @@ export interface GlobalSettings {
   documentStyles?: DocumentStyles
 }
 
+// ---------------------------------------------------------------------------
+// Cross-store file sections (version 7+)
+// ---------------------------------------------------------------------------
+
+export interface PlayerFileData {
+  coins: number
+  ownedItems: string[]
+  equippedWeapon: string
+  equippedArmor: string
+  consumableInventory: Record<string, number>
+  questStats: PlayerStats
+  retroactiveGrantApplied: boolean
+}
+
+export interface ImageRevealFileData {
+  activeSessions: ImageRevealSession[]
+  completedSessions: ImageRevealSession[]
+  isPaused: boolean
+  pauseStartedAt: number | null
+  activeEffects: ActiveEffect[]
+}
+
+export interface WriteathonFileData {
+  config: WriteathonConfig | null
+  milestones: WriteathonMilestone[]
+  villagerQuests: BoardQuest[]
+  activeBoardQuests: BoardQuest[]
+  dailyQuestAccepted: boolean
+}
+
+export interface MetricsFileData {
+  dayBuckets: Record<string, DailyMetricBucket>
+  session: SessionMetrics | null
+  pinnedMetrics: MetricKey[]
+}
+
 export interface WritinatorFile {
-  version: 6
+  version: 7
   book: Book
   snapshots: Record<string, Snapshot[]>         // keyed by storylet ID
   publishedSnapshots: Record<string, PublishedSnapshot[]>  // keyed by storylet ID
@@ -176,6 +212,11 @@ export interface WritinatorFile {
   characters: Character[]
   markers: Record<string, StatDelta[]>          // keyed by marker UUID
   saveCounter: number
+  // Cross-store sections — optional for v1-v6 back-compat (absent = no-op on load)
+  player?: PlayerFileData
+  quests?: ImageRevealFileData
+  writeathon?: WriteathonFileData
+  metrics?: MetricsFileData
 }
 
 // ---------------------------------------------------------------------------
