@@ -1,4 +1,6 @@
-import type { DailyMetricBucket, MetricsState } from '../types'
+import type { DailyMetricBucket, MetricKey, MetricsState } from '../types'
+import type { Book, Storylet } from '../types'
+import { countWords } from './words'
 
 /**
  * Returns today's date key in YYYY-MM-DD format using local time.
@@ -16,11 +18,12 @@ export function todayKey(now: number = Date.now()): string {
  * 'all' returns 0 (epoch).
  */
 export function rangeStart(
-  range: '7d' | '30d' | '90d' | 'all',
+  range: '7d' | '30d' | '90d' | '365d' | 'all',
   now: number = Date.now()
 ): number {
   if (range === 'all') return 0
-  const days = range === '7d' ? 7 : range === '30d' ? 30 : 90
+  const days =
+    range === '7d' ? 7 : range === '30d' ? 30 : range === '90d' ? 90 : 365
   return now - days * 24 * 60 * 60 * 1000
 }
 
@@ -30,7 +33,7 @@ export function rangeStart(
  */
 export function aggregateRange(
   buckets: Record<string, DailyMetricBucket>,
-  range: '7d' | '30d' | '90d' | 'all',
+  range: '7d' | '30d' | '90d' | '365d' | 'all',
   now: number = Date.now()
 ): { gross: number; net: number; days: number } {
   const start = rangeStart(range, now)
@@ -88,4 +91,62 @@ export function currentSessionTotals(state: MetricsState): {
 } {
   if (!state.session) return { gross: 0, net: 0 }
   return { gross: state.session.gross, net: state.session.net }
+}
+
+/**
+ * Returns a human-readable label and formatted value string for a given MetricKey.
+ * wpmSamples is read via metricsStore.getState() when needed — pass null to skip.
+ */
+export function getMetricDisplayValue(
+  key: MetricKey,
+  metrics: MetricsState,
+  book: Book | null,
+  activeStorylet: Storylet | null,
+  now: number = Date.now(),
+): { value: string; label: string } {
+  const { dayBuckets } = metrics
+  const tk = todayKey(now)
+
+  switch (key) {
+    case 'session': {
+      const n = metrics.session?.gross ?? 0
+      return { label: 'Session', value: formatNumber(n) }
+    }
+    case 'today': {
+      const n = dayBuckets[tk]?.gross ?? 0
+      return { label: 'Today', value: formatNumber(n) }
+    }
+    case 'todayNet': {
+      const n = dayBuckets[tk]?.net ?? 0
+      return { label: 'Today (net)', value: formatNumber(n) }
+    }
+    case 'wpm10': {
+      const wpm = computeWPM(metrics.wpmSamples, 600_000, now)
+      return { label: 'WPM (10m)', value: formatNumber(wpm) }
+    }
+    case 'week': {
+      const n = aggregateRange(dayBuckets, '7d', now).net
+      return { label: 'This week', value: formatNumber(n) }
+    }
+    case 'month': {
+      const n = aggregateRange(dayBuckets, '30d', now).net
+      return { label: 'This month', value: formatNumber(n) }
+    }
+    case 'year': {
+      const n = aggregateRange(dayBuckets, '365d', now).net
+      return { label: 'This year', value: formatNumber(n) }
+    }
+    case 'storyletWords': {
+      const n = countWords(activeStorylet?.content ?? null)
+      return { label: 'Storylet words', value: formatNumber(n) }
+    }
+    case 'bookWords': {
+      const n =
+        book?.storylets.reduce(
+          (sum, s) => sum + countWords(s.content),
+          0,
+        ) ?? 0
+      return { label: 'Book words', value: formatNumber(n) }
+    }
+  }
 }
