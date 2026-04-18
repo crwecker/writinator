@@ -13,6 +13,7 @@ import { vim, getCM as getVimCM, Vim } from '@replit/codemirror-vim'
 import { searchEmojis } from '../../lib/emoji'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
+import { useMetricsStore } from '../../stores/metricsStore'
 import { useCharacterStore } from '../../stores/characterStore'
 import { htmlToMarkdownWithStyles } from '../../lib/richPaste'
 import {
@@ -692,6 +693,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const fontSizeCompartmentRef = useRef<Compartment | null>(null)
   const typewriterCompartmentRef = useRef<Compartment | null>(null)
   const docStylesCompartmentRef = useRef<Compartment | null>(null)
+  // Cached word count for sub-second WPM delta computation. Updated on every doc change.
+  const prevWordCountRef = useRef<number>(0)
 
   // Stable callback refs
   const callbacksRef = useRef({ onWordCountChange, onVimModeChange, onEditorView })
@@ -865,10 +868,18 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             const text = update.state.doc.toString()
+            const newCount = countWords(text)
+            // WPM ring-buffer sampling — hot path, must be cheap.
+            // Only runs when docChanged; only allocates when delta > 0.
+            const delta = newCount - prevWordCountRef.current
+            if (delta > 0) {
+              useMetricsStore.getState().recordWpmSample(delta, Date.now())
+            }
+            prevWordCountRef.current = newCount
             // Defer React state updates out of CM6's synchronous update cycle
             // to prevent React re-renders from interfering with CM6 DOM updates
             queueMicrotask(() => {
-              callbacksRef.current.onWordCountChange?.(countWords(text))
+              callbacksRef.current.onWordCountChange?.(newCount)
               updateContent(text)
             })
           }
@@ -892,6 +903,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const store = useStoryletStore.getState()
     const activeStorylet = store.book?.storylets?.find((s) => s.id === store.activeStoryletId)
     if (activeStorylet?.content) {
+      // Seed prevWordCountRef so the first edit doesn't spike a huge delta
+      prevWordCountRef.current = countWords(activeStorylet.content)
       view.dispatch({ changes: { from: 0, to: 0, insert: activeStorylet.content } })
       callbacksRef.current.onWordCountChange?.(countWords(activeStorylet.content))
       loadedDocumentRef.current = { id: activeStorylet.id, version: activeStorylet.docVersion ?? 0 }

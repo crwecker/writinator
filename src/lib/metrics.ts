@@ -60,6 +60,25 @@ export function formatNumber(n: number): string {
 }
 
 /**
+ * Computes WPM over a rolling window from the transient ring buffer.
+ * windowMs defaults to 10 minutes (600_000 ms).
+ * Allocation-free: iterates in place, no intermediate arrays.
+ */
+export function computeWPM(
+  samples: Array<{ timestamp: number; delta: number }>,
+  windowMs: number = 600_000,
+  now: number = Date.now(),
+): number {
+  const cutoff = now - windowMs
+  let sum = 0
+  for (const s of samples) {
+    if (s.timestamp >= cutoff && s.delta > 0) sum += s.delta
+  }
+  const minutes = windowMs / 60_000
+  return Math.round(sum / minutes)
+}
+
+/**
  * Returns the gross and net totals for the current session.
  * Returns {gross: 0, net: 0} when no session is active.
  */

@@ -71,17 +71,43 @@ export const useMetricsStore = create<MetricsState>()(
       },
 
       recordWpmSample: (delta: number, timestamp: number) => {
-        // Implemented in Phase 3
-        void delta
-        void timestamp
+        // NOTE: wpmSamples is intentionally excluded from `partialize` (transient).
+        // Do NOT subscribe to wpmSamples via useMetricsStore(s => s.wpmSamples) in
+        // React components — it fires on every keystroke. Read via getState() in
+        // callbacks or compute WPM on demand.
+        if (delta <= 0) return
+        const now = timestamp
+        const cutoff = now - 600_000 // 10 minutes
+        const { wpmSamples } = get()
+        // Prune old samples + append new one (immutable array so Zustand notifies subscribers)
+        let pruned = wpmSamples.filter((s) => s.timestamp >= cutoff)
+        pruned = [...pruned, { timestamp, delta }]
+        // Bound array size to prevent unbounded growth
+        if (pruned.length > 5000) {
+          pruned = pruned.slice(-3000)
+        }
+        set({ wpmSamples: pruned })
       },
 
       startSession: () => {
-        // Implemented in Phase 3
+        const { session } = get()
+        const fourHours = 4 * 60 * 60 * 1000
+        if (session !== null && Date.now() - session.startedAt < fourHours) {
+          // Reuse existing session — still within the 4-hour window
+          return
+        }
+        set({
+          session: {
+            sessionId: crypto.randomUUID(),
+            startedAt: Date.now(),
+            gross: 0,
+            net: 0,
+          },
+        })
       },
 
       resetSession: () => {
-        // Implemented in Phase 3
+        set({ session: null })
       },
 
       togglePin: (key: MetricKey) => {

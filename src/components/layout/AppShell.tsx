@@ -35,6 +35,7 @@ import { FileConnectionBanner } from './FileConnectionBanner'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords, extractWords } from '../../lib/words'
+import { useMetricsStore } from '../../stores/metricsStore'
 import { JourneyBar } from './JourneyBar'
 import { DailyTarget } from './DailyTarget'
 import { MilestoneFlash } from './MilestoneFlash'
@@ -128,6 +129,11 @@ export function AppShell() {
 
   const closeDeltaEditor = useCallback(() => {
     setDeltaEditorState((prev) => ({ ...prev, open: false }))
+  }, [])
+
+  // Start (or reuse) a writing session on app mount. Reuses any session within 4h.
+  useEffect(() => {
+    useMetricsStore.getState().startSession()
   }, [])
 
   // Delegated click listener for stat-marker dots.
@@ -591,7 +597,6 @@ export function AppShell() {
           <span className="mx-1.5 text-gray-600">|</span>
           {bookWordCount.toLocaleString()} book
         </span>
-        <span className="mx-1.5 text-gray-600">|</span>
         <DailyTarget bookWordCount={bookWordCount} />
         <div className="flex items-center gap-3">
           <button
