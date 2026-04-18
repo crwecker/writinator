@@ -474,3 +474,49 @@ export interface BoardQuest {
   createdAt: string
   completedAt?: string
 }
+
+// ---------------------------------------------------------------------------
+// Writing Metrics
+// ---------------------------------------------------------------------------
+
+export type MetricKey =
+  | 'session'
+  | 'today'
+  | 'todayNet'
+  | 'wpm10'
+  | 'week'
+  | 'month'
+  | 'year'
+  | 'storyletWords'
+  | 'bookWords'
+
+export interface DailyMetricBucket {
+  gross: number
+  net: number
+  minutesActive: number
+  lastMinuteIndex: number | null
+}
+
+export interface SessionMetrics {
+  sessionId: string
+  startedAt: number
+  gross: number
+  net: number
+}
+
+export interface MetricsState {
+  dayBuckets: Record<string, DailyMetricBucket>
+  session: SessionMetrics | null
+  pinnedMetrics: MetricKey[]
+  hasHydrated: boolean
+  /** Transient ring buffer for WPM calculation — not persisted. */
+  wpmSamples: Array<{ timestamp: number; delta: number }>
+
+  // Actions
+  recordDelta: (oldCount: number, newCount: number, timestamp: number) => void
+  recordWpmSample: (delta: number, timestamp: number) => void
+  startSession: () => void
+  resetSession: () => void
+  togglePin: (key: MetricKey) => void
+  isPinned: (key: MetricKey) => boolean
+}
