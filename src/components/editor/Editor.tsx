@@ -1037,21 +1037,31 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             ok: boolean
             markerCount: number
             statblockCount: number
+            noteCount: number
             length: number
             preview: string
           }
         }).__exportSmokeTest = () => {
           const book = useStoryletStore.getState().book
           if (!book) {
-            return { ok: false, markerCount: 0, statblockCount: 0, length: 0, preview: '(no book)' }
+            return {
+              ok: false,
+              markerCount: 0,
+              statblockCount: 0,
+              noteCount: 0,
+              length: 0,
+              preview: '(no book)',
+            }
           }
           const out = mod.renderBookAsMarkdown(book)
           const markerCount = (out.match(/<!--\s*stat:/g) ?? []).length
           const statblockCount = (out.match(/<!--\s*statblock:/g) ?? []).length
+          const noteCount = (out.match(/<!--\s*note:/g) ?? []).length
           return {
-            ok: markerCount === 0,
+            ok: markerCount === 0 && noteCount === 0,
             markerCount,
             statblockCount,
+            noteCount,
             length: out.length,
             preview: out.slice(0, 400),
           }

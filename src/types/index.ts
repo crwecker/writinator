@@ -456,6 +456,26 @@ export type ConsistencyIssue =
       markerId: string
     }
 
+export type NoteConsistencyIssue =
+  | {
+      /** Store has an entry for id, but no storylet.content contains the anchor. */
+      kind: 'orphanNote'
+      id: string
+      storyletId: undefined
+    }
+  | {
+      /** Content has an anchor for id, but no store entry exists. */
+      kind: 'inverseOrphanNote'
+      id: string
+      storyletId: string
+    }
+  | {
+      /** Store has storylet notes for a storyletId that no longer exists in the book. */
+      kind: 'orphanStoryletNote'
+      id: undefined
+      storyletId: string
+    }
+
 export interface RecentFile {
   handle: FileSystemFileHandle
   name: string

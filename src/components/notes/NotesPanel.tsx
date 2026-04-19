@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CornerDownRight, Pencil, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { AlertTriangle, ChevronDown, ChevronRight, CornerDownRight, Pencil, Trash2 } from 'lucide-react'
 import type { EditorView } from '@codemirror/view'
 import { useNotesStore } from '../../stores/notesStore'
 import { useStoryletStore } from '../../stores/storyletStore'
-import { extractNotes } from '../../lib/noteUtils'
-import type { PositionNote, Storylet, StoryletNote } from '../../types'
+import { extractNotes, insertNoteMarker, removeNoteMarker } from '../../lib/noteUtils'
+import { checkNoteConsistency } from '../../lib/noteConsistency'
+import type {
+  NoteConsistencyIssue,
+  PositionNote,
+  Storylet,
+  StoryletNote,
+} from '../../types'
 import { TagChipInput } from './TagChipInput'
 import { ColorPickerPopover } from './ColorPickerPopover'
 
@@ -282,10 +288,21 @@ export function NotesPanel({
   const setActiveStorylet = useStoryletStore((s) => s.setActiveStorylet)
   const positionNotes = useNotesStore((s) => s.positionNotes)
   const storyletNotes = useNotesStore((s) => s.storyletNotes)
+  const addPositionNote = useNotesStore((s) => s.addPositionNote)
+  const removePositionNote = useNotesStore((s) => s.removePositionNote)
+  const removeAllNotesForStorylet = useNotesStore(
+    (s) => s.removeAllNotesForStorylet,
+  )
   const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map())
 
   // Tag filter — chips with AND semantics across all note kinds.
   const [filterTags, setFilterTags] = useState<string[]>([])
+
+  // Issues section: default collapsed, but auto-expand once when the panel
+  // first opens with orphans to surface. `autoExpanded` latches after the
+  // first auto-expand so the user can re-collapse without us re-expanding.
+  const [issuesExpanded, setIssuesExpanded] = useState(false)
+  const [autoExpanded, setAutoExpanded] = useState(false)
 
   // Jump from a panel row to the anchor in the editor. Mirrors
   // CharacterPanel.jumpToMarker but uses the notesStore / noteUtils pattern.
@@ -321,6 +338,120 @@ export function NotesPanel({
       }
     },
     [book, activeStoryletId, editorView, setActiveStorylet],
+  )
+
+  // -------------------------------------------------------------------------
+  // Issues (orphan detection) — recomputes when book or notes state changes.
+  // -------------------------------------------------------------------------
+  const issues = useMemo<NoteConsistencyIssue[]>(
+    () => checkNoteConsistency(book, { positionNotes, storyletNotes }),
+    [book, positionNotes, storyletNotes],
+  )
+  const issueCount = issues.length
+
+  // First time the panel opens while issues exist, auto-expand. `autoExpanded`
+  // latches after the first trigger so the user's subsequent collapse sticks.
+  // Uses the "derived state during render" pattern (same as StoryletNoteRow's
+  // lastSyncedUpdatedAt reconcile) to avoid react-hooks/set-state-in-effect.
+  if (open && issueCount > 0 && !autoExpanded) {
+    setAutoExpanded(true)
+    if (!issuesExpanded) setIssuesExpanded(true)
+  }
+
+  // Resolve handlers -------------------------------------------------------
+
+  /** Delete the store entry for an orphanNote (anchor is missing, user wants
+   *  to abandon the stub). */
+  const handleDeleteOrphanNoteEntry = useCallback(
+    (noteId: string) => {
+      removePositionNote(noteId)
+    },
+    [removePositionNote],
+  )
+
+  /** Insert an anchor for an orphanNote at the current editor cursor on the
+   *  active storylet. */
+  const handleInsertAnchorForOrphan = useCallback(
+    (noteId: string) => {
+      const view = editorView
+      if (!view || !book) return
+      const targetStoryletId = activeStoryletId ?? book.storylets[0]?.id
+      if (!targetStoryletId) return
+      const doInsert = () => {
+        const v = editorView
+        if (!v) return
+        const pos = v.state.selection.main.head
+        const marker = `<!-- note:${noteId} -->`
+        v.dispatch({
+          changes: { from: pos, to: pos, insert: marker },
+          selection: { anchor: pos + marker.length },
+          scrollIntoView: true,
+        })
+        v.focus()
+      }
+      if (targetStoryletId !== activeStoryletId) {
+        setActiveStorylet(targetStoryletId)
+        setTimeout(doInsert, 30)
+      } else {
+        doInsert()
+      }
+    },
+    [editorView, book, activeStoryletId, setActiveStorylet],
+  )
+
+  /** Remove the `<!-- note:<id> -->` anchor from the storylet that owns it
+   *  (inverseOrphanNote). Mirrors CharacterPanel.onRemoveOrphanFromText —
+   *  switches to that storylet first if it isn't already active, then
+   *  dispatches the deletion through the editor so undo history stays intact. */
+  const handleRemoveAnchorFromText = useCallback(
+    (noteId: string, storyletId: string) => {
+      if (!book) return
+      const storylet = book.storylets.find((s) => s.id === storyletId)
+      if (!storylet) return
+      const content = storylet.content ?? ''
+      const escaped = noteId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const re = new RegExp(`<!--\\s*note:${escaped}\\s*-->`)
+      const match = content.match(re)
+      if (!match || typeof match.index !== 'number') return
+      const doRemove = () => {
+        const v = editorView
+        if (!v) return
+        v.dispatch({
+          changes: {
+            from: match.index as number,
+            to: (match.index as number) + match[0].length,
+            insert: '',
+          },
+        })
+      }
+      if (storyletId === activeStoryletId) {
+        doRemove()
+      } else {
+        setActiveStorylet(storyletId)
+        setTimeout(doRemove, 30)
+      }
+      // Silence unused-imports lint — these helpers are surfaced on the panel
+      // for future resolve-action expansion without needing a new import.
+      void insertNoteMarker
+      void removeNoteMarker
+    },
+    [book, activeStoryletId, editorView, setActiveStorylet],
+  )
+
+  /** Create an empty store entry so an orphaned anchor has metadata. */
+  const handleCreateEntryForOrphan = useCallback(
+    (noteId: string) => {
+      addPositionNote(noteId, { body: '' })
+    },
+    [addPositionNote],
+  )
+
+  /** Drop all storylet-notes keyed to a deleted storylet. */
+  const handleDeleteOrphanStoryletNotes = useCallback(
+    (storyletId: string) => {
+      removeAllNotesForStorylet(storyletId)
+    },
+    [removeAllNotesForStorylet],
   )
 
   // Flash + scroll into view when a row becomes focused.
@@ -413,6 +544,135 @@ export function NotesPanel({
         >
           Close
         </button>
+      </div>
+
+      {/* Issues section (collapsible) */}
+      <div
+        data-testid="notes-panel-issues"
+        className="border-b border-gray-800"
+      >
+        <button
+          data-testid="notes-panel-issues-toggle"
+          onClick={() => setIssuesExpanded((v) => !v)}
+          className={`w-full flex items-center gap-1.5 px-3 py-2 text-[11px] transition-colors ${
+            issueCount > 0
+              ? 'text-amber-300 hover:bg-gray-800/60'
+              : 'text-gray-500 hover:bg-gray-800/40'
+          }`}
+        >
+          {issuesExpanded ? (
+            <ChevronDown size={12} />
+          ) : (
+            <ChevronRight size={12} />
+          )}
+          <AlertTriangle size={12} />
+          <span className="uppercase tracking-wider font-semibold">Issues</span>
+          {issueCount > 0 && (
+            <span
+              data-testid="notes-panel-issues-badge"
+              className="ml-auto inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/80 text-[9px] text-gray-900 font-semibold tabular-nums"
+            >
+              {issueCount}
+            </span>
+          )}
+          {issueCount === 0 && (
+            <span className="ml-auto text-gray-600 text-[10px]">all clear</span>
+          )}
+        </button>
+        {issuesExpanded && (
+          <div className="px-3 pb-3 pt-0">
+            {issueCount === 0 ? (
+              <div
+                data-testid="notes-panel-issues-empty"
+                className="text-[11px] text-gray-500 italic px-1 py-2"
+              >
+                No orphan notes detected.
+              </div>
+            ) : (
+              <ul className="space-y-1.5">
+                {issues.map((issue, i) => (
+                  <li
+                    key={`${issue.kind}-${i}-${issue.id ?? issue.storyletId ?? ''}`}
+                    data-testid={`notes-panel-issue-${issue.kind}`}
+                    data-issue-kind={issue.kind}
+                    className="text-[11px] text-gray-300 border border-gray-800 rounded px-2 py-1.5 space-y-1"
+                  >
+                    {issue.kind === 'orphanNote' && (
+                      <>
+                        <div>
+                          <span className="text-gray-500">Store entry </span>
+                          <code className="text-gray-400">
+                            {issue.id.slice(0, 8)}
+                            {issue.id.length > 8 ? '\u2026' : ''}
+                          </code>
+                          <span className="text-gray-500"> has no anchor in any storylet.</span>
+                        </div>
+                        <div className="flex gap-1.5 flex-wrap">
+                          <IssueButton
+                            onClick={() => handleDeleteOrphanNoteEntry(issue.id)}
+                          >
+                            Delete entry
+                          </IssueButton>
+                          <IssueButton
+                            onClick={() => handleInsertAnchorForOrphan(issue.id)}
+                          >
+                            Insert anchor at cursor
+                          </IssueButton>
+                        </div>
+                      </>
+                    )}
+                    {issue.kind === 'inverseOrphanNote' && (
+                      <>
+                        <div>
+                          <span className="text-gray-500">Anchor </span>
+                          <code className="text-gray-400">
+                            {issue.id.slice(0, 8)}
+                            {issue.id.length > 8 ? '\u2026' : ''}
+                          </code>
+                          <span className="text-gray-500"> in text has no store entry.</span>
+                        </div>
+                        <div className="flex gap-1.5 flex-wrap">
+                          <IssueButton
+                            onClick={() =>
+                              handleRemoveAnchorFromText(issue.id, issue.storyletId)
+                            }
+                          >
+                            Remove from text
+                          </IssueButton>
+                          <IssueButton
+                            onClick={() => handleCreateEntryForOrphan(issue.id)}
+                          >
+                            Create empty entry
+                          </IssueButton>
+                        </div>
+                      </>
+                    )}
+                    {issue.kind === 'orphanStoryletNote' && (
+                      <>
+                        <div>
+                          <span className="text-gray-500">Storylet notes on deleted storylet </span>
+                          <code className="text-gray-400">
+                            {issue.storyletId.slice(0, 8)}
+                            {issue.storyletId.length > 8 ? '\u2026' : ''}
+                          </code>
+                        </div>
+                        <div className="flex gap-1.5 flex-wrap">
+                          <IssueButton
+                            onClick={() =>
+                              handleDeleteOrphanStoryletNotes(issue.storyletId)
+                            }
+                          >
+                            Delete
+                          </IssueButton>
+                        </div>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Filter bar */}
@@ -590,5 +850,26 @@ export function NotesPanel({
         )}
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// IssueButton — compact action pill used inside the Issues section.
+// ---------------------------------------------------------------------------
+
+function IssueButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-2 py-0.5 text-[10px] text-gray-300 border border-gray-700 hover:border-gray-500 hover:bg-gray-800 rounded transition-colors"
+    >
+      {children}
+    </button>
   )
 }
