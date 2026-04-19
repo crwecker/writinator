@@ -231,7 +231,7 @@ export interface NotesFileData {
 }
 
 export interface WritinatorFile {
-  version: 7
+  version: 8
   book: Book
   snapshots: Record<string, Snapshot[]>         // keyed by storylet ID
   publishedSnapshots: Record<string, PublishedSnapshot[]>  // keyed by storylet ID
@@ -239,11 +239,12 @@ export interface WritinatorFile {
   characters: Character[]
   markers: Record<string, StatDelta[]>          // keyed by marker UUID
   saveCounter: number
-  // Cross-store sections — optional for v1-v6 back-compat (absent = no-op on load)
+  // Cross-store sections — optional for back-compat (absent = no-op on load)
   player?: PlayerFileData
   quests?: ImageRevealFileData
   writeathon?: WriteathonFileData
   metrics?: MetricsFileData
+  notes?: NotesFileData
 }
 
 // ---------------------------------------------------------------------------

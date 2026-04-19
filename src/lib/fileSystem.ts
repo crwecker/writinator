@@ -10,6 +10,7 @@ import { serializePlayer, hydratePlayer } from '../stores/playerStore'
 import { serializeImageReveal, hydrateImageReveal } from '../stores/imageRevealStore'
 import { serializeWriteathon, hydrateWriteathon } from '../stores/writeathonStore'
 import { serializeMetrics, hydrateMetrics } from '../stores/metricsStore'
+import { serializeNotes, hydrateNotes } from '../stores/notesStore'
 
 // ---------------------------------------------------------------------------
 // Section registry — add/remove cross-store sections here
@@ -27,11 +28,13 @@ const EXTERNAL_SECTIONS: [
   FileSection<'quests'>,
   FileSection<'writeathon'>,
   FileSection<'metrics'>,
+  FileSection<'notes'>,
 ] = [
   { key: 'player',     serialize: serializePlayer,     hydrate: hydratePlayer },
   { key: 'quests',     serialize: serializeImageReveal, hydrate: hydrateImageReveal },
   { key: 'writeathon', serialize: serializeWriteathon,  hydrate: hydrateWriteathon },
   { key: 'metrics',    serialize: serializeMetrics,     hydrate: hydrateMetrics },
+  { key: 'notes',      serialize: serializeNotes,       hydrate: hydrateNotes },
 ]
 
 // queryPermission is not yet in TypeScript lib types for File System Access API
@@ -123,7 +126,7 @@ export async function buildWritinatorFile(
   const publishedSnapshots = await getAllPublishedSnapshots()
   const { characters, markers } = useCharacterStore.getState()
   const file: WritinatorFile = {
-    version: 7,
+    version: 8,
     book,
     snapshots,
     publishedSnapshots,

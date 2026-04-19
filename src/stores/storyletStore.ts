@@ -34,6 +34,7 @@ import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
 import { useMetricsStore, hydrateMetrics } from './metricsStore'
 import { useCharacterStore } from './characterStore'
 import { hydratePlayer } from './playerStore'
+import { hydrateNotes } from './notesStore'
 import { countWords } from '../lib/words'
 
 interface StoryletState {
@@ -242,6 +243,7 @@ export const useStoryletStore = create<StoryletState>()(
         hydrateImageReveal(file.quests)
         hydrateWriteathon(file.writeathon)
         hydrateMetrics(file.metrics)
+        hydrateNotes(file.notes)
       },
 
       renameBook: (title: string) => {
