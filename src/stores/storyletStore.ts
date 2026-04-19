@@ -447,6 +447,15 @@ export const useStoryletStore = create<StoryletState>()(
           book: { ...book, storylets: remaining, updatedAt: now() },
           activeStoryletId: newActiveId,
         })
+        // Clean up storylet notes for each deleted storylet (dynamic import to
+        // avoid circular deps). Position notes are still owned by the markers
+        // embedded in content and are garbage-collected by Phase 9 consistency.
+        void import('./notesStore').then(({ useNotesStore }) => {
+          const removeAll = useNotesStore.getState().removeAllNotesForStorylet
+          for (const deletedId of toDelete) {
+            removeAll(deletedId)
+          }
+        })
       },
 
       reorderStorylets: (ids: string[]) => {
