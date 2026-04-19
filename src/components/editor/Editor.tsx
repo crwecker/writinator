@@ -472,6 +472,9 @@ const markdownDecorationPlugin = ViewPlugin.fromClass(
   },
   {
     decorations: (v) => v.decorations,
+    // Respected by CM6 native motion commands and VIM INSERT-mode arrow keys.
+    // @replit/codemirror-vim NORMAL-mode motions (h/l/w/b/e) walk by document offsets
+    // and ignore this facet — cursor can land inside hidden ranges and visually disappear.
     provide: (plugin) =>
       EditorView.atomicRanges.of(
         (view) => view.plugin(plugin)?.atomicRanges ?? RangeSet.empty
