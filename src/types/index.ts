@@ -153,6 +153,8 @@ export type DocumentStyles = Record<string, NamedStyle>
 
 export const DEFAULT_STYLE_NAMES = ['body', 'h1', 'h2', 'h3', 'blockquote', 'code'] as const
 
+export type RightPanelTab = 'characters' | 'notes' | 'history'
+
 export interface EditorPreferences {
   vimMode: boolean
   fontFamily: 'serif' | 'sans' | 'mono'
@@ -161,6 +163,7 @@ export interface EditorPreferences {
   renderMode: 'source' | 'rendered' | 'preview'
   sidebarOpen: boolean
   collapsedStoryletIds: string[]
+  rightPanelActiveTab: RightPanelTab | null
 }
 
 export interface GlobalSettings {

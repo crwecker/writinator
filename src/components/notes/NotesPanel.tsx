@@ -21,6 +21,8 @@ interface Props {
   focusedNoteId: string | null
   onFocusHandled: () => void
   onEditNote: (noteId: string) => void
+  /** When true, render only the inner body — skip outer wrapper and header. */
+  embedded?: boolean
 }
 
 interface StoryletSection {
@@ -282,6 +284,7 @@ export function NotesPanel({
   focusedNoteId,
   onFocusHandled,
   onEditNote,
+  embedded = false,
 }: Props) {
   const book = useStoryletStore((s) => s.book)
   const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
@@ -530,22 +533,8 @@ export function NotesPanel({
 
   if (!open) return null
 
-  return (
-    <div
-      data-testid="notes-panel"
-      className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[320px] shrink-0 overflow-hidden"
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-        <span className="text-sm font-medium text-gray-200">Notes</span>
-        <button
-          onClick={onClose}
-          className="text-gray-500 hover:text-gray-300 text-xs"
-        >
-          Close
-        </button>
-      </div>
-
+  const body = (
+    <>
       {/* Issues section (collapsible) */}
       <div
         data-testid="notes-panel-issues"
@@ -849,6 +838,33 @@ export function NotesPanel({
           </div>
         )}
       </div>
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <div data-testid="notes-panel" className="flex flex-col h-full overflow-hidden">
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      data-testid="notes-panel"
+      className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[320px] shrink-0 overflow-hidden"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+        <span className="text-sm font-medium text-gray-200">Notes</span>
+        <button
+          onClick={onClose}
+          className="text-gray-500 hover:text-gray-300 text-xs"
+        >
+          Close
+        </button>
+      </div>
+      {body}
     </div>
   )
 }

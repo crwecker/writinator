@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
-import type { EditorPreferences } from '../types'
+import type { EditorPreferences, RightPanelTab } from '../types'
 
 interface EditorState extends EditorPreferences {
   /** Transient: current CodeMirror main-selection head offset. Not persisted. */
@@ -21,6 +21,7 @@ interface EditorState extends EditorPreferences {
   setCollapsedStoryletIds: (ids: string[]) => void
   setCursorOffset: (offset: number) => void
   pushRecentColor: (color: string) => void
+  setRightPanelActiveTab: (tab: RightPanelTab | null) => void
 }
 
 const RECENT_COLORS_MAX = 8
@@ -51,6 +52,7 @@ export const useEditorStore = create<EditorState>()(
       collapsedStoryletIds: [],
       cursorOffset: 0,
       recentColors: [],
+      rightPanelActiveTab: null,
 
       setVimMode: (enabled: boolean) => set({ vimMode: enabled }),
       toggleVimMode: () => set({ vimMode: !get().vimMode }),
@@ -92,6 +94,8 @@ export const useEditorStore = create<EditorState>()(
         )
         set({ recentColors: next })
       },
+      setRightPanelActiveTab: (tab: RightPanelTab | null) =>
+        set({ rightPanelActiveTab: tab }),
     }),
     {
       name: 'writinator-editor',
@@ -106,6 +110,7 @@ export const useEditorStore = create<EditorState>()(
           sidebarOpen: state.sidebarOpen,
           collapsedStoryletIds: state.collapsedStoryletIds,
           recentColors: state.recentColors,
+          rightPanelActiveTab: state.rightPanelActiveTab,
         }) as unknown as EditorState,
     }
   )

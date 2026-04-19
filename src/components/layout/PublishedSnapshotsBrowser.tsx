@@ -30,6 +30,8 @@ interface Props {
   onOpenPublishModal: () => void
   onRestoreSnapshot: (content: string) => void
   onClose: () => void
+  /** When true, render only the inner body — skip outer wrapper styling. Shell supplies chrome. */
+  embedded?: boolean
 }
 
 type CopyFormat = 'markdown' | 'html'
@@ -49,7 +51,7 @@ function computeWordDelta(
   return { insertedWords, deletedWords }
 }
 
-export function PublishedSnapshotsBrowser({ onOpenPublishModal, onRestoreSnapshot, onClose }: Props) {
+export function PublishedSnapshotsBrowser({ onOpenPublishModal, onRestoreSnapshot, onClose, embedded = false }: Props) {
   const [snapshots, setSnapshots] = useState<PublishedSnapshot[]>([])
   const [autoSnapshots, setAutoSnapshots] = useState<Snapshot[]>([])
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -245,7 +247,13 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal, onRestoreSnapsho
     : null
 
   return (
-    <div className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[380px] shrink-0 overflow-hidden">
+    <div
+      className={
+        embedded
+          ? 'flex flex-col h-full overflow-hidden'
+          : 'flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[380px] shrink-0 overflow-hidden'
+      }
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
         {previewEntry ? (
@@ -314,12 +322,14 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal, onRestoreSnapsho
               <Send size={12} />
               Publish
             </button>
-            <button
-              onClick={onClose}
-              className="text-gray-500 hover:text-gray-300 text-xs"
-            >
-              Close
-            </button>
+            {!embedded && (
+              <button
+                onClick={onClose}
+                className="text-gray-500 hover:text-gray-300 text-xs"
+              >
+                Close
+              </button>
+            )}
           </div>
         )}
       </div>

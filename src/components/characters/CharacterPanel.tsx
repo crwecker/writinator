@@ -24,6 +24,8 @@ interface Props {
   onClose: () => void
   editorView: EditorView | null
   onOpenCharacterSheet?: () => void
+  /** When true, render only the inner body (tabs + content) — skip outer wrapper and header. */
+  embedded?: boolean
 }
 
 function formatModifier(mod: StatModifier, defs: StatDefinition[]): string {
@@ -364,7 +366,7 @@ function CharacterSection({ character, computed }: SectionProps) {
   )
 }
 
-export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView }: Props) {
+export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView, embedded = false }: Props) {
   const characters = useCharacterStore((s) => s.characters)
   const markers = useCharacterStore((s) => s.markers)
   const removeMarkerFromStore = useCharacterStore((s) => s.removeMarker)
@@ -422,22 +424,8 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
 
   if (!open) return null
 
-  return (
-    <div
-      data-testid="character-panel"
-      className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[320px] shrink-0 overflow-hidden"
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-        <span className="text-sm font-medium text-gray-200">Characters</span>
-        <button
-          onClick={onClose}
-          className="text-gray-500 hover:text-gray-300 text-xs"
-        >
-          Close
-        </button>
-      </div>
-
+  const body = (
+    <>
       {/* Tabs */}
       <div className="flex border-b border-gray-700 bg-gray-900/60">
         <TabButton active={tab === 'stats'} onClick={() => setTab('stats')} testId="character-panel-tab-stats">
@@ -569,6 +557,33 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
           />
         )}
       </div>
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <div data-testid="character-panel" className="flex flex-col h-full overflow-hidden">
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      data-testid="character-panel"
+      className="flex flex-col bg-gray-900 border-l border-gray-700 h-full w-[320px] shrink-0 overflow-hidden"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+        <span className="text-sm font-medium text-gray-200">Characters</span>
+        <button
+          onClick={onClose}
+          className="text-gray-500 hover:text-gray-300 text-xs"
+        >
+          Close
+        </button>
+      </div>
+      {body}
     </div>
   )
 }
