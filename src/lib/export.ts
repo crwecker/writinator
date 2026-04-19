@@ -20,6 +20,7 @@ import {
   STAT_MARKER_REGEX,
   STATBLOCK_MARKER_REGEX,
 } from './markerUtils'
+import { NOTE_MARKER_REGEX } from './noteUtils'
 import { renderStoryletAsMarkdown, renderStoryletAsHtml } from './render'
 
 // ─── Helpers ────────────────────────────────────────────
@@ -332,7 +333,7 @@ export function processCharacterMarkers(
   content: string,
   ctx: CharacterMarkerContext,
   format: StatblockExportFormat,
-  options?: { preserveStatMarkers?: boolean }
+  options?: { preserveStatMarkers?: boolean; preserveNoteMarkers?: boolean }
 ): string {
   if (!content) return content
   let out = content
@@ -340,6 +341,12 @@ export function processCharacterMarkers(
   // 1) Strip stat-delta markers (unless MD preserve flag is set).
   if (!options?.preserveStatMarkers) {
     out = out.replace(new RegExp(STAT_MARKER_REGEX.source, 'g'), '')
+  }
+
+  // 1b) Strip note anchors (unless MD preserve flag is set). Notes never
+  // appear in rendered output — they're metadata-only pointers for the panel.
+  if (!options?.preserveNoteMarkers) {
+    out = out.replace(new RegExp(NOTE_MARKER_REGEX.source, 'g'), '')
   }
 
   // 2) Replace statblock markers with rendered blocks.
@@ -503,7 +510,7 @@ export function getDepth(storylet: Storylet, storylets: Storylet[]): number {
 /** Get the full book as a single markdown string with storylet headings */
 function bookToMarkdown(
   book: Book,
-  options?: { preserveStatMarkers?: boolean }
+  options?: { preserveStatMarkers?: boolean; preserveNoteMarkers?: boolean }
 ): string {
   const parts: string[] = [`# ${book.title}\n`]
   for (const doc of book.storylets) {
@@ -540,7 +547,7 @@ function hasStringValue(node: unknown): node is { value: string } {
 
 export function exportAsMarkdown(
   book: Book,
-  options?: { preserveStatMarkers?: boolean }
+  options?: { preserveStatMarkers?: boolean; preserveNoteMarkers?: boolean }
 ): void {
   download(
     bookToMarkdown(book, options),
@@ -552,7 +559,7 @@ export function exportAsMarkdown(
 /** In-memory variant: returns the Markdown string instead of triggering a download. */
 export function renderBookAsMarkdown(
   book: Book,
-  options?: { preserveStatMarkers?: boolean }
+  options?: { preserveStatMarkers?: boolean; preserveNoteMarkers?: boolean }
 ): string {
   return bookToMarkdown(book, options)
 }

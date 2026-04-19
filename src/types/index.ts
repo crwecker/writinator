@@ -153,6 +153,8 @@ export type DocumentStyles = Record<string, NamedStyle>
 
 export const DEFAULT_STYLE_NAMES = ['body', 'h1', 'h2', 'h3', 'blockquote', 'code'] as const
 
+export type RightPanelTab = 'characters' | 'notes' | 'history'
+
 export interface EditorPreferences {
   vimMode: boolean
   fontFamily: 'serif' | 'sans' | 'mono'
@@ -161,6 +163,7 @@ export interface EditorPreferences {
   renderMode: 'source' | 'rendered' | 'preview'
   sidebarOpen: boolean
   collapsedStoryletIds: string[]
+  rightPanelActiveTab: RightPanelTab | null
 }
 
 export interface GlobalSettings {
@@ -203,8 +206,36 @@ export interface MetricsFileData {
   pinnedMetrics: MetricKey[]
 }
 
+// ---------------------------------------------------------------------------
+// Notes — position notes anchored to storylet offsets, and per-storylet notes
+// ---------------------------------------------------------------------------
+
+export interface PositionNote {
+  id: string
+  body: string
+  color?: string
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StoryletNote {
+  id: string
+  storyletId: string
+  body: string
+  color?: string
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NotesFileData {
+  positionNotes: Record<string, PositionNote>
+  storyletNotes: Record<string, StoryletNote[]>
+}
+
 export interface WritinatorFile {
-  version: 7
+  version: 8
   book: Book
   snapshots: Record<string, Snapshot[]>         // keyed by storylet ID
   publishedSnapshots: Record<string, PublishedSnapshot[]>  // keyed by storylet ID
@@ -212,11 +243,12 @@ export interface WritinatorFile {
   characters: Character[]
   markers: Record<string, StatDelta[]>          // keyed by marker UUID
   saveCounter: number
-  // Cross-store sections — optional for v1-v6 back-compat (absent = no-op on load)
+  // Cross-store sections — optional for back-compat (absent = no-op on load)
   player?: PlayerFileData
   quests?: ImageRevealFileData
   writeathon?: WriteathonFileData
   metrics?: MetricsFileData
+  notes?: NotesFileData
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +457,26 @@ export type ConsistencyIssue =
       characterId: string
       slot: string
       markerId: string
+    }
+
+export type NoteConsistencyIssue =
+  | {
+      /** Store has an entry for id, but no storylet.content contains the anchor. */
+      kind: 'orphanNote'
+      id: string
+      storyletId: undefined
+    }
+  | {
+      /** Content has an anchor for id, but no store entry exists. */
+      kind: 'inverseOrphanNote'
+      id: string
+      storyletId: string
+    }
+  | {
+      /** Store has storylet notes for a storyletId that no longer exists in the book. */
+      kind: 'orphanStoryletNote'
+      id: undefined
+      storyletId: string
     }
 
 export interface RecentFile {

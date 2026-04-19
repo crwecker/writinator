@@ -15,6 +15,7 @@ import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { useMetricsStore } from '../../stores/metricsStore'
 import { useCharacterStore } from '../../stores/characterStore'
+import { useNotesStore } from '../../stores/notesStore'
 import { htmlToMarkdownWithStyles } from '../../lib/richPaste'
 import {
   statMarkerExtension,
@@ -24,6 +25,10 @@ import {
   statblockMarkerExtension,
   dispatchStatblockActiveStorylet,
 } from './statblockMarkerExtension'
+import {
+  noteMarkerExtension,
+  dispatchNotesSnapshot,
+} from './noteMarkerExtension'
 import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
 import './editor.css'
@@ -767,6 +772,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         renderModeField,
         markdownDecorationPlugin,
         statMarkerExtension(),
+        noteMarkerExtension(),
         statblockMarkerExtension(),
         placeholder('Start writing...'),
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
@@ -1018,6 +1024,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         useCharacterStore
       ;(window as unknown as { __storyletStore?: typeof useStoryletStore }).__storyletStore =
         useStoryletStore
+      ;(window as unknown as { __notesStore?: typeof useNotesStore }).__notesStore =
+        useNotesStore
       // Expose an in-memory markdown renderer so QA can inspect export output
       // without triggering a file download.
       import('../../lib/export').then((mod) => {
@@ -1029,27 +1037,54 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             ok: boolean
             markerCount: number
             statblockCount: number
+            noteCount: number
             length: number
             preview: string
           }
         }).__exportSmokeTest = () => {
           const book = useStoryletStore.getState().book
           if (!book) {
-            return { ok: false, markerCount: 0, statblockCount: 0, length: 0, preview: '(no book)' }
+            return {
+              ok: false,
+              markerCount: 0,
+              statblockCount: 0,
+              noteCount: 0,
+              length: 0,
+              preview: '(no book)',
+            }
           }
           const out = mod.renderBookAsMarkdown(book)
           const markerCount = (out.match(/<!--\s*stat:/g) ?? []).length
           const statblockCount = (out.match(/<!--\s*statblock:/g) ?? []).length
+          const noteCount = (out.match(/<!--\s*note:/g) ?? []).length
           return {
-            ok: markerCount === 0,
+            ok: markerCount === 0 && noteCount === 0,
             markerCount,
             statblockCount,
+            noteCount,
             length: out.length,
             preview: out.slice(0, 400),
           }
         }
       })
     }
+    return unsubscribe
+  }, [])
+
+  // Sync notes store → CM6 snapshot so note-marker squares refresh on store
+  // changes. Dispatches once on mount + any time `positionNotes` reference-
+  // changes in the Zustand store. Mirrors the character snapshot pattern.
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const initial = useNotesStore.getState()
+    dispatchNotesSnapshot(view, { positionNotes: initial.positionNotes })
+    const unsubscribe = useNotesStore.subscribe((state, prev) => {
+      if (state.positionNotes === prev.positionNotes) return
+      const v = viewRef.current
+      if (!v) return
+      dispatchNotesSnapshot(v, { positionNotes: state.positionNotes })
+    })
     return unsubscribe
   }, [])
 

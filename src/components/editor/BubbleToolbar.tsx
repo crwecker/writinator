@@ -9,6 +9,7 @@ import { DEFAULT_STYLE_NAMES } from '../../types'
 interface BubbleToolbarProps {
   editorView: EditorView | null
   onInsertMarker?: (markerId: string) => void
+  onInsertNote?: () => void
   onEditStyles?: () => void
 }
 
@@ -842,7 +843,7 @@ function wrapWithSpanClass(view: EditorView, className: string) {
   view.focus()
 }
 
-export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles }: BubbleToolbarProps) {
+export default function BubbleToolbar({ editorView, onInsertMarker, onInsertNote, onEditStyles }: BubbleToolbarProps) {
   const documentStyles = useStoryletStore((s) => s.globalSettings.documentStyles)
   const updateGlobalSettings = useStoryletStore((s) => s.updateGlobalSettings)
   const replaceInlineStyleInOtherDocs = useStoryletStore((s) => s.replaceInlineStyleInOtherDocs)
@@ -1132,6 +1133,19 @@ export default function BubbleToolbar({ editorView, onInsertMarker, onEditStyles
           >
             Status Block
           </button>
+          {onInsertNote && (
+            <button
+              data-testid="bubble-note-insert"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                onInsertNote()
+              }}
+              title="Insert note anchor at cursor"
+              className="rounded px-2 py-1 text-xs font-medium transition-colors text-gray-300 hover:bg-gray-700 hover:text-gray-100"
+            >
+              Note
+            </button>
+          )}
         </>
       )}
 

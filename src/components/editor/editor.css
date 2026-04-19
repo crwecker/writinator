@@ -130,6 +130,28 @@
   outline-offset: 2px;
 }
 
+/* Note-marker square widget (rendered in place of `<!-- note:uuid -->`) */
+.cm-note-marker-square {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin: 0 2px;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35) inset;
+}
+
+.cm-note-marker-square:hover {
+  outline: 2px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 1px;
+}
+
+.cm-note-marker-square:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
 /* Typewriter mode */
 .typewriter-mode .cm-scroller {
   /* Padding to allow cursor to center when near top/bottom of document */

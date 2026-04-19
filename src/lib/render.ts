@@ -15,7 +15,7 @@ import { parseMarkdown } from './ast'
 export function renderStoryletAsMarkdown(
   storylet: Storylet,
   book: Book,
-  options?: { preserveStatMarkers?: boolean }
+  options?: { preserveStatMarkers?: boolean; preserveNoteMarkers?: boolean }
 ): string {
   const depth = getDepth(storylet, book.storylets)
   const hashes = '#'.repeat(Math.min(depth + 2, 6))

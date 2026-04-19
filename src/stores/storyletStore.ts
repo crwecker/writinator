@@ -34,6 +34,7 @@ import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
 import { useMetricsStore, hydrateMetrics } from './metricsStore'
 import { useCharacterStore } from './characterStore'
 import { hydratePlayer } from './playerStore'
+import { hydrateNotes } from './notesStore'
 import { countWords } from '../lib/words'
 
 interface StoryletState {
@@ -242,6 +243,7 @@ export const useStoryletStore = create<StoryletState>()(
         hydrateImageReveal(file.quests)
         hydrateWriteathon(file.writeathon)
         hydrateMetrics(file.metrics)
+        hydrateNotes(file.notes)
       },
 
       renameBook: (title: string) => {
@@ -444,6 +446,15 @@ export const useStoryletStore = create<StoryletState>()(
         set({
           book: { ...book, storylets: remaining, updatedAt: now() },
           activeStoryletId: newActiveId,
+        })
+        // Clean up storylet notes for each deleted storylet (dynamic import to
+        // avoid circular deps). Position notes are still owned by the markers
+        // embedded in content and are garbage-collected by Phase 9 consistency.
+        void import('./notesStore').then(({ useNotesStore }) => {
+          const removeAll = useNotesStore.getState().removeAllNotesForStorylet
+          for (const deletedId of toDelete) {
+            removeAll(deletedId)
+          }
         })
       },
 

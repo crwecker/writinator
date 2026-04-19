@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins, Search } from 'lucide-react'
+import { Coins, Search, StickyNote } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -24,6 +24,9 @@ import { QuestReminder } from '../quests/QuestReminder'
 import { CharacterSheetModal } from '../characters/CharacterSheetModal'
 import { CharacterPanel } from '../characters/CharacterPanel'
 import { DeltaEditorModal } from '../characters/DeltaEditorModal'
+import { NotesPanel } from '../notes/NotesPanel'
+import { NoteEditorModal } from '../notes/NoteEditorModal'
+import { RightPanelShell, type RightPanel } from './RightPanelShell'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import { getPublishedSnapshots } from '../../stores/publishedSnapshotStore'
@@ -36,6 +39,7 @@ import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords, extractWords } from '../../lib/words'
 import { useMetricsStore } from '../../stores/metricsStore'
+import { useNotesStore } from '../../stores/notesStore'
 import { JourneyBar } from './JourneyBar'
 import { DailyTarget } from './DailyTarget'
 import { MilestoneFlash } from './MilestoneFlash'
@@ -56,6 +60,13 @@ export function AppShell() {
   const [guildTab, setGuildTab] = useState<GuildTab>('board')
   const [characterSheetOpen, setCharacterSheetOpen] = useState(false)
   const [characterPanelOpen, setCharacterPanelOpen] = useState(false)
+  const [notesPanelOpen, setNotesPanelOpen] = useState(false)
+  const [focusedNoteId, setFocusedNoteId] = useState<string | null>(null)
+  const [noteEditorState, setNoteEditorState] = useState<{
+    open: boolean
+    noteId: string | null
+    mode: 'create' | 'edit'
+  }>({ open: false, noteId: null, mode: 'create' })
   const [deltaEditorState, setDeltaEditorState] = useState<{
     open: boolean
     markerId: string | null
@@ -156,6 +167,27 @@ export function AppShell() {
     return () => contentDOM.removeEventListener('click', onClick)
   }, [editorView])
 
+  // Delegated click listener for note squares — opens the panel + focuses the row.
+  // Does NOT open the editor modal (the row's Edit button does that).
+  useEffect(() => {
+    if (!editorView) return
+    const contentDOM = editorView.contentDOM
+    function onClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const square = target.closest('[data-note-id]') as HTMLElement | null
+      if (!square) return
+      const noteId = square.getAttribute('data-note-id')
+      if (!noteId) return
+      e.preventDefault()
+      e.stopPropagation()
+      setNotesPanelOpen(true)
+      setFocusedNoteId(noteId)
+    }
+    contentDOM.addEventListener('click', onClick)
+    return () => contentDOM.removeEventListener('click', onClick)
+  }, [editorView])
+
   const handleRestoreSnapshot = useCallback((content: string) => {
     if (!editorView) return
     editorView.dispatch({
@@ -173,6 +205,54 @@ export function AppShell() {
       changes: { from: to, to, insert: `<!-- stat:${markerId} -->` },
     })
     setDeltaEditorState({ open: true, markerId, mode: 'create' })
+  }, [])
+
+  const handleInsertNote = useCallback(() => {
+    const view = editorViewRef.current
+    if (!view) return
+    const { to } = view.state.selection.main
+    const noteId = crypto.randomUUID()
+    view.dispatch({
+      changes: { from: to, to, insert: `<!-- note:${noteId} -->` },
+    })
+    useNotesStore.getState().addPositionNote(noteId, { body: '' })
+    setNoteEditorState({ open: true, noteId, mode: 'create' })
+  }, [])
+
+  const openNoteEditor = useCallback((noteId: string) => {
+    setNoteEditorState({ open: true, noteId, mode: 'edit' })
+  }, [])
+
+  const closeNoteEditor = useCallback(() => {
+    setNoteEditorState((prev) => ({ ...prev, open: false }))
+  }, [])
+
+  const clearFocusedNote = useCallback(() => setFocusedNoteId(null), [])
+
+  // Toggle a right-panel flag; when opening (false → true), make it the
+  // active tab in the shell so the user sees what they just opened. When
+  // closing, leave the persisted active tab alone — the shell falls back to
+  // another open panel automatically.
+  const toggleCharacterPanel = useCallback(() => {
+    setCharacterPanelOpen((prev) => {
+      const next = !prev
+      if (next) useEditorStore.getState().setRightPanelActiveTab('characters')
+      return next
+    })
+  }, [])
+  const toggleNotesPanel = useCallback(() => {
+    setNotesPanelOpen((prev) => {
+      const next = !prev
+      if (next) useEditorStore.getState().setRightPanelActiveTab('notes')
+      return next
+    })
+  }, [])
+  const togglePublishedSnapshots = useCallback(() => {
+    setPublishedSnapshotsOpen((prev) => {
+      const next = !prev
+      if (next) useEditorStore.getState().setRightPanelActiveTab('history')
+      return next
+    })
   }, [])
 
   const handleSaveToDisk = useCallback(() => {
@@ -208,7 +288,7 @@ export function AppShell() {
       }
       if (km.snapshotHistory && matchesEvent(km.snapshotHistory, e)) {
         e.preventDefault()
-        setPublishedSnapshotsOpen((prev) => !prev)
+        togglePublishedSnapshots()
         return
       }
       if (km.exportBook && matchesEvent(km.exportBook, e)) {
@@ -238,7 +318,12 @@ export function AppShell() {
       }
       if (km.toggleCharacterPanel && matchesEvent(km.toggleCharacterPanel, e)) {
         e.preventDefault()
-        setCharacterPanelOpen((p) => !p)
+        toggleCharacterPanel()
+        return
+      }
+      if (km.toggleNotesPanel && matchesEvent(km.toggleNotesPanel, e)) {
+        e.preventDefault()
+        toggleNotesPanel()
         return
       }
       if (km.insertStatMarker && matchesEvent(km.insertStatMarker, e)) {
@@ -247,10 +332,25 @@ export function AppShell() {
         handleInsertStatMarker()
         return
       }
+      if (km.insertNote && matchesEvent(km.insertNote, e)) {
+        if (!editorViewRef.current) return
+        e.preventDefault()
+        handleInsertNote()
+        return
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [toggleDistractionFree, toggleRenderMode, handleSaveToDisk, handleInsertStatMarker])
+  }, [
+    toggleDistractionFree,
+    toggleRenderMode,
+    handleSaveToDisk,
+    handleInsertStatMarker,
+    handleInsertNote,
+    toggleCharacterPanel,
+    toggleNotesPanel,
+    togglePublishedSnapshots,
+  ])
 
   // Auto-snapshot every 5 minutes
   useEffect(() => {
@@ -396,8 +496,9 @@ export function AppShell() {
     { action: 'toggleRenderMode', label: 'Cycle presentation', onSelect: toggleRenderMode },
     { action: 'toggleFileTree', label: 'Toggle file tree', onSelect: () => useEditorStore.getState().toggleSidebar() },
     { action: 'findInBook', label: 'Find in book', onSelect: () => setFindOpen((prev) => !prev) },
-    { action: 'snapshotHistory', label: 'History', onSelect: () => setPublishedSnapshotsOpen((prev) => !prev) },
-    { action: 'toggleCharacterPanel', label: 'Character stats', onSelect: () => setCharacterPanelOpen((p) => !p) },
+    { action: 'snapshotHistory', label: 'History', onSelect: togglePublishedSnapshots },
+    { action: 'toggleCharacterPanel', label: 'Character stats', onSelect: toggleCharacterPanel },
+    { action: 'toggleNotesPanel', label: 'Notes', onSelect: toggleNotesPanel },
     { action: 'insertStatMarker', label: 'Insert stat change', onSelect: handleInsertStatMarker },
     { action: 'closeBook', label: 'Open new book', onSelect: () => { void useStoryletStore.getState().closeBook() } },
   ]
@@ -484,14 +585,22 @@ export function AppShell() {
             </button>
             <button
               data-testid="character-panel-button"
-              onClick={() => setCharacterPanelOpen((p) => !p)}
+              onClick={toggleCharacterPanel}
               className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
               title="Character stats panel (Ctrl+Shift+C)"
             >
               Stats
             </button>
             <button
-              onClick={() => setPublishedSnapshotsOpen((prev) => !prev)}
+              data-testid="notes-panel-button"
+              onClick={toggleNotesPanel}
+              className="text-gray-500 hover:text-gray-300 transition-colors px-1.5 py-0.5"
+              title="Notes panel (Ctrl+Shift+J)"
+            >
+              <StickyNote size={13} />
+            </button>
+            <button
+              onClick={togglePublishedSnapshots}
               className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
               title="History — published versions & snapshots (Ctrl+Shift+H)"
             >
@@ -521,6 +630,7 @@ export function AppShell() {
           <BubbleToolbar
             editorView={editorView}
             onInsertMarker={handleInsertMarker}
+            onInsertNote={handleInsertNote}
             onEditStyles={() => setStyleEditorOpen(true)}
           />
           <FindInBook
@@ -566,25 +676,69 @@ export function AppShell() {
           />
         </div>
 
-        {publishedSnapshotsOpen && !distractionFree && (
-          <PublishedSnapshotsBrowser
-            onOpenPublishModal={() => setPublishModalOpen(true)}
-            onRestoreSnapshot={handleRestoreSnapshot}
-            onClose={() => setPublishedSnapshotsOpen(false)}
+        {!distractionFree && (
+          <RightPanelShell
+            panels={[
+              {
+                key: 'characters',
+                label: 'Characters',
+                open: characterPanelOpen,
+                onClose: () => setCharacterPanelOpen(false),
+                content: (
+                  <CharacterPanel
+                    open={characterPanelOpen}
+                    onClose={() => setCharacterPanelOpen(false)}
+                    editorView={editorView}
+                    onOpenCharacterSheet={() => {
+                      setCharacterPanelOpen(false)
+                      setCharacterSheetOpen(true)
+                    }}
+                    embedded
+                  />
+                ),
+              },
+              {
+                key: 'notes',
+                label: 'Notes',
+                open: notesPanelOpen,
+                onClose: () => setNotesPanelOpen(false),
+                content: (
+                  <NotesPanel
+                    open={notesPanelOpen}
+                    onClose={() => setNotesPanelOpen(false)}
+                    editorView={editorView}
+                    focusedNoteId={focusedNoteId}
+                    onFocusHandled={clearFocusedNote}
+                    onEditNote={openNoteEditor}
+                    embedded
+                  />
+                ),
+              },
+              {
+                key: 'history',
+                label: 'History',
+                open: publishedSnapshotsOpen,
+                onClose: () => setPublishedSnapshotsOpen(false),
+                content: (
+                  <PublishedSnapshotsBrowser
+                    onOpenPublishModal={() => setPublishModalOpen(true)}
+                    onRestoreSnapshot={handleRestoreSnapshot}
+                    onClose={() => setPublishedSnapshotsOpen(false)}
+                    embedded
+                  />
+                ),
+              },
+            ] as RightPanel[]}
           />
         )}
 
-        {characterPanelOpen && !distractionFree && (
-          <CharacterPanel
-            open={characterPanelOpen}
-            onClose={() => setCharacterPanelOpen(false)}
-            editorView={editorView}
-            onOpenCharacterSheet={() => {
-              setCharacterPanelOpen(false)
-              setCharacterSheetOpen(true)
-            }}
-          />
-        )}
+        <NoteEditorModal
+          open={noteEditorState.open}
+          onClose={closeNoteEditor}
+          noteId={noteEditorState.noteId}
+          mode={noteEditorState.mode}
+          editorView={editorView}
+        />
       </div>
 
       {!distractionFree && <ImageRevealPanel />}
