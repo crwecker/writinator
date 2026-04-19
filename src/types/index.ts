@@ -203,6 +203,33 @@ export interface MetricsFileData {
   pinnedMetrics: MetricKey[]
 }
 
+// ---------------------------------------------------------------------------
+// Notes — position notes anchored to storylet offsets, and per-storylet notes
+// ---------------------------------------------------------------------------
+
+export interface PositionNote {
+  id: string
+  body: string
+  color?: string
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StoryletNote {
+  id: string
+  storyletId: string
+  body: string
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NotesFileData {
+  positionNotes: Record<string, PositionNote>
+  storyletNotes: Record<string, StoryletNote[]>
+}
+
 export interface WritinatorFile {
   version: 7
   book: Book

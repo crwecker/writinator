@@ -15,6 +15,7 @@ import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { useMetricsStore } from '../../stores/metricsStore'
 import { useCharacterStore } from '../../stores/characterStore'
+import { useNotesStore } from '../../stores/notesStore'
 import { htmlToMarkdownWithStyles } from '../../lib/richPaste'
 import {
   statMarkerExtension,
@@ -1018,6 +1019,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         useCharacterStore
       ;(window as unknown as { __storyletStore?: typeof useStoryletStore }).__storyletStore =
         useStoryletStore
+      ;(window as unknown as { __notesStore?: typeof useNotesStore }).__notesStore =
+        useNotesStore
       // Expose an in-memory markdown renderer so QA can inspect export output
       // without triggering a file download.
       import('../../lib/export').then((mod) => {
