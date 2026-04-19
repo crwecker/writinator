@@ -5,6 +5,8 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { extractNotes } from '../../lib/noteUtils'
 import type { PositionNote, Storylet, StoryletNote } from '../../types'
+import { TagChipInput } from './TagChipInput'
+import { ColorPickerPopover } from './ColorPickerPopover'
 
 interface Props {
   open: boolean
@@ -35,9 +37,19 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+/** A note matches when it contains every active filter tag (AND semantics). */
+function matchesTagFilter(
+  noteTags: string[] | undefined,
+  filter: string[],
+): boolean {
+  if (filter.length === 0) return true
+  if (!noteTags || noteTags.length === 0) return false
+  return filter.every((f) => noteTags.includes(f))
+}
+
 // ---------------------------------------------------------------------------
-// StoryletNoteRow — inline-edited textarea with debounced auto-save (400ms).
-// Also renders a small trash button with a two-step confirm.
+// StoryletNoteRow — inline-edited textarea + tag chips + color swatch with
+// debounced auto-save (400ms).
 // ---------------------------------------------------------------------------
 
 interface StoryletNoteRowProps {
@@ -54,7 +66,10 @@ function StoryletNoteRow({ storyletId, note }: StoryletNoteRowProps) {
     note.updatedAt,
   )
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [colorPickerOpen, setColorPickerOpen] = useState(false)
+  const [colorAnchor, setColorAnchor] = useState({ top: 0, left: 0 })
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const colorSwatchRef = useRef<HTMLButtonElement>(null)
 
   // Reconcile external updates (file load, undo) using the "derived state
   // from props" pattern. When the store-owned updatedAt moves forward and we
@@ -88,6 +103,13 @@ function StoryletNoteRow({ storyletId, note }: StoryletNoteRowProps) {
     [storyletId, note.id, updateStoryletNote],
   )
 
+  const handleTagsChange = useCallback(
+    (tags: string[]) => {
+      updateStoryletNote(storyletId, note.id, { tags })
+    },
+    [storyletId, note.id, updateStoryletNote],
+  )
+
   const handleDelete = useCallback(() => {
     if (saveTimer.current !== null) {
       clearTimeout(saveTimer.current)
@@ -96,47 +118,88 @@ function StoryletNoteRow({ storyletId, note }: StoryletNoteRowProps) {
     removeStoryletNote(storyletId, note.id)
   }, [storyletId, note.id, removeStoryletNote])
 
+  function openColorPicker() {
+    const rect = colorSwatchRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setColorAnchor({ top: rect.bottom + 4, left: rect.left })
+    setColorPickerOpen(true)
+  }
+
+  const color = note.color
+
   return (
     <div
       data-testid="storylet-note-row"
       data-note-id={note.id}
-      className="relative group"
+      className="relative group space-y-1"
     >
-      <textarea
-        data-testid="storylet-note-textarea"
-        value={draft}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder="Write a storylet note…"
-        className="w-full min-h-[60px] resize-none bg-gray-800/40 border border-gray-700 rounded px-2 py-1.5 pr-7 text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-blue-500"
-      />
-      <div className="absolute top-1 right-1 flex items-center gap-1">
-        {confirmDelete ? (
-          <>
-            <button
-              data-testid="storylet-note-delete-confirm"
-              onClick={handleDelete}
-              className="text-[10px] bg-red-900 hover:bg-red-800 text-red-200 rounded px-1.5 py-0.5"
-            >
-              Yes
-            </button>
-            <button
-              onClick={() => setConfirmDelete(false)}
-              className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-1.5 py-0.5"
-            >
-              No
-            </button>
-          </>
-        ) : (
+      <div className="relative">
+        <textarea
+          data-testid="storylet-note-textarea"
+          value={draft}
+          onChange={(e) => handleChange(e.target.value)}
+          placeholder="Write a storylet note…"
+          className="w-full min-h-[60px] resize-none bg-gray-800/40 border border-gray-700 rounded px-2 py-1.5 pr-14 text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-blue-500"
+        />
+        <div className="absolute top-1 right-1 flex items-center gap-1">
           <button
-            data-testid="storylet-note-delete"
-            onClick={() => setConfirmDelete(true)}
-            title="Delete note"
-            className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-500 hover:text-red-400 p-0.5 transition-opacity"
-          >
-            <Trash2 size={12} />
-          </button>
-        )}
+            ref={colorSwatchRef}
+            type="button"
+            onClick={openColorPicker}
+            title={color ? `Color ${color}` : 'Set color'}
+            className="w-3.5 h-3.5 rounded border border-gray-600"
+            style={{
+              backgroundColor: color ?? 'transparent',
+              backgroundImage: color
+                ? undefined
+                : 'repeating-linear-gradient(45deg,#374151,#374151 2px,#4b5563 2px,#4b5563 4px)',
+            }}
+            data-testid="storylet-note-color"
+          />
+          {confirmDelete ? (
+            <>
+              <button
+                data-testid="storylet-note-delete-confirm"
+                onClick={handleDelete}
+                className="text-[10px] bg-red-900 hover:bg-red-800 text-red-200 rounded px-1.5 py-0.5"
+              >
+                Yes
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-1.5 py-0.5"
+              >
+                No
+              </button>
+            </>
+          ) : (
+            <button
+              data-testid="storylet-note-delete"
+              onClick={() => setConfirmDelete(true)}
+              title="Delete note"
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-500 hover:text-red-400 p-0.5 transition-opacity"
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </div>
       </div>
+      <TagChipInput
+        tags={note.tags ?? []}
+        onChange={handleTagsChange}
+        placeholder="tag"
+        size="sm"
+        testId="storylet-note-tags"
+      />
+      <ColorPickerPopover
+        open={colorPickerOpen}
+        onClose={() => setColorPickerOpen(false)}
+        currentColor={color}
+        onSelect={(c) => {
+          updateStoryletNote(storyletId, note.id, { color: c })
+        }}
+        anchorRect={colorAnchor}
+      />
     </div>
   )
 }
@@ -221,6 +284,9 @@ export function NotesPanel({
   const storyletNotes = useNotesStore((s) => s.storyletNotes)
   const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map())
 
+  // Tag filter — chips with AND semantics across all note kinds.
+  const [filterTags, setFilterTags] = useState<string[]>([])
+
   // Jump from a panel row to the anchor in the editor. Mirrors
   // CharacterPanel.jumpToMarker but uses the notesStore / noteUtils pattern.
   const jumpToNote = useCallback(
@@ -274,7 +340,8 @@ export function NotesPanel({
   }, [focusedNoteId, open, onFocusHandled])
 
   // Active storylet (or fallback to first) is pinned at the top. Any other
-  // storylets with notes render below in a secondary list.
+  // storylets with notes render below in a secondary list. Filtering applies
+  // after the section structure so storylet headers stay meaningful.
   const storyletNotesSections = useMemo<{
     active: StoryletNotesSection | null
     others: StoryletNotesSection[]
@@ -285,8 +352,11 @@ export function NotesPanel({
       book.storylets[0] ??
       null
 
+    const filterList = (notes: StoryletNote[]) =>
+      notes.filter((n) => matchesTagFilter(n.tags, filterTags))
+
     const activeSection: StoryletNotesSection | null = active
-      ? { storylet: active, notes: storyletNotes[active.id] ?? [] }
+      ? { storylet: active, notes: filterList(storyletNotes[active.id] ?? []) }
       : null
 
     const others: StoryletNotesSection[] = []
@@ -294,10 +364,12 @@ export function NotesPanel({
       if (active && storylet.id === active.id) continue
       const notes = storyletNotes[storylet.id]
       if (!notes || notes.length === 0) continue
-      others.push({ storylet, notes })
+      const filtered = filterList(notes)
+      if (filtered.length === 0) continue
+      others.push({ storylet, notes: filtered })
     }
     return { active: activeSection, others }
-  }, [book, activeStoryletId, storyletNotes])
+  }, [book, activeStoryletId, storyletNotes, filterTags])
 
   const sections = useMemo<StoryletSection[]>(() => {
     if (!book) return []
@@ -305,22 +377,25 @@ export function NotesPanel({
     for (const storylet of book.storylets) {
       const extracted = extractNotes(storylet.content ?? '')
       if (extracted.length === 0) continue
-      out.push({
-        storylet,
-        notes: extracted.map((n) => ({
+      const filtered = extracted
+        .map((n) => ({
           id: n.id,
           offset: n.offset,
           note: positionNotes[n.id],
-        })),
-      })
+        }))
+        .filter((row) => matchesTagFilter(row.note?.tags, filterTags))
+      if (filtered.length === 0) continue
+      out.push({ storylet, notes: filtered })
     }
     return out
-  }, [book, positionNotes])
+  }, [book, positionNotes, filterTags])
 
   const totalPositionNotes = useMemo(
     () => sections.reduce((sum, s) => sum + s.notes.length, 0),
     [sections],
   )
+
+  const filterActive = filterTags.length > 0
 
   if (!open) return null
 
@@ -340,37 +415,67 @@ export function NotesPanel({
         </button>
       </div>
 
+      {/* Filter bar */}
+      <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/60">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+            Filter
+          </span>
+          {filterActive && (
+            <button
+              data-testid="notes-panel-filter-clear"
+              onClick={() => setFilterTags([])}
+              className="text-[10px] text-gray-500 hover:text-gray-200"
+            >
+              clear
+            </button>
+          )}
+        </div>
+        <TagChipInput
+          tags={filterTags}
+          onChange={setFilterTags}
+          placeholder="Filter by tag…"
+          size="sm"
+          testId="notes-panel-filter"
+        />
+      </div>
+
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
         {/* Pinned: Storylet notes ----------------------------------------- */}
-        {storyletNotesSections.active && (
-          <section
-            data-testid="storylet-notes-section"
-            className="space-y-3"
-          >
-            <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
-              Storylet notes
-            </div>
-            <StoryletNotesGroup
-              storylet={storyletNotesSections.active.storylet}
-              notes={storyletNotesSections.active.notes}
-            />
-            {storyletNotesSections.others.length > 0 && (
-              <div
-                data-testid="storylet-notes-others"
-                className="pt-2 border-t border-gray-800 space-y-3"
-              >
-                {storyletNotesSections.others.map((s) => (
-                  <StoryletNotesGroup
-                    key={s.storylet.id}
-                    storylet={s.storylet}
-                    notes={s.notes}
-                  />
-                ))}
+        {storyletNotesSections.active &&
+          (storyletNotesSections.active.notes.length > 0 ||
+            !filterActive ||
+            storyletNotesSections.others.length > 0) && (
+            <section
+              data-testid="storylet-notes-section"
+              className="space-y-3"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+                Storylet notes
               </div>
-            )}
-          </section>
-        )}
+              {(!filterActive || storyletNotesSections.active.notes.length > 0) && (
+                <StoryletNotesGroup
+                  storylet={storyletNotesSections.active.storylet}
+                  notes={storyletNotesSections.active.notes}
+                />
+              )}
+              {storyletNotesSections.others.length > 0 && (
+                <div
+                  data-testid="storylet-notes-others"
+                  className="pt-2 border-t border-gray-800 space-y-3"
+                >
+                  {storyletNotesSections.others.map((s) => (
+                    <StoryletNotesGroup
+                      key={s.storylet.id}
+                      storylet={s.storylet}
+                      notes={s.notes}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
         {/* Position notes ------------------------------------------------- */}
         {totalPositionNotes > 0 && (
@@ -458,6 +563,21 @@ export function NotesPanel({
             ))}
           </section>
         )}
+
+        {/* No-match state when a filter is on but nothing matches. */}
+        {book &&
+          filterActive &&
+          totalPositionNotes === 0 &&
+          (!storyletNotesSections.active ||
+            storyletNotesSections.active.notes.length === 0) &&
+          storyletNotesSections.others.length === 0 && (
+            <div
+              data-testid="notes-panel-no-match"
+              className="text-center text-xs text-gray-500 py-8"
+            >
+              No notes match the current filter.
+            </div>
+          )}
 
         {/* Empty state — only when there is no book at all. */}
         {!book && (

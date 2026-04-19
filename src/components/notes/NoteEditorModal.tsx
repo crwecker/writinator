@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useNotesStore } from '../../stores/notesStore'
 import { NOTE_MARKER_REGEX } from '../../lib/noteUtils'
+import { TagChipInput } from './TagChipInput'
+import { ColorPickerPopover } from './ColorPickerPopover'
 
 interface Props {
   open: boolean
@@ -20,6 +22,7 @@ export function NoteEditorModal({
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const colorButtonRef = useRef<HTMLButtonElement>(null)
   const note = useNotesStore((s) =>
     noteId ? s.positionNotes[noteId] : undefined,
   )
@@ -27,13 +30,23 @@ export function NoteEditorModal({
   const removePositionNote = useNotesStore((s) => s.removePositionNote)
 
   const [body, setBody] = useState<string>('')
+  const [tags, setTags] = useState<string[]>([])
+  const [color, setColor] = useState<string | undefined>(undefined)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [colorPickerOpen, setColorPickerOpen] = useState(false)
+  const [colorAnchorRect, setColorAnchorRect] = useState<{
+    top: number
+    left: number
+  }>({ top: 0, left: 0 })
 
   // Seed draft whenever the modal opens (or the target note changes).
   useEffect(() => {
     if (!open) return
     setConfirmDelete(false)
+    setColorPickerOpen(false)
     setBody(note?.body ?? '')
+    setTags(note?.tags ?? [])
+    setColor(note?.color)
     // Focus the textarea after the panel renders.
     const t = setTimeout(() => textareaRef.current?.focus(), 0)
     return () => clearTimeout(t)
@@ -73,7 +86,7 @@ export function NoteEditorModal({
 
   function handleSave() {
     if (!noteId) return
-    updatePositionNote(noteId, { body })
+    updatePositionNote(noteId, { body, tags, color })
     onClose()
   }
 
@@ -94,6 +107,13 @@ export function NoteEditorModal({
     }
     removePositionNote(noteId)
     onClose()
+  }
+
+  function openColorPicker() {
+    const rect = colorButtonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setColorAnchorRect({ top: rect.bottom + 4, left: rect.left })
+    setColorPickerOpen(true)
   }
 
   const shortId = noteId.slice(0, 8)
@@ -120,16 +140,50 @@ export function NoteEditorModal({
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-5">
-          <label className="block text-xs text-gray-400 mb-1">Body</label>
-          <textarea
-            ref={textareaRef}
-            data-testid="note-editor-body"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="Write a note…"
-            className="w-full min-h-[160px] resize-y bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-600 outline-none focus:border-blue-500"
-          />
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Body</label>
+            <textarea
+              ref={textareaRef}
+              data-testid="note-editor-body"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Write a note…"
+              className="w-full min-h-[160px] resize-y bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-600 outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Tags</label>
+            <TagChipInput
+              tags={tags}
+              onChange={setTags}
+              placeholder="Add tag and press Enter"
+              testId="note-editor-tags"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Color</label>
+            <button
+              ref={colorButtonRef}
+              type="button"
+              onClick={openColorPicker}
+              data-testid="note-editor-color-button"
+              className="inline-flex items-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
+            >
+              <span
+                className="w-4 h-4 rounded border border-gray-600"
+                style={{
+                  backgroundColor: color ?? 'transparent',
+                  backgroundImage: color
+                    ? undefined
+                    : 'repeating-linear-gradient(45deg,#374151,#374151 3px,#4b5563 3px,#4b5563 6px)',
+                }}
+              />
+              <span className="font-mono">{color ?? 'none'}</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-gray-700 px-5 py-3 shrink-0">
@@ -178,6 +232,14 @@ export function NoteEditorModal({
           </div>
         </div>
       </div>
+
+      <ColorPickerPopover
+        open={colorPickerOpen}
+        onClose={() => setColorPickerOpen(false)}
+        currentColor={color}
+        onSelect={(c) => setColor(c)}
+        anchorRect={colorAnchorRect}
+      />
     </div>
   )
 }

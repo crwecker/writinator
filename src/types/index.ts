@@ -220,6 +220,7 @@ export interface StoryletNote {
   id: string
   storyletId: string
   body: string
+  color?: string
   tags: string[]
   createdAt: string
   updatedAt: string
