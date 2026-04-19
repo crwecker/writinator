@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins, Search } from 'lucide-react'
+import { Coins, Search, StickyNote } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -24,6 +24,7 @@ import { QuestReminder } from '../quests/QuestReminder'
 import { CharacterSheetModal } from '../characters/CharacterSheetModal'
 import { CharacterPanel } from '../characters/CharacterPanel'
 import { DeltaEditorModal } from '../characters/DeltaEditorModal'
+import { NotesPanel } from '../notes/NotesPanel'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import { getPublishedSnapshots } from '../../stores/publishedSnapshotStore'
@@ -57,6 +58,7 @@ export function AppShell() {
   const [guildTab, setGuildTab] = useState<GuildTab>('board')
   const [characterSheetOpen, setCharacterSheetOpen] = useState(false)
   const [characterPanelOpen, setCharacterPanelOpen] = useState(false)
+  const [notesPanelOpen, setNotesPanelOpen] = useState(false)
   const [deltaEditorState, setDeltaEditorState] = useState<{
     open: boolean
     markerId: string | null
@@ -253,6 +255,11 @@ export function AppShell() {
         setCharacterPanelOpen((p) => !p)
         return
       }
+      if (km.toggleNotesPanel && matchesEvent(km.toggleNotesPanel, e)) {
+        e.preventDefault()
+        setNotesPanelOpen((p) => !p)
+        return
+      }
       if (km.insertStatMarker && matchesEvent(km.insertStatMarker, e)) {
         if (!editorViewRef.current) return
         e.preventDefault()
@@ -416,6 +423,7 @@ export function AppShell() {
     { action: 'findInBook', label: 'Find in book', onSelect: () => setFindOpen((prev) => !prev) },
     { action: 'snapshotHistory', label: 'History', onSelect: () => setPublishedSnapshotsOpen((prev) => !prev) },
     { action: 'toggleCharacterPanel', label: 'Character stats', onSelect: () => setCharacterPanelOpen((p) => !p) },
+    { action: 'toggleNotesPanel', label: 'Notes', onSelect: () => setNotesPanelOpen((p) => !p) },
     { action: 'insertStatMarker', label: 'Insert stat change', onSelect: handleInsertStatMarker },
     { action: 'closeBook', label: 'Open new book', onSelect: () => { void useStoryletStore.getState().closeBook() } },
   ]
@@ -507,6 +515,14 @@ export function AppShell() {
               title="Character stats panel (Ctrl+Shift+C)"
             >
               Stats
+            </button>
+            <button
+              data-testid="notes-panel-button"
+              onClick={() => setNotesPanelOpen((p) => !p)}
+              className="text-gray-500 hover:text-gray-300 transition-colors px-1.5 py-0.5"
+              title="Notes panel (Ctrl+Shift+J)"
+            >
+              <StickyNote size={13} />
             </button>
             <button
               onClick={() => setPublishedSnapshotsOpen((prev) => !prev)}
@@ -602,6 +618,13 @@ export function AppShell() {
               setCharacterPanelOpen(false)
               setCharacterSheetOpen(true)
             }}
+          />
+        )}
+
+        {notesPanelOpen && !distractionFree && (
+          <NotesPanel
+            open={notesPanelOpen}
+            onClose={() => setNotesPanelOpen(false)}
           />
         )}
       </div>
