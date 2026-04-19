@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, keymap, placeholder, drawSelection, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view'
-import { EditorState, Compartment, StateField, StateEffect, type Extension } from '@codemirror/state'
+import { EditorState, Compartment, StateField, StateEffect, RangeSet, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import {
   autocompletion,
@@ -96,8 +96,15 @@ const renderModeField = StateField.define<'source' | 'rendered' | 'preview'>({
 })
 
 // Markdown decoration plugin
-function markdownDecorations(view: EditorView): DecorationSet {
+function markdownDecorations(view: EditorView): { decorations: DecorationSet; atomicRanges: DecorationSet } {
   const decorations: { from: number; to: number; deco: Decoration }[] = []
+  const atomicEntries: { from: number; to: number; deco: Decoration }[] = []
+
+  const pushReplace = (from: number, to: number) => {
+    const deco = Decoration.replace({})
+    decorations.push({ from, to, deco })
+    atomicEntries.push({ from, to, deco })
+  }
   const doc = view.state.doc
   const mode = view.state.field(renderModeField)
   const cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number
@@ -202,11 +209,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
       // In rendered mode on non-cursor lines, hide the "# " prefix
       if (isRendered && (alwaysHide || !isCursorLine)) {
         const prefixLen = headingMatch[0].length // e.g. "## " = 3
-        decorations.push({
-          from: line.from,
-          to: line.from + prefixLen,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(line.from, line.from + prefixLen)
       }
     }
 
@@ -217,21 +220,13 @@ function markdownDecorations(view: EditorView): DecorationSet {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
       if (isRendered && (alwaysHide || !isCursorLine)) {
-        decorations.push({
-          from: matchStart,
-          to: matchStart + 3,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchStart, matchStart + 3)
         decorations.push({
           from: matchStart + 3,
           to: matchEnd - 3,
           deco: Decoration.mark({ attributes: { style: 'font-weight: 700; font-style: italic;' } }),
         })
-        decorations.push({
-          from: matchEnd - 3,
-          to: matchEnd,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchEnd - 3, matchEnd)
       } else {
         decorations.push({
           from: matchStart,
@@ -248,11 +243,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
       const matchEnd = matchStart + match[0].length
       if (isRendered && (alwaysHide || !isCursorLine)) {
         // Replace opening **
-        decorations.push({
-          from: matchStart,
-          to: matchStart + 2,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchStart, matchStart + 2)
         // Mark inner content as bold
         decorations.push({
           from: matchStart + 2,
@@ -260,11 +251,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
           deco: Decoration.mark({ attributes: { style: 'font-weight: 700;' } }),
         })
         // Replace closing **
-        decorations.push({
-          from: matchEnd - 2,
-          to: matchEnd,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchEnd - 2, matchEnd)
       } else {
         // Source mode: mark the whole match
         decorations.push({
@@ -281,21 +268,13 @@ function markdownDecorations(view: EditorView): DecorationSet {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
       if (isRendered && (alwaysHide || !isCursorLine)) {
-        decorations.push({
-          from: matchStart,
-          to: matchStart + 1,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchStart, matchStart + 1)
         decorations.push({
           from: matchStart + 1,
           to: matchEnd - 1,
           deco: Decoration.mark({ attributes: { style: 'font-style: italic;' } }),
         })
-        decorations.push({
-          from: matchEnd - 1,
-          to: matchEnd,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchEnd - 1, matchEnd)
       } else {
         decorations.push({
           from: matchStart,
@@ -311,21 +290,13 @@ function markdownDecorations(view: EditorView): DecorationSet {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
       if (isRendered && (alwaysHide || !isCursorLine)) {
-        decorations.push({
-          from: matchStart,
-          to: matchStart + 2,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchStart, matchStart + 2)
         decorations.push({
           from: matchStart + 2,
           to: matchEnd - 2,
           deco: Decoration.mark({ attributes: { style: 'text-decoration: line-through;' } }),
         })
-        decorations.push({
-          from: matchEnd - 2,
-          to: matchEnd,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchEnd - 2, matchEnd)
       } else {
         decorations.push({
           from: matchStart,
@@ -341,21 +312,13 @@ function markdownDecorations(view: EditorView): DecorationSet {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
       if (isRendered && (alwaysHide || !isCursorLine)) {
-        decorations.push({
-          from: matchStart,
-          to: matchStart + 1,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchStart, matchStart + 1)
         decorations.push({
           from: matchStart + 1,
           to: matchEnd - 1,
           deco: Decoration.mark({ class: 'cm-md-code' }),
         })
-        decorations.push({
-          from: matchEnd - 1,
-          to: matchEnd,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchEnd - 1, matchEnd)
       } else {
         decorations.push({
           from: matchStart,
@@ -377,11 +340,7 @@ function markdownDecorations(view: EditorView): DecorationSet {
         })
       }
       if (isRendered && (alwaysHide || !isCursorLine)) {
-        decorations.push({
-          from: line.from,
-          to: line.from + alignMatch[0].length,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(line.from, line.from + alignMatch[0].length)
       }
     }
 
@@ -454,21 +413,13 @@ function markdownDecorations(view: EditorView): DecorationSet {
       }
 
       if (isRendered && (alwaysHide || !isCursorLine)) {
-        decorations.push({
-          from: matchStart,
-          to: openTagEnd,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(matchStart, openTagEnd)
         decorations.push({
           from: openTagEnd,
           to: closeTagStart,
           deco: Decoration.mark({ attributes: { style: cssString } }),
         })
-        decorations.push({
-          from: closeTagStart,
-          to: matchEnd,
-          deco: Decoration.replace({}),
-        })
+        pushReplace(closeTagStart, matchEnd)
       } else {
         decorations.push({
           from: matchStart,
@@ -479,15 +430,23 @@ function markdownDecorations(view: EditorView): DecorationSet {
     }
   }
 
-  decorations.sort((a, b) => a.from - b.from || a.to - b.to)
-  return Decoration.set(decorations.map((d) => d.deco.range(d.from, d.to)))
+  const cmp = (a: { from: number; to: number }, b: { from: number; to: number }) => a.from - b.from || a.to - b.to
+  decorations.sort(cmp)
+  atomicEntries.sort(cmp)
+  return {
+    decorations: Decoration.set(decorations.map((d) => d.deco.range(d.from, d.to))),
+    atomicRanges: Decoration.set(atomicEntries.map((d) => d.deco.range(d.from, d.to)), true),
+  }
 }
 
 const markdownDecorationPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet
+    atomicRanges: DecorationSet
     constructor(view: EditorView) {
-      this.decorations = markdownDecorations(view)
+      const result = markdownDecorations(view)
+      this.decorations = result.decorations
+      this.atomicRanges = result.atomicRanges
     }
     update(update: ViewUpdate) {
       const renderModeChanged = update.transactions.some((tr) =>
@@ -497,17 +456,27 @@ const markdownDecorationPlugin = ViewPlugin.fromClass(
         tr.effects.some((e) => e.is(docStylesChangedEffect))
       )
       if (update.docChanged || update.viewportChanged || renderModeChanged || stylesChanged) {
-        this.decorations = markdownDecorations(update.view)
+        const result = markdownDecorations(update.view)
+        this.decorations = result.decorations
+        this.atomicRanges = result.atomicRanges
       } else if (update.view.state.field(renderModeField) === 'rendered' && update.selectionSet) {
         const oldLine = update.startState.doc.lineAt(update.startState.selection.main.head).number
         const newLine = update.state.doc.lineAt(update.state.selection.main.head).number
         if (oldLine !== newLine) {
-          this.decorations = markdownDecorations(update.view)
+          const result = markdownDecorations(update.view)
+          this.decorations = result.decorations
+          this.atomicRanges = result.atomicRanges
         }
       }
     }
   },
-  { decorations: (v) => v.decorations }
+  {
+    decorations: (v) => v.decorations,
+    provide: (plugin) =>
+      EditorView.atomicRanges.of(
+        (view) => view.plugin(plugin)?.atomicRanges ?? RangeSet.empty
+      ),
+  }
 )
 
 // Custom kj keymap for exiting insert mode.
