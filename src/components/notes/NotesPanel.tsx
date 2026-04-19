@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { CornerDownRight, Pencil, Trash2 } from 'lucide-react'
+import type { EditorView } from '@codemirror/view'
 import { useNotesStore } from '../../stores/notesStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { extractNotes } from '../../lib/noteUtils'
@@ -8,6 +9,10 @@ import type { PositionNote, Storylet, StoryletNote } from '../../types'
 interface Props {
   open: boolean
   onClose: () => void
+  editorView: EditorView | null
+  focusedNoteId: string | null
+  onFocusHandled: () => void
+  onEditNote: (noteId: string) => void
 }
 
 interface StoryletSection {
@@ -201,11 +206,72 @@ function StoryletNotesGroup({ storylet, notes }: StoryletNotesGroupProps) {
 // NotesPanel
 // ---------------------------------------------------------------------------
 
-export function NotesPanel({ open, onClose }: Props) {
+export function NotesPanel({
+  open,
+  onClose,
+  editorView,
+  focusedNoteId,
+  onFocusHandled,
+  onEditNote,
+}: Props) {
   const book = useStoryletStore((s) => s.book)
   const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
+  const setActiveStorylet = useStoryletStore((s) => s.setActiveStorylet)
   const positionNotes = useNotesStore((s) => s.positionNotes)
   const storyletNotes = useNotesStore((s) => s.storyletNotes)
+  const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map())
+
+  // Jump from a panel row to the anchor in the editor. Mirrors
+  // CharacterPanel.jumpToMarker but uses the notesStore / noteUtils pattern.
+  const jumpToNote = useCallback(
+    (noteId: string) => {
+      if (!book) return
+      // Find which storylet contains this anchor + its offset.
+      let targetStoryletId: string | null = null
+      let targetOffset = 0
+      for (const storylet of book.storylets) {
+        const extracted = extractNotes(storylet.content ?? '')
+        const match = extracted.find((n) => n.id === noteId)
+        if (match) {
+          targetStoryletId = storylet.id
+          targetOffset = match.offset
+          break
+        }
+      }
+      if (!targetStoryletId) return
+      const doJump = () => {
+        const v = editorView
+        if (!v) return
+        const len = v.state.doc.length
+        const pos = Math.min(targetOffset, len)
+        v.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+        v.focus()
+      }
+      if (targetStoryletId !== activeStoryletId) {
+        setActiveStorylet(targetStoryletId)
+        setTimeout(doJump, 30)
+      } else {
+        doJump()
+      }
+    },
+    [book, activeStoryletId, editorView, setActiveStorylet],
+  )
+
+  // Flash + scroll into view when a row becomes focused.
+  useEffect(() => {
+    if (!focusedNoteId || !open) return
+    const el = rowRefs.current.get(focusedNoteId)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el.classList.remove('cm-value-flash')
+    void el.offsetWidth
+    el.classList.add('cm-value-flash')
+    const timer = setTimeout(() => {
+      el.classList.remove('cm-value-flash')
+      onFocusHandled()
+    }, 800)
+    return () => clearTimeout(timer)
+  }, [focusedNoteId, open, onFocusHandled])
 
   // Active storylet (or fallback to first) is pinned at the top. Any other
   // storylets with notes render below in a secondary list.
@@ -333,7 +399,11 @@ export function NotesPanel({ open, onClose }: Props) {
                         key={id}
                         data-testid="notes-panel-note-row"
                         data-note-id={id}
-                        className="flex items-start gap-2 px-2 py-2"
+                        ref={(el) => {
+                          if (el) rowRefs.current.set(id, el)
+                          else rowRefs.current.delete(id)
+                        }}
+                        className="group flex items-start gap-2 px-2 py-2"
                       >
                         <span
                           className="w-2.5 h-2.5 rounded-sm shrink-0 translate-y-[3px]"
@@ -361,6 +431,24 @@ export function NotesPanel({ open, onClose }: Props) {
                               ))}
                             </div>
                           )}
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
+                          <button
+                            data-testid="notes-panel-jump"
+                            onClick={() => jumpToNote(id)}
+                            title="Jump to note in editor"
+                            className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
+                          >
+                            <CornerDownRight size={12} />
+                          </button>
+                          <button
+                            data-testid="notes-panel-edit"
+                            onClick={() => onEditNote(id)}
+                            title="Edit note"
+                            className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
+                          >
+                            <Pencil size={12} />
+                          </button>
                         </div>
                       </li>
                     )

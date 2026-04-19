@@ -25,6 +25,7 @@ import { CharacterSheetModal } from '../characters/CharacterSheetModal'
 import { CharacterPanel } from '../characters/CharacterPanel'
 import { DeltaEditorModal } from '../characters/DeltaEditorModal'
 import { NotesPanel } from '../notes/NotesPanel'
+import { NoteEditorModal } from '../notes/NoteEditorModal'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import { getPublishedSnapshots } from '../../stores/publishedSnapshotStore'
@@ -59,6 +60,12 @@ export function AppShell() {
   const [characterSheetOpen, setCharacterSheetOpen] = useState(false)
   const [characterPanelOpen, setCharacterPanelOpen] = useState(false)
   const [notesPanelOpen, setNotesPanelOpen] = useState(false)
+  const [focusedNoteId, setFocusedNoteId] = useState<string | null>(null)
+  const [noteEditorState, setNoteEditorState] = useState<{
+    open: boolean
+    noteId: string | null
+    mode: 'create' | 'edit'
+  }>({ open: false, noteId: null, mode: 'create' })
   const [deltaEditorState, setDeltaEditorState] = useState<{
     open: boolean
     markerId: string | null
@@ -159,6 +166,27 @@ export function AppShell() {
     return () => contentDOM.removeEventListener('click', onClick)
   }, [editorView])
 
+  // Delegated click listener for note squares — opens the panel + focuses the row.
+  // Does NOT open the editor modal (the row's Edit button does that).
+  useEffect(() => {
+    if (!editorView) return
+    const contentDOM = editorView.contentDOM
+    function onClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const square = target.closest('[data-note-id]') as HTMLElement | null
+      if (!square) return
+      const noteId = square.getAttribute('data-note-id')
+      if (!noteId) return
+      e.preventDefault()
+      e.stopPropagation()
+      setNotesPanelOpen(true)
+      setFocusedNoteId(noteId)
+    }
+    contentDOM.addEventListener('click', onClick)
+    return () => contentDOM.removeEventListener('click', onClick)
+  }, [editorView])
+
   const handleRestoreSnapshot = useCallback((content: string) => {
     if (!editorView) return
     editorView.dispatch({
@@ -187,7 +215,18 @@ export function AppShell() {
       changes: { from: to, to, insert: `<!-- note:${noteId} -->` },
     })
     useNotesStore.getState().addPositionNote(noteId, { body: '' })
+    setNoteEditorState({ open: true, noteId, mode: 'create' })
   }, [])
+
+  const openNoteEditor = useCallback((noteId: string) => {
+    setNoteEditorState({ open: true, noteId, mode: 'edit' })
+  }, [])
+
+  const closeNoteEditor = useCallback(() => {
+    setNoteEditorState((prev) => ({ ...prev, open: false }))
+  }, [])
+
+  const clearFocusedNote = useCallback(() => setFocusedNoteId(null), [])
 
   const handleSaveToDisk = useCallback(() => {
     const state = useStoryletStore.getState()
@@ -625,8 +664,20 @@ export function AppShell() {
           <NotesPanel
             open={notesPanelOpen}
             onClose={() => setNotesPanelOpen(false)}
+            editorView={editorView}
+            focusedNoteId={focusedNoteId}
+            onFocusHandled={clearFocusedNote}
+            onEditNote={openNoteEditor}
           />
         )}
+
+        <NoteEditorModal
+          open={noteEditorState.open}
+          onClose={closeNoteEditor}
+          noteId={noteEditorState.noteId}
+          mode={noteEditorState.mode}
+          editorView={editorView}
+        />
       </div>
 
       {!distractionFree && <ImageRevealPanel />}
