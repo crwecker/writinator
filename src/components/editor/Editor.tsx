@@ -25,6 +25,10 @@ import {
   statblockMarkerExtension,
   dispatchStatblockActiveStorylet,
 } from './statblockMarkerExtension'
+import {
+  noteMarkerExtension,
+  dispatchNotesSnapshot,
+} from './noteMarkerExtension'
 import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
 import './editor.css'
@@ -768,6 +772,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         renderModeField,
         markdownDecorationPlugin,
         statMarkerExtension(),
+        noteMarkerExtension(),
         statblockMarkerExtension(),
         placeholder('Start writing...'),
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
@@ -1053,6 +1058,23 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         }
       })
     }
+    return unsubscribe
+  }, [])
+
+  // Sync notes store → CM6 snapshot so note-marker squares refresh on store
+  // changes. Dispatches once on mount + any time `positionNotes` reference-
+  // changes in the Zustand store. Mirrors the character snapshot pattern.
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const initial = useNotesStore.getState()
+    dispatchNotesSnapshot(view, { positionNotes: initial.positionNotes })
+    const unsubscribe = useNotesStore.subscribe((state, prev) => {
+      if (state.positionNotes === prev.positionNotes) return
+      const v = viewRef.current
+      if (!v) return
+      dispatchNotesSnapshot(v, { positionNotes: state.positionNotes })
+    })
     return unsubscribe
   }, [])
 
