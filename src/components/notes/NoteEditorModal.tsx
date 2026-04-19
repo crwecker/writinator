@@ -231,15 +231,15 @@ export function NoteEditorModal({
             </button>
           </div>
         </div>
-      </div>
 
-      <ColorPickerPopover
-        open={colorPickerOpen}
-        onClose={() => setColorPickerOpen(false)}
-        currentColor={color}
-        onSelect={(c) => setColor(c)}
-        anchorRect={colorAnchorRect}
-      />
+        <ColorPickerPopover
+          open={colorPickerOpen}
+          onClose={() => setColorPickerOpen(false)}
+          currentColor={color}
+          onSelect={(c) => setColor(c)}
+          anchorRect={colorAnchorRect}
+        />
+      </div>
     </div>
   )
 }
