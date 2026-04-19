@@ -11,6 +11,7 @@ export type ActionName =
   | 'toggleRenderMode'
   | 'toggleCharacterPanel'
   | 'insertStatMarker'
+  | 'insertNote'
   | 'exportBook'
   | 'findInBook'
   | 'openFile'
@@ -35,6 +36,7 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   toggleRenderMode: 'Cycle Presentation',
   toggleCharacterPanel: 'Toggle Character Panel',
   insertStatMarker: 'Insert stat change',
+  insertNote: 'Insert Note',
   exportBook: 'Export book',
   findInBook: 'Find in book',
   openFile: 'Open file',
@@ -49,6 +51,7 @@ export const DEFAULT_KEYMAP: KeyMap = {
   toggleRenderMode: { key: 'p', ctrl: true, shift: true },
   toggleCharacterPanel: { key: 'c', ctrl: true, shift: true },
   insertStatMarker: { key: '.', ctrl: true, shift: true },
+  insertNote: { key: 'n', ctrl: true, shift: true },
   exportBook: { key: 'e', ctrl: true, shift: true },
   findInBook: { key: 'f', ctrl: true, shift: true },
 }

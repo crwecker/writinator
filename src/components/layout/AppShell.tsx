@@ -36,6 +36,7 @@ import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords, extractWords } from '../../lib/words'
 import { useMetricsStore } from '../../stores/metricsStore'
+import { useNotesStore } from '../../stores/notesStore'
 import { JourneyBar } from './JourneyBar'
 import { DailyTarget } from './DailyTarget'
 import { MilestoneFlash } from './MilestoneFlash'
@@ -175,6 +176,17 @@ export function AppShell() {
     setDeltaEditorState({ open: true, markerId, mode: 'create' })
   }, [])
 
+  const handleInsertNote = useCallback(() => {
+    const view = editorViewRef.current
+    if (!view) return
+    const { to } = view.state.selection.main
+    const noteId = crypto.randomUUID()
+    view.dispatch({
+      changes: { from: to, to, insert: `<!-- note:${noteId} -->` },
+    })
+    useNotesStore.getState().addPositionNote(noteId, { body: '' })
+  }, [])
+
   const handleSaveToDisk = useCallback(() => {
     const state = useStoryletStore.getState()
     state._flushContentUpdate()
@@ -247,10 +259,16 @@ export function AppShell() {
         handleInsertStatMarker()
         return
       }
+      if (km.insertNote && matchesEvent(km.insertNote, e)) {
+        if (!editorViewRef.current) return
+        e.preventDefault()
+        handleInsertNote()
+        return
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [toggleDistractionFree, toggleRenderMode, handleSaveToDisk, handleInsertStatMarker])
+  }, [toggleDistractionFree, toggleRenderMode, handleSaveToDisk, handleInsertStatMarker, handleInsertNote])
 
   // Auto-snapshot every 5 minutes
   useEffect(() => {
@@ -521,6 +539,7 @@ export function AppShell() {
           <BubbleToolbar
             editorView={editorView}
             onInsertMarker={handleInsertMarker}
+            onInsertNote={handleInsertNote}
             onEditStyles={() => setStyleEditorOpen(true)}
           />
           <FindInBook
