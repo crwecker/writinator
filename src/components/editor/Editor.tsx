@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, keymap, placeholder, drawSelection, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view'
-import { EditorState, Compartment, StateField, StateEffect, RangeSet, type Extension } from '@codemirror/state'
+import { EditorState, Compartment, StateEffect, RangeSet, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import {
   autocompletion,
@@ -17,6 +17,7 @@ import { useMetricsStore } from '../../stores/metricsStore'
 import { useCharacterStore } from '../../stores/characterStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { htmlToMarkdownWithStyles } from '../../lib/richPaste'
+import { useIsFileLocked, isFileLockedNow } from '../../lib/fileLock'
 import {
   statMarkerExtension,
   dispatchCharacterSnapshot,
@@ -31,6 +32,11 @@ import {
 } from './noteMarkerExtension'
 import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
+import {
+  renderModeField,
+  setRenderModeEffect,
+  shouldHideMarkdown,
+} from './renderMode'
 import './editor.css'
 
 // Map j/k to gj/gk so vim navigation respects visual (wrapped) lines
@@ -65,6 +71,17 @@ function makeFontSizeTheme(fontSize: number): Extension {
   })
 }
 
+// Blocks edits when the book is not connected to a granted file handle.
+// EditorState.readOnly stops user input; the transaction filter cancels
+// programmatic doc changes (bubble toolbar, stat markers, rich paste).
+function makeLockExt(locked: boolean): Extension {
+  if (!locked) return []
+  return [
+    EditorState.readOnly.of(true),
+    EditorState.transactionFilter.of((tr) => (tr.docChanged ? [] : tr)),
+  ]
+}
+
 function makeDocStylesTheme(styles: DocumentStyles | undefined): Extension {
   if (!styles) return []
   const rules: Record<string, Record<string, string>> = {}
@@ -83,18 +100,6 @@ function makeDocStylesTheme(styles: DocumentStyles | undefined): Extension {
 // Effect dispatched when documentStyles changes so the decoration plugin re-runs
 const docStylesChangedEffect = StateEffect.define<null>()
 
-// StateEffect and StateField for render mode so the decoration plugin can read it synchronously
-const setRenderModeEffect = StateEffect.define<'source' | 'rendered' | 'preview'>()
-const renderModeField = StateField.define<'source' | 'rendered' | 'preview'>({
-  create: () => useEditorStore.getState().renderMode,
-  update(value, tr) {
-    for (const e of tr.effects) {
-      if (e.is(setRenderModeEffect)) return e.value
-    }
-    return value
-  },
-})
-
 // Markdown decoration plugin
 function markdownDecorations(view: EditorView): { decorations: DecorationSet; atomicRanges: DecorationSet } {
   const decorations: { from: number; to: number; deco: Decoration }[] = []
@@ -108,8 +113,6 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
   const doc = view.state.doc
   const mode = view.state.field(renderModeField)
   const cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number
-  const isRendered = mode === 'rendered' || mode === 'preview'
-  const alwaysHide = mode === 'preview'
 
   // Cache document styles for heading overrides
   const docStyles = useStoryletStore.getState().globalSettings.documentStyles
@@ -156,7 +159,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
 
     // Group fence lines: collapse entire row when rendered, dim as chrome otherwise.
     if (groupRole && (groupRole.kind === 'open' || groupRole.kind === 'close')) {
-      const fenceClass = isRendered && (alwaysHide || !isCursorLine)
+      const fenceClass = shouldHideMarkdown(mode, isCursorLine)
         ? 'cm-group-fence-hidden'
         : 'cm-group-fence'
       decorations.push({
@@ -207,7 +210,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
       })
 
       // In rendered mode on non-cursor lines, hide the "# " prefix
-      if (isRendered && (alwaysHide || !isCursorLine)) {
+      if (shouldHideMarkdown(mode, isCursorLine)) {
         const prefixLen = headingMatch[0].length // e.g. "## " = 3
         pushReplace(line.from, line.from + prefixLen)
       }
@@ -219,7 +222,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
     while ((match = boldItalicRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && (alwaysHide || !isCursorLine)) {
+      if (shouldHideMarkdown(mode, isCursorLine)) {
         pushReplace(matchStart, matchStart + 3)
         decorations.push({
           from: matchStart + 3,
@@ -241,7 +244,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
     while ((match = boldRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && (alwaysHide || !isCursorLine)) {
+      if (shouldHideMarkdown(mode, isCursorLine)) {
         // Replace opening **
         pushReplace(matchStart, matchStart + 2)
         // Mark inner content as bold
@@ -267,7 +270,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
     while ((match = italicRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && (alwaysHide || !isCursorLine)) {
+      if (shouldHideMarkdown(mode, isCursorLine)) {
         pushReplace(matchStart, matchStart + 1)
         decorations.push({
           from: matchStart + 1,
@@ -289,7 +292,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
     while ((match = strikeRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && (alwaysHide || !isCursorLine)) {
+      if (shouldHideMarkdown(mode, isCursorLine)) {
         pushReplace(matchStart, matchStart + 2)
         decorations.push({
           from: matchStart + 2,
@@ -311,7 +314,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
     while ((match = codeRegex.exec(text)) !== null) {
       const matchStart = line.from + match.index
       const matchEnd = matchStart + match[0].length
-      if (isRendered && (alwaysHide || !isCursorLine)) {
+      if (shouldHideMarkdown(mode, isCursorLine)) {
         pushReplace(matchStart, matchStart + 1)
         decorations.push({
           from: matchStart + 1,
@@ -339,7 +342,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
           deco: Decoration.line({ attributes: { style: `text-align: ${alignment};` } }),
         })
       }
-      if (isRendered && (alwaysHide || !isCursorLine)) {
+      if (shouldHideMarkdown(mode, isCursorLine)) {
         pushReplace(line.from, line.from + alignMatch[0].length)
       }
     }
@@ -412,7 +415,7 @@ function markdownDecorations(view: EditorView): { decorations: DecorationSet; at
         })
       }
 
-      if (isRendered && (alwaysHide || !isCursorLine)) {
+      if (shouldHideMarkdown(mode, isCursorLine)) {
         pushReplace(matchStart, openTagEnd)
         decorations.push({
           from: openTagEnd,
@@ -484,12 +487,15 @@ const markdownDecorationPlugin = ViewPlugin.fromClass(
 // Snap the cursor out of any hidden (atomic) range that a motion lands it inside,
 // and eagerly across when a forward motion lands on a range's entry boundary (or a
 // backward motion on its exit boundary). Entry/exit boundaries render at the same
-// visual position as the far side of the hidden range in preview mode, so stopping
-// there feels like a dead keypress.
+// visual position as the far side of the hidden range, so stopping there feels
+// like a dead keypress (true for l/h/arrows AND w/b/counted motions).
 //
-// Needed because @replit/codemirror-vim NORMAL-mode motions (h/l/w/b/e, arrow keys
-// in NORMAL) walk by document offsets and don't consult EditorView.atomicRanges.
-// Also catches mouse clicks and programmatic dispatches that land mid-range.
+// Reads every registered EditorView.atomicRanges provider in the view, so the
+// behavior covers every extension that publishes atomic ranges — markdown markers,
+// stat/note/statblock marker widgets, and any future hider that follows the pattern.
+// Needed because @replit/codemirror-vim NORMAL-mode motions walk by document offsets
+// and ignore the atomicRanges facet. Also catches mouse clicks and programmatic
+// dispatches that land mid-range.
 const atomicCursorSnap = ViewPlugin.fromClass(
   class {
     update(update: ViewUpdate) {
@@ -497,26 +503,25 @@ const atomicCursorSnap = ViewPlugin.fromClass(
       const sel = update.state.selection.main
       if (!sel.empty) return
       const pos = sel.head
-      const plugin = update.view.plugin(markdownDecorationPlugin)
-      if (!plugin) return
       const oldPos = update.startState.selection.main.head
       const forward = pos >= oldPos
+
       let snapTo: number | null = null
-      const iter = plugin.atomicRanges.iter()
-      while (iter.value && iter.from <= pos) {
-        // Strictly inside a hidden range — snap to the range's far side.
-        if (pos > iter.from && pos < iter.to) {
-          snapTo = forward ? iter.to : iter.from
-          break
+      const providers = update.view.state.facet(EditorView.atomicRanges)
+      outer: for (const provider of providers) {
+        const ranges = provider(update.view)
+        const iter = ranges.iter()
+        while (iter.value && iter.from <= pos) {
+          if (pos > iter.from && pos < iter.to) {
+            snapTo = forward ? iter.to : iter.from
+            break outer
+          }
+          if (forward && pos === iter.from) { snapTo = iter.to; break outer }
+          if (!forward && pos === iter.to) { snapTo = iter.from; break outer }
+          iter.next()
         }
-        // Forward motion stopping at the entry boundary, or backward motion stopping
-        // at the exit boundary — eager snap past the range. Boundary positions render
-        // at the same visual location as the far side, so stopping there always feels
-        // like a dead keypress (true for l/h/arrows AND for w/b/counted motions).
-        if (forward && pos === iter.from) { snapTo = iter.to; break }
-        if (!forward && pos === iter.to) { snapTo = iter.from; break }
-        iter.next()
       }
+
       if (snapTo === null) return
       const target = snapTo
       queueMicrotask(() => {
@@ -703,6 +708,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const documentStyles = useStoryletStore((s) => s.globalSettings.documentStyles)
 
   const distractionFree = useEditorStore((s) => s.distractionFree)
+  const locked = useIsFileLocked()
 
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -714,6 +720,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const fontSizeCompartmentRef = useRef<Compartment | null>(null)
   const typewriterCompartmentRef = useRef<Compartment | null>(null)
   const docStylesCompartmentRef = useRef<Compartment | null>(null)
+  const lockCompartmentRef = useRef<Compartment | null>(null)
   // Cached word count for sub-second WPM delta computation. Updated on every doc change.
   const prevWordCountRef = useRef<number>(0)
 
@@ -758,10 +765,12 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const fontSizeComp = new Compartment()
     const typewriterComp = new Compartment()
     const docStylesComp = new Compartment()
+    const lockComp = new Compartment()
     fontCompartmentRef.current = fontComp
     fontSizeCompartmentRef.current = fontSizeComp
     typewriterCompartmentRef.current = typewriterComp
     docStylesCompartmentRef.current = docStylesComp
+    lockCompartmentRef.current = lockComp
 
     const updateContent = useStoryletStore.getState().updateStoryletContent
 
@@ -796,6 +805,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
         typewriterComp.of(useEditorStore.getState().distractionFree ? typewriterScroll() : []),
         docStylesComp.of(makeDocStylesTheme(useStoryletStore.getState().globalSettings.documentStyles)),
+        lockComp.of(makeLockExt(isFileLockedNow())),
         EditorView.theme({
           '&': { height: '100%', backgroundColor: 'transparent' },
           '.cm-scroller': { overflow: 'auto', padding: '2rem', lineHeight: '1.75' },
@@ -941,6 +951,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
       fontSizeCompartmentRef.current = null
       typewriterCompartmentRef.current = null
       docStylesCompartmentRef.current = null
+      lockCompartmentRef.current = null
       callbacksRef.current.onEditorView?.(null)
       view.destroy()
     }
@@ -1114,6 +1125,15 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     // Toggle CSS class for line fading
     view.dom.classList.toggle('typewriter-mode', distractionFree)
   }, [distractionFree])
+
+  // Apply/clear read-only lock when file connection changes
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = lockCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({ effects: comp.reconfigure(makeLockExt(locked)) })
+    view.dom.classList.toggle('editor-locked', locked)
+  }, [locked])
 
   const hasBook = useStoryletStore((s) => !!s.book)
   const hasStorylet = useStoryletStore((s) => !!s.activeStoryletId)

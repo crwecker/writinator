@@ -14,6 +14,11 @@ import {
 } from '@codemirror/state'
 import type { Character, StatDelta, StatDeltaOp } from '../../types'
 import { STAT_MARKER_REGEX } from '../../lib/markerUtils'
+import {
+  renderModeField,
+  setRenderModeEffect,
+  markerPresentation,
+} from './renderMode'
 
 /**
  * Compact snapshot of character-store state needed to render dot widgets.
@@ -198,21 +203,27 @@ class StatMarkerWidget extends WidgetType {
 }
 
 function buildDecorations(view: EditorView): DecorationSet {
+  const presentation = markerPresentation(view.state.field(renderModeField))
+  // In source mode the raw `<!-- stat:uuid -->` text stays visible — no decoration.
+  if (presentation === 'raw') return Decoration.none
+
   const snapshot = view.state.field(characterSnapshotField)
   const characterById = new Map<string, Character>()
   for (const c of snapshot.characters) characterById.set(c.id, c)
 
   const builder = new RangeSetBuilder<Decoration>()
-  // visibleRanges are non-overlapping and increasing; iterate in order so the
-  // RangeSetBuilder invariant (monotonic from) is preserved.
   for (const { from, to } of view.visibleRanges) {
     const text = view.state.doc.sliceString(from, to)
-    // Fresh regex per range keeps lastIndex local.
     const re = new RegExp(STAT_MARKER_REGEX.source, 'g')
     let m: RegExpExecArray | null
     while ((m = re.exec(text)) !== null) {
       const start = from + m.index
       const end = start + m[0].length
+      // clean mode: hide the marker text entirely with no widget.
+      if (presentation === 'empty') {
+        builder.add(start, end, Decoration.replace({}))
+        continue
+      }
       const markerId = m[1]
       const deltas = snapshot.markers[markerId]
       const firstDelta = deltas?.[0]
@@ -249,10 +260,14 @@ const statMarkerViewPlugin = ViewPlugin.fromClass(
       const snapshotChanged =
         update.startState.field(characterSnapshotField) !==
         update.state.field(characterSnapshotField)
+      const renderModeChanged = update.transactions.some((tr) =>
+        tr.effects.some((e) => e.is(setRenderModeEffect))
+      )
       if (
         update.docChanged ||
         update.viewportChanged ||
-        snapshotChanged
+        snapshotChanged ||
+        renderModeChanged
       ) {
         this.decorations = buildDecorations(update.view)
       }

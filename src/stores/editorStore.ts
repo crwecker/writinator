@@ -67,7 +67,8 @@ export const useEditorStore = create<EditorState>()(
         const next: Record<EditorPreferences['renderMode'], EditorPreferences['renderMode']> = {
           source: 'rendered',
           rendered: 'preview',
-          preview: 'source',
+          preview: 'clean',
+          clean: 'source',
         }
         set({ renderMode: next[get().renderMode] })
       },

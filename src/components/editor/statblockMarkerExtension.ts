@@ -16,6 +16,11 @@ import { createElement } from 'react'
 import { STATBLOCK_MARKER_REGEX } from '../../lib/markerUtils'
 import StatBlockWidget from '../characters/StatBlockWidget'
 import { useStoryletStore } from '../../stores/storyletStore'
+import {
+  renderModeField,
+  setRenderModeEffect,
+  markerPresentation,
+} from './renderMode'
 
 function parseOptionsRaw(raw: string | undefined): Record<string, string> {
   if (!raw) return {}
@@ -142,6 +147,10 @@ export function dispatchStatblockActiveStorylet(
 }
 
 function buildDecorations(state: EditorState): DecorationSet {
+  const presentation = markerPresentation(state.field(renderModeField))
+  // In source mode the raw `<!-- statblock:uuid -->` text stays visible — no decoration.
+  if (presentation === 'raw') return Decoration.none
+
   const storyletId = state.field(activeStoryletField, false) ?? ''
   const fullText = state.doc.toString()
   const re = new RegExp(STATBLOCK_MARKER_REGEX.source, 'g')
@@ -163,6 +172,11 @@ function buildDecorations(state: EditorState): DecorationSet {
   matches.sort((a, b) => a.start - b.start)
   const builder = new RangeSetBuilder<Decoration>()
   for (const mm of matches) {
+    if (presentation === 'empty') {
+      // clean mode: hide the marker text entirely with no widget.
+      builder.add(mm.start, mm.end, Decoration.replace({}))
+      continue
+    }
     builder.add(
       mm.start,
       mm.end,
@@ -189,12 +203,18 @@ const statblockDecorationField = StateField.define<DecorationSet>({
     const docIdChanged = tr.effects.some((e) =>
       e.is(setStatblockActiveStoryletEffect)
     )
-    if (tr.docChanged || docIdChanged) {
+    const renderModeChanged = tr.effects.some((e) => e.is(setRenderModeEffect))
+    if (tr.docChanged || docIdChanged || renderModeChanged) {
       return buildDecorations(tr.state)
     }
     return value
   },
-  provide: (f) => EditorView.decorations.from(f),
+  provide: (f) => [
+    EditorView.decorations.from(f),
+    // Widgets replace the whole marker range; publishing them as atomicRanges lets
+    // cursor motion jump across the widget instead of stepping through its span.
+    EditorView.atomicRanges.of((view) => view.state.field(f)),
+  ],
 })
 
 const statblockBaseTheme = EditorView.baseTheme({

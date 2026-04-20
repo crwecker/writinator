@@ -160,7 +160,7 @@ export interface EditorPreferences {
   fontFamily: 'serif' | 'sans' | 'mono'
   fontSize: number
   distractionFree: boolean
-  renderMode: 'source' | 'rendered' | 'preview'
+  renderMode: 'source' | 'rendered' | 'preview' | 'clean'
   sidebarOpen: boolean
   collapsedStoryletIds: string[]
   rightPanelActiveTab: RightPanelTab | null

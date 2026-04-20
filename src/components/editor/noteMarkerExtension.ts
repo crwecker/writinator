@@ -14,6 +14,11 @@ import {
 } from '@codemirror/state'
 import type { PositionNote } from '../../types'
 import { NOTE_MARKER_REGEX } from '../../lib/noteUtils'
+import {
+  renderModeField,
+  setRenderModeEffect,
+  markerPresentation,
+} from './renderMode'
 
 /**
  * Compact snapshot of notes-store state needed to render square widgets.
@@ -115,19 +120,25 @@ class NoteMarkerWidget extends WidgetType {
 }
 
 function buildDecorations(view: EditorView): DecorationSet {
+  const presentation = markerPresentation(view.state.field(renderModeField))
+  // In source mode the raw `<!-- note:uuid -->` text stays visible — no decoration.
+  if (presentation === 'raw') return Decoration.none
+
   const snapshot = view.state.field(notesSnapshotField)
 
   const builder = new RangeSetBuilder<Decoration>()
-  // visibleRanges are non-overlapping and increasing; iterate in order so the
-  // RangeSetBuilder invariant (monotonic from) is preserved.
   for (const { from, to } of view.visibleRanges) {
     const text = view.state.doc.sliceString(from, to)
-    // Fresh regex per range keeps lastIndex local.
     const re = new RegExp(NOTE_MARKER_REGEX.source, 'g')
     let m: RegExpExecArray | null
     while ((m = re.exec(text)) !== null) {
       const start = from + m.index
       const end = start + m[0].length
+      // clean mode: hide the marker text entirely with no widget.
+      if (presentation === 'empty') {
+        builder.add(start, end, Decoration.replace({}))
+        continue
+      }
       const noteId = m[1]
       const note = snapshot.positionNotes[noteId]
       const color = note?.color ?? NEUTRAL_COLOR
@@ -155,10 +166,14 @@ const noteMarkerViewPlugin = ViewPlugin.fromClass(
       const snapshotChanged =
         update.startState.field(notesSnapshotField) !==
         update.state.field(notesSnapshotField)
+      const renderModeChanged = update.transactions.some((tr) =>
+        tr.effects.some((e) => e.is(setRenderModeEffect))
+      )
       if (
         update.docChanged ||
         update.viewportChanged ||
-        snapshotChanged
+        snapshotChanged ||
+        renderModeChanged
       ) {
         this.decorations = buildDecorations(update.view)
       }
