@@ -25,7 +25,6 @@ import { CharacterSheetModal } from '../characters/CharacterSheetModal'
 import { CharacterPanel } from '../characters/CharacterPanel'
 import { DeltaEditorModal } from '../characters/DeltaEditorModal'
 import { NotesPanel } from '../notes/NotesPanel'
-import { NoteEditorModal } from '../notes/NoteEditorModal'
 import { RightPanelShell, type RightPanel } from './RightPanelShell'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
@@ -63,11 +62,6 @@ export function AppShell() {
   const [characterPanelOpen, setCharacterPanelOpen] = useState(false)
   const [notesPanelOpen, setNotesPanelOpen] = useState(false)
   const [focusedNoteId, setFocusedNoteId] = useState<string | null>(null)
-  const [noteEditorState, setNoteEditorState] = useState<{
-    open: boolean
-    noteId: string | null
-    mode: 'create' | 'edit'
-  }>({ open: false, noteId: null, mode: 'create' })
   const [deltaEditorState, setDeltaEditorState] = useState<{
     open: boolean
     markerId: string | null
@@ -219,15 +213,10 @@ export function AppShell() {
       changes: { from: to, to, insert: `<!-- note:${noteId} -->` },
     })
     useNotesStore.getState().addPositionNote(noteId, { body: '' })
-    setNoteEditorState({ open: true, noteId, mode: 'create' })
-  }, [])
-
-  const openNoteEditor = useCallback((noteId: string) => {
-    setNoteEditorState({ open: true, noteId, mode: 'edit' })
-  }, [])
-
-  const closeNoteEditor = useCallback(() => {
-    setNoteEditorState((prev) => ({ ...prev, open: false }))
+    // Open the Notes panel and focus the new row for inline editing.
+    setNotesPanelOpen(true)
+    useEditorStore.getState().setRightPanelActiveTab('notes')
+    setFocusedNoteId(noteId)
   }, [])
 
   const clearFocusedNote = useCallback(() => setFocusedNoteId(null), [])
@@ -712,7 +701,6 @@ export function AppShell() {
                     editorView={editorView}
                     focusedNoteId={focusedNoteId}
                     onFocusHandled={clearFocusedNote}
-                    onEditNote={openNoteEditor}
                     embedded
                   />
                 ),
@@ -735,13 +723,6 @@ export function AppShell() {
           />
         )}
 
-        <NoteEditorModal
-          open={noteEditorState.open}
-          onClose={closeNoteEditor}
-          noteId={noteEditorState.noteId}
-          mode={noteEditorState.mode}
-          editorView={editorView}
-        />
       </div>
 
       {!distractionFree && <ImageRevealPanel />}

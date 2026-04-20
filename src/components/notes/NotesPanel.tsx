@@ -20,25 +20,18 @@ interface Props {
   editorView: EditorView | null
   focusedNoteId: string | null
   onFocusHandled: () => void
-  onEditNote: (noteId: string) => void
   /** When true, render only the inner body — skip outer wrapper and header. */
   embedded?: boolean
 }
 
 interface StoryletSection {
   storylet: Storylet
-  notes: Array<{ id: string; offset: number; note: PositionNote | undefined }>
+  notes: Array<{ id: string; offset: number; note: PositionNote }>
 }
 
 interface StoryletNotesSection {
   storylet: Storylet
   notes: StoryletNote[]
-}
-
-function previewBody(body: string): string {
-  const collapsed = body.replace(/\s+/g, ' ').trim()
-  if (collapsed.length <= 60) return collapsed
-  return collapsed.slice(0, 60).trimEnd() + '\u2026'
 }
 
 function nowIso(): string {
@@ -274,6 +267,182 @@ function StoryletNotesGroup({ storylet, notes }: StoryletNotesGroupProps) {
 }
 
 // ---------------------------------------------------------------------------
+// PositionNoteRow — inline-edited textarea + tag chips + color swatch with
+// debounced auto-save (400ms). Adds a Jump-to-anchor button compared to the
+// StoryletNoteRow. Row exposes its <li> via registerRowRef so the parent
+// panel can scroll / flash / focus it when focusedNoteId matches.
+// ---------------------------------------------------------------------------
+
+interface PositionNoteRowProps {
+  id: string
+  note: PositionNote
+  autoFocusTextarea: boolean
+  registerRowRef: (id: string, el: HTMLLIElement | null) => void
+  onJump: (id: string) => void
+  onDelete: (id: string) => void
+}
+
+function PositionNoteRow({
+  id,
+  note,
+  autoFocusTextarea,
+  registerRowRef,
+  onJump,
+  onDelete,
+}: PositionNoteRowProps) {
+  const updatePositionNote = useNotesStore((s) => s.updatePositionNote)
+
+  const [draft, setDraft] = useState<string>(note.body)
+  const [lastSyncedUpdatedAt, setLastSyncedUpdatedAt] = useState<string>(
+    note.updatedAt,
+  )
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [colorPickerOpen, setColorPickerOpen] = useState(false)
+  const [colorAnchor, setColorAnchor] = useState({ top: 0, left: 0 })
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const colorSwatchRef = useRef<HTMLButtonElement>(null)
+
+  // Reconcile external updates (file load, undo) — mirrors StoryletNoteRow.
+  if (note.updatedAt !== lastSyncedUpdatedAt) {
+    setLastSyncedUpdatedAt(note.updatedAt)
+    if (note.body !== draft) setDraft(note.body)
+  }
+
+  // Focus the textarea when this row becomes the focused one (new note,
+  // marker click).
+  useEffect(() => {
+    if (autoFocusTextarea) textareaRef.current?.focus()
+  }, [autoFocusTextarea])
+
+  // Flush on unmount.
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current !== null) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
+    }
+  }, [])
+
+  const handleChange = useCallback(
+    (value: string) => {
+      setDraft(value)
+      if (saveTimer.current !== null) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(() => {
+        updatePositionNote(id, { body: value })
+        saveTimer.current = null
+      }, 400)
+    },
+    [id, updatePositionNote],
+  )
+
+  const handleTagsChange = useCallback(
+    (tags: string[]) => {
+      updatePositionNote(id, { tags })
+    },
+    [id, updatePositionNote],
+  )
+
+  function openColorPicker() {
+    const rect = colorSwatchRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setColorAnchor({ top: rect.bottom + 4, left: rect.left })
+    setColorPickerOpen(true)
+  }
+
+  const color = note.color
+
+  return (
+    <li
+      ref={(el) => registerRowRef(id, el)}
+      data-testid="notes-panel-note-row"
+      data-note-id={id}
+      className="group relative space-y-1 px-2 py-2"
+    >
+      <div className="relative">
+        <textarea
+          ref={textareaRef}
+          data-testid="position-note-textarea"
+          value={draft}
+          onChange={(e) => handleChange(e.target.value)}
+          placeholder="Write a note…"
+          className="w-full min-h-[60px] resize-none bg-gray-800/40 border border-gray-700 rounded px-2 py-1.5 pr-24 text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-blue-500"
+        />
+        <div className="absolute top-1 right-1 flex items-center gap-1">
+          <button
+            ref={colorSwatchRef}
+            type="button"
+            onClick={openColorPicker}
+            title={color ? `Color ${color}` : 'Set color'}
+            className="w-3.5 h-3.5 rounded border border-gray-600"
+            style={{
+              backgroundColor: color ?? 'transparent',
+              backgroundImage: color
+                ? undefined
+                : 'repeating-linear-gradient(45deg,#374151,#374151 2px,#4b5563 2px,#4b5563 4px)',
+            }}
+            data-testid="position-note-color"
+          />
+          <button
+            data-testid="notes-panel-jump"
+            type="button"
+            onClick={() => onJump(id)}
+            title="Jump to note in editor"
+            className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
+          >
+            <CornerDownRight size={12} />
+          </button>
+          {confirmDelete ? (
+            <>
+              <button
+                data-testid="position-note-delete-confirm"
+                onClick={() => {
+                  setConfirmDelete(false)
+                  onDelete(id)
+                }}
+                className="text-[10px] bg-red-900 hover:bg-red-800 text-red-200 rounded px-1.5 py-0.5"
+              >
+                Yes
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-1.5 py-0.5"
+              >
+                No
+              </button>
+            </>
+          ) : (
+            <button
+              data-testid="position-note-delete"
+              onClick={() => setConfirmDelete(true)}
+              title="Delete note"
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-500 hover:text-red-400 p-0.5 transition-opacity"
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+      <TagChipInput
+        tags={note.tags ?? []}
+        onChange={handleTagsChange}
+        placeholder="tag"
+        size="sm"
+        testId="position-note-tags"
+      />
+      <ColorPickerPopover
+        open={colorPickerOpen}
+        onClose={() => setColorPickerOpen(false)}
+        currentColor={color}
+        onSelect={(c) => updatePositionNote(id, { color: c })}
+        anchorRect={colorAnchor}
+      />
+    </li>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // NotesPanel
 // ---------------------------------------------------------------------------
 
@@ -283,7 +452,6 @@ export function NotesPanel({
   editorView,
   focusedNoteId,
   onFocusHandled,
-  onEditNote,
   embedded = false,
 }: Props) {
   const book = useStoryletStore((s) => s.book)
@@ -505,24 +673,84 @@ export function NotesPanel({
     return { active: activeSection, others }
   }, [book, activeStoryletId, storyletNotes, filterTags])
 
+  // Rows without a store entry are orphaned anchors — surfaced in the Issues
+  // section, excluded from the main list.
   const sections = useMemo<StoryletSection[]>(() => {
     if (!book) return []
     const out: StoryletSection[] = []
     for (const storylet of book.storylets) {
       const extracted = extractNotes(storylet.content ?? '')
       if (extracted.length === 0) continue
-      const filtered = extracted
-        .map((n) => ({
-          id: n.id,
-          offset: n.offset,
-          note: positionNotes[n.id],
-        }))
-        .filter((row) => matchesTagFilter(row.note?.tags, filterTags))
+      const filtered: StoryletSection['notes'] = []
+      for (const n of extracted) {
+        const note = positionNotes[n.id]
+        if (!note) continue
+        if (!matchesTagFilter(note.tags, filterTags)) continue
+        filtered.push({ id: n.id, offset: n.offset, note })
+      }
       if (filtered.length === 0) continue
       out.push({ storylet, notes: filtered })
     }
     return out
   }, [book, positionNotes, filterTags])
+
+  const registerRowRef = useCallback(
+    (id: string, el: HTMLLIElement | null) => {
+      if (el) rowRefs.current.set(id, el)
+      else rowRefs.current.delete(id)
+    },
+    [],
+  )
+
+  /** Delete a position note: remove the anchor from its owning storylet's
+   *  content (via editor dispatch to preserve undo history), then drop the
+   *  store entry. Mirrors the old NoteEditorModal delete flow. */
+  const handleDeletePositionNote = useCallback(
+    (noteId: string) => {
+      if (!book) {
+        removePositionNote(noteId)
+        return
+      }
+      let owningStoryletId: string | null = null
+      let anchorStart = -1
+      let anchorLen = 0
+      for (const storylet of book.storylets) {
+        const content = storylet.content ?? ''
+        const escaped = noteId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const re = new RegExp(`<!--\\s*note:${escaped}\\s*-->`)
+        const match = content.match(re)
+        if (match && typeof match.index === 'number') {
+          owningStoryletId = storylet.id
+          anchorStart = match.index
+          anchorLen = match[0].length
+          break
+        }
+      }
+      const dropStore = () => removePositionNote(noteId)
+      if (!owningStoryletId || anchorStart < 0) {
+        dropStore()
+        return
+      }
+      const dispatchRemoval = () => {
+        const v = editorView
+        if (!v) {
+          dropStore()
+          return
+        }
+        v.dispatch({
+          changes: { from: anchorStart, to: anchorStart + anchorLen, insert: '' },
+        })
+        dropStore()
+      }
+      if (owningStoryletId === activeStoryletId) {
+        dispatchRemoval()
+      } else {
+        setActiveStorylet(owningStoryletId)
+        setTimeout(dispatchRemoval, 30)
+      }
+    },
+    [book, activeStoryletId, editorView, setActiveStorylet, removePositionNote],
+  )
 
   const totalPositionNotes = useMemo(
     () => sections.reduce((sum, s) => sum + s.notes.length, 0),
@@ -742,75 +970,17 @@ export function NotesPanel({
                   {section.storylet.name}
                 </div>
                 <ul className="divide-y divide-gray-800/60">
-                  {section.notes.map(({ id, note }) => {
-                    const body = note?.body ?? ''
-                    const preview = previewBody(body)
-                    const isEmpty = preview.length === 0
-                    const tags = note?.tags ?? []
-                    const color = note?.color ?? '#6b7280'
-                    return (
-                      <li
-                        key={id}
-                        data-testid="notes-panel-note-row"
-                        data-note-id={id}
-                        ref={(el) => {
-                          if (el) rowRefs.current.set(id, el)
-                          else rowRefs.current.delete(id)
-                        }}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => onEditNote(id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            onEditNote(id)
-                          }
-                        }}
-                        title="Click to edit note"
-                        className="group flex items-start gap-2 px-2 py-2 cursor-pointer hover:bg-gray-800/60 focus:outline-none focus:bg-gray-800/60"
-                      >
-                        <span
-                          className="w-2.5 h-2.5 rounded-sm shrink-0 translate-y-[3px]"
-                          style={{ backgroundColor: color }}
-                          title={note?.color ? `Color ${note.color}` : 'No color'}
-                        />
-                        <div className="flex-1 min-w-0 space-y-1">
-                          <div
-                            className={`text-[12px] leading-snug truncate ${
-                              isEmpty ? 'text-gray-600 italic' : 'text-gray-200'
-                            }`}
-                          >
-                            {isEmpty ? '(empty)' : preview}
-                          </div>
-                          {tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {tags.map((t) => (
-                                <span
-                                  key={t}
-                                  className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700"
-                                >
-                                  {t}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
-                          <button
-                            data-testid="notes-panel-jump"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              jumpToNote(id)
-                            }}
-                            title="Jump to note in editor"
-                            className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
-                          >
-                            <CornerDownRight size={12} />
-                          </button>
-                        </div>
-                      </li>
-                    )
-                  })}
+                  {section.notes.map(({ id, note }) => (
+                    <PositionNoteRow
+                      key={id}
+                      id={id}
+                      note={note}
+                      autoFocusTextarea={focusedNoteId === id}
+                      registerRowRef={registerRowRef}
+                      onJump={jumpToNote}
+                      onDelete={handleDeletePositionNote}
+                    />
+                  ))}
                 </ul>
               </div>
             ))}
