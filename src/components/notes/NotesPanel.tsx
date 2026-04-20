@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, ChevronDown, ChevronRight, CornerDownRight, Pencil, Trash2 } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronRight, CornerDownRight, Trash2 } from 'lucide-react'
 import type { EditorView } from '@codemirror/view'
 import { useNotesStore } from '../../stores/notesStore'
 import { useStoryletStore } from '../../stores/storyletStore'
@@ -757,7 +757,17 @@ export function NotesPanel({
                           if (el) rowRefs.current.set(id, el)
                           else rowRefs.current.delete(id)
                         }}
-                        className="group flex items-start gap-2 px-2 py-2"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onEditNote(id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            onEditNote(id)
+                          }
+                        }}
+                        title="Click to edit note"
+                        className="group flex items-start gap-2 px-2 py-2 cursor-pointer hover:bg-gray-800/60 focus:outline-none focus:bg-gray-800/60"
                       >
                         <span
                           className="w-2.5 h-2.5 rounded-sm shrink-0 translate-y-[3px]"
@@ -769,7 +779,6 @@ export function NotesPanel({
                             className={`text-[12px] leading-snug truncate ${
                               isEmpty ? 'text-gray-600 italic' : 'text-gray-200'
                             }`}
-                            title={isEmpty ? '' : body}
                           >
                             {isEmpty ? '(empty)' : preview}
                           </div>
@@ -789,19 +798,14 @@ export function NotesPanel({
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
                           <button
                             data-testid="notes-panel-jump"
-                            onClick={() => jumpToNote(id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              jumpToNote(id)
+                            }}
                             title="Jump to note in editor"
                             className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
                           >
                             <CornerDownRight size={12} />
-                          </button>
-                          <button
-                            data-testid="notes-panel-edit"
-                            onClick={() => onEditNote(id)}
-                            title="Edit note"
-                            className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
-                          >
-                            <Pencil size={12} />
                           </button>
                         </div>
                       </li>
