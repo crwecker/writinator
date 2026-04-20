@@ -35,6 +35,7 @@ import { LandingPage } from './LandingPage'
 import { RewardToast } from '../quests/RewardToast'
 import { GenericToast } from './GenericToast'
 import { FileConnectionBanner } from './FileConnectionBanner'
+import { useIsFileLocked } from '../../lib/fileLock'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { countWords, extractWords } from '../../lib/words'
@@ -83,6 +84,7 @@ export function AppShell() {
   const book = useStoryletStore((s) => s.book)
   const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
   const hasHydrated = useStoryletStore((s) => s.hasHydrated)
+  const locked = useIsFileLocked()
   const renameBook = useStoryletStore((s) => s.renameBook)
   const renameStorylet = useStoryletStore((s) => s.renameStorylet)
   const bookWordCount = useMemo(
@@ -103,10 +105,10 @@ export function AppShell() {
   const [storyletTitleValue, setStoryletTitleValue] = useState('')
 
   const startEditingBookTitle = useCallback(() => {
-    if (!book) return
+    if (!book || locked) return
     setBookTitleValue(book.title)
     setEditingBookTitle(true)
-  }, [book])
+  }, [book, locked])
 
   const commitBookTitle = useCallback(() => {
     const trimmed = bookTitleValue.trim()
@@ -115,10 +117,10 @@ export function AppShell() {
   }, [bookTitleValue, book?.title, renameBook])
 
   const startEditingStoryletTitle = useCallback(() => {
-    if (!activeStorylet) return
+    if (!activeStorylet || locked) return
     setStoryletTitleValue(activeStorylet.name)
     setEditingStoryletTitle(true)
-  }, [activeStorylet])
+  }, [activeStorylet, locked])
 
   const commitStoryletTitle = useCallback(() => {
     const trimmed = storyletTitleValue.trim()
@@ -199,13 +201,14 @@ export function AppShell() {
   const handleInsertStatMarker = useCallback(() => {
     const view = editorViewRef.current
     if (!view) return
+    if (locked) return
     const { to } = view.state.selection.main
     const markerId = crypto.randomUUID()
     view.dispatch({
       changes: { from: to, to, insert: `<!-- stat:${markerId} -->` },
     })
     setDeltaEditorState({ open: true, markerId, mode: 'create' })
-  }, [])
+  }, [locked])
 
   const handleInsertNote = useCallback(() => {
     const view = editorViewRef.current

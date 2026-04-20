@@ -28,7 +28,8 @@ function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
 }
 import { createSnapshot, getAllSnapshots, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
-import { clearFileHandle } from '../lib/fileSystem'
+import { clearFileHandle, getHandleState } from '../lib/fileSystem'
+import { showToast } from './genericToastStore'
 import { useImageRevealStore, hydrateImageReveal } from './imageRevealStore'
 import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
 import { useMetricsStore, hydrateMetrics } from './metricsStore'
@@ -89,6 +90,24 @@ interface StoryletState {
 
 function generateId(): string {
   return crypto.randomUUID()
+}
+
+// Book edits require a tethered file. Returns true and shows a toast
+// when the book is loaded but no granted file handle is present.
+// Safety net for mutation paths that might bypass UI-level disabling
+// (programmatic dispatch, shortcuts, modals).
+// Mirrors the logic in fileLock.ts — 'unknown' permission is treated as OK
+// so freshly-opened files don't briefly lock while queryPermission resolves.
+let lastLockToastAt = 0
+function bailIfLocked(action: string): boolean {
+  const handle = getHandleState()
+  if (handle.hasHandle && handle.permission !== 'denied' && handle.permission !== 'prompt') return false
+  const ts = Date.now()
+  if (ts - lastLockToastAt > 1500) {
+    lastLockToastAt = ts
+    showToast(`Can't ${action} — connect to a file first.`, 'warning')
+  }
+  return true
 }
 
 /** Walk up the parentId chain to check if docId is a descendant of ancestorId */
@@ -249,6 +268,7 @@ export const useStoryletStore = create<StoryletState>()(
       renameBook: (title: string) => {
         const { book } = get()
         if (!book) return
+        if (bailIfLocked('rename book')) return
         set({ book: { ...book, title, updatedAt: now() } })
       },
 
@@ -271,6 +291,7 @@ export const useStoryletStore = create<StoryletState>()(
       addStorylet: (name?: string, parentId?: string) => {
         const { book } = get()
         if (!book) return ''
+        if (bailIfLocked('add storylet')) return ''
         const id = generateId()
         const timestamp = now()
         const siblings = book.storylets.filter((s) => s.parentId === parentId)
@@ -311,6 +332,7 @@ export const useStoryletStore = create<StoryletState>()(
       duplicateStorylet: (id: string) => {
         const { book } = get()
         if (!book) return ''
+        if (bailIfLocked('duplicate storylet')) return ''
         const timestamp = now()
 
         // Collect the target storylet and all its descendants (in order)
@@ -363,6 +385,7 @@ export const useStoryletStore = create<StoryletState>()(
       renameStorylet: (id: string, name: string) => {
         const { book } = get()
         if (!book) return
+        if (bailIfLocked('rename storylet')) return
         set({
           book: {
             ...book,
@@ -398,6 +421,7 @@ export const useStoryletStore = create<StoryletState>()(
       setStoryletIcon: (id: string, icon: string | undefined) => {
         const { book } = get()
         if (!book) return
+        if (bailIfLocked('change icon')) return
         set({
           book: {
             ...book,
@@ -412,6 +436,7 @@ export const useStoryletStore = create<StoryletState>()(
       setStoryletColor: (id: string, color: string | undefined) => {
         const { book } = get()
         if (!book) return
+        if (bailIfLocked('change color')) return
         set({
           book: {
             ...book,
@@ -426,6 +451,7 @@ export const useStoryletStore = create<StoryletState>()(
       deleteStorylet: (id: string) => {
         const { book, activeStoryletId } = get()
         if (!book) return
+        if (bailIfLocked('delete storylet')) return
         // Collect all descendant ids
         const toDelete = new Set<string>([id])
         let changed = true
@@ -461,6 +487,7 @@ export const useStoryletStore = create<StoryletState>()(
       reorderStorylets: (ids: string[]) => {
         const { book } = get()
         if (!book) return
+        if (bailIfLocked('reorder storylets')) return
         const storyletMap = new Map(book.storylets.map((s) => [s.id, s]))
         const reordered = ids
           .map((id) => storyletMap.get(id))
@@ -487,6 +514,7 @@ export const useStoryletStore = create<StoryletState>()(
       moveStorylet: (id: string, newParentId: string | undefined, insertIndex: number) => {
         const { book } = get()
         if (!book) return
+        if (bailIfLocked('move storylet')) return
 
         const storylet = book.storylets.find((d) => d.id === id)
         if (!storylet) return
@@ -545,6 +573,7 @@ export const useStoryletStore = create<StoryletState>()(
       },
 
       updateStoryletContent: (content: string) => {
+        if (bailIfLocked('edit content')) return
         const { _contentUpdateTimer } = get()
         if (_contentUpdateTimer) {
           clearTimeout(_contentUpdateTimer)
@@ -596,12 +625,14 @@ export const useStoryletStore = create<StoryletState>()(
       },
 
       updateGlobalSettings: (patch: Partial<GlobalSettings>) => {
+        if (bailIfLocked('update settings')) return
         const existing = get().globalSettings
         set({ globalSettings: { ...existing, ...patch } })
       },
 
       renameStyle: (oldName: string, newName: string) => {
         if (!oldName || !newName || oldName === newName) return
+        if (bailIfLocked('rename style')) return
         get()._flushContentUpdate()
         const { book, globalSettings } = get()
         const existingStyles = globalSettings.documentStyles ?? {}
@@ -637,6 +668,7 @@ export const useStoryletStore = create<StoryletState>()(
       replaceInlineStyleInOtherDocs: (styleString: string, className: string) => {
         const { book, activeStoryletId } = get()
         if (!book) return 0
+        if (bailIfLocked('replace style')) return 0
         const needle = `<span style="${styleString}">`
         const replacement = `<span class="${className}">`
         let total = 0
@@ -660,6 +692,7 @@ export const useStoryletStore = create<StoryletState>()(
         scope: ReplaceScope,
         targetStoryletId?: string,
       ) => {
+        if (bailIfLocked('replace in book')) return { storyletsChanged: 0, matchesReplaced: 0 }
         get()._flushContentUpdate()
         const { book } = get()
         if (!book) return { storyletsChanged: 0, matchesReplaced: 0 }

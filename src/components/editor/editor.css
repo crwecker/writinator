@@ -5,6 +5,15 @@
   font-size: inherit;
 }
 
+/* Read-only lock (no file connected) — dim content + hide caret to reinforce the banner. */
+.cm-editor.editor-locked .cm-content {
+  opacity: 0.6;
+}
+.cm-editor.editor-locked .cm-cursor,
+.cm-editor.editor-locked .cm-fat-cursor {
+  display: none !important;
+}
+
 .cm-editor.cm-focused {
   outline: none;
 }

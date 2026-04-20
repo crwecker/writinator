@@ -1,10 +1,9 @@
-import { useState, useSyncExternalStore } from 'react'
 import {
-  subscribeHandle,
   getHandleState,
   restoreStoredFileHandleFromRecents,
   openFile,
 } from '../../lib/fileSystem'
+import { useIsFileLocked } from '../../lib/fileLock'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useRecentFilesStore } from '../../stores/recentFilesStore'
 import { showToast } from '../../stores/genericToastStore'
@@ -16,24 +15,17 @@ interface FileSystemHandleWithPermission extends FileSystemFileHandle {
 }
 
 export function FileConnectionBanner() {
-  const [reconnectDismissed, setReconnectDismissed] = useState(false)
-
-  const handleState = useSyncExternalStore(subscribeHandle, getHandleState)
-  const book = useStoryletStore((s) => s.book)
+  const locked = useIsFileLocked()
   const recentFiles = useRecentFilesStore((s) => s.recentFiles)
 
-  // No book loaded — banner is only for active book context
-  if (!book) return null
+  // Banner state matches editor lock state 1:1 so they can never disagree.
+  if (!locked) return null
 
-  // Already connected and permission granted — hide banner
-  if (handleState.hasHandle && handleState.permission === 'granted') return null
-
+  const handleState = getHandleState()
   const mostRecent = recentFiles.length > 0 ? recentFiles[0] : null
 
-  // Reconnect dismissed — skip reconnect variant but fall through to untethered
-
   async function handleConnect() {
-    if (!book) return
+    if (!useStoryletStore.getState().book) return
     try {
       const parsed = await openFile()
       if (!parsed) return
@@ -70,25 +62,29 @@ export function FileConnectionBanner() {
     }
   }
 
-  // Reconnect variant: no current handle, recent file available, not dismissed
-  if (!handleState.hasHandle && mostRecent && !reconnectDismissed) {
+  const bannerClass =
+    'w-full bg-amber-900/40 border-b border-amber-500/60 text-amber-100 text-sm px-4 py-2 flex items-center justify-between shrink-0'
+
+  // Reconnect variant: no current handle, recent file available
+  if (!handleState.hasHandle && mostRecent) {
     return (
-      <div className="w-full bg-gray-800 border-b border-gray-700 text-gray-200 text-sm px-4 py-2 flex items-center justify-between shrink-0">
-        <span className="text-gray-400">
-          Reconnect to <span className="text-gray-200 font-medium">{mostRecent.name}</span>?
+      <div className={bannerClass} role="alert">
+        <span>
+          <span className="font-semibold text-amber-300">Read-only —</span>{' '}
+          reconnect to <span className="font-medium text-amber-50">{mostRecent.name}</span> to edit.
         </span>
         <div className="flex items-center gap-2">
           <button
             onClick={() => { void handleReconnect() }}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs transition-colors"
+            className="bg-amber-500 hover:bg-amber-400 text-gray-900 font-medium px-3 py-1 rounded text-xs transition-colors"
           >
             Reconnect
           </button>
           <button
-            onClick={() => setReconnectDismissed(true)}
-            className="text-gray-500 hover:text-gray-300 px-3 py-1 rounded text-xs transition-colors"
+            onClick={() => { void handleConnect() }}
+            className="text-amber-200 hover:text-amber-50 px-3 py-1 rounded text-xs transition-colors"
           >
-            Dismiss
+            Open different file…
           </button>
         </div>
       </div>
@@ -97,13 +93,14 @@ export function FileConnectionBanner() {
 
   // Untethered variant: no handle, no recents — always visible
   return (
-    <div className="w-full bg-gray-800 border-b border-gray-700 text-gray-200 text-sm px-4 py-2 flex items-center justify-between shrink-0">
-      <span className="text-gray-400">
-        Not saved to a file — changes live only in browser storage.
+    <div className={bannerClass} role="alert">
+      <span>
+        <span className="font-semibold text-amber-300">Read-only —</span>{' '}
+        not saved to a file. Connect to start editing.
       </span>
       <button
         onClick={() => { void handleConnect() }}
-        className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs transition-colors"
+        className="bg-amber-500 hover:bg-amber-400 text-gray-900 font-medium px-3 py-1 rounded text-xs transition-colors"
       >
         Connect to file…
       </button>

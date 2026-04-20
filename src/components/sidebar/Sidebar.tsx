@@ -16,6 +16,7 @@ import {
 } from '@dnd-kit/sortable'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
+import { useIsFileLocked } from '../../lib/fileLock'
 import { TreeNode, type DropIndicator } from './TreeNode'
 import { getIconComponent } from '../../lib/icons'
 import type { Storylet } from '../../types'
@@ -101,6 +102,8 @@ export function Sidebar() {
   const collapsedStoryletIds = useEditorStore((s) => s.collapsedStoryletIds)
   const toggleStoryletCollapsed = useEditorStore((s) => s.toggleStoryletCollapsed)
 
+  const locked = useIsFileLocked()
+
   const [newlyCreatedId, setNewlyCreatedId] = useState<string | null>(null)
 
   const handleAddStorylet = useCallback(
@@ -122,11 +125,13 @@ export function Sidebar() {
   const [isValidDrop, setIsValidDrop] = useState(true)
   const pointerYRef = useRef(0)
 
-  const sensors = useSensors(
+  const activeSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
     })
   )
+  // Passing an empty sensor array to DndContext effectively disables drag while locked.
+  const sensors = locked ? [] : activeSensors
 
   const flatItems = useMemo(() => {
     if (!book) return []
@@ -314,6 +319,7 @@ export function Sidebar() {
                     isDeletable={(book.storylets?.length ?? 0) > 1}
                     autoEdit={item.storylet.id === newlyCreatedId}
                     onAutoEditConsumed={clearNewlyCreatedId}
+                    locked={locked}
                   />
                 )
               })}
@@ -336,8 +342,10 @@ export function Sidebar() {
 
       {/* Add storylet button */}
       <button
-        className="mx-2 my-2 px-2 py-1 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded border border-dashed border-gray-700 hover:border-gray-500 transition-colors"
+        className="mx-2 my-2 px-2 py-1 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded border border-dashed border-gray-700 hover:border-gray-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-gray-400 disabled:hover:bg-transparent disabled:hover:border-gray-700"
         onClick={() => handleAddStorylet()}
+        disabled={locked}
+        title={locked ? 'Connect to a file to edit' : undefined}
       >
         + New Storylet
       </button>

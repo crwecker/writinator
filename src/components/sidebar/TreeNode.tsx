@@ -25,6 +25,7 @@ interface TreeNodeProps {
   isDeletable: boolean
   autoEdit?: boolean
   onAutoEditConsumed?: () => void
+  locked?: boolean
 }
 
 export function TreeNode({
@@ -43,6 +44,7 @@ export function TreeNode({
   isDeletable,
   autoEdit,
   onAutoEditConsumed,
+  locked = false,
 }: TreeNodeProps) {
   const [isEditing, setIsEditing] = useState(autoEdit ?? false)
   const [editValue, setEditValue] = useState(storylet.name)
@@ -185,10 +187,10 @@ export function TreeNode({
           ${dropIndicator === 'reparent' ? 'bg-blue-500/20' : ''}
           ${dropIndicator === 'invalid' ? 'bg-red-500/10' : ''}`}
         onClick={() => !isEditing && onClick()}
-        onDoubleClick={startEditing}
-        onContextMenu={handleContextMenu}
-        {...attributes}
-        {...listeners}
+        onDoubleClick={locked ? undefined : startEditing}
+        onContextMenu={locked ? undefined : handleContextMenu}
+        {...(locked ? {} : attributes)}
+        {...(locked ? {} : listeners)}
       >
         {/* Disclosure chevron (branches only) */}
         {hasChildren && (
@@ -210,9 +212,10 @@ export function TreeNode({
         {/* Icon — click to open icon picker */}
         <button
           type="button"
-          className="shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-white"
+          className="shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-white disabled:hover:text-gray-400"
           style={storylet.color ? { color: storylet.color } : undefined}
-          onClick={openAppearanceFromIconButton}
+          onClick={locked ? undefined : openAppearanceFromIconButton}
+          disabled={locked}
         >
           {createElement(getIconComponent(storylet.icon ?? ''), { size: 16 })}
         </button>
@@ -244,7 +247,7 @@ export function TreeNode({
         )}
 
         {/* Right zone: action buttons (visible on hover) */}
-        {!isEditing && (
+        {!isEditing && !locked && (
           <span className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
             <button
               className="p-0.5 rounded text-gray-400 hover:text-white"
