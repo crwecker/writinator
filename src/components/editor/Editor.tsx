@@ -500,24 +500,21 @@ const atomicCursorSnap = ViewPlugin.fromClass(
       const plugin = update.view.plugin(markdownDecorationPlugin)
       if (!plugin) return
       const oldPos = update.startState.selection.main.head
-      const delta = pos - oldPos
-      const forward = delta >= 0
-      const singleStep = Math.abs(delta) === 1
+      const forward = pos >= oldPos
       let snapTo: number | null = null
       const iter = plugin.atomicRanges.iter()
       while (iter.value && iter.from <= pos) {
-        // Strictly inside a hidden range — always snap in the motion's direction.
+        // Strictly inside a hidden range — snap to the range's far side.
         if (pos > iter.from && pos < iter.to) {
           snapTo = forward ? iter.to : iter.from
           break
         }
-        // At an entry boundary from a single-step motion — eager snap past the range.
-        // Gated on delta=1 so programmatic dispatches (setCursor, click, onDocLoad)
-        // that happen to land on a boundary don't get moved.
-        if (singleStep) {
-          if (forward && pos === iter.from) { snapTo = iter.to; break }
-          if (!forward && pos === iter.to) { snapTo = iter.from; break }
-        }
+        // Forward motion stopping at the entry boundary, or backward motion stopping
+        // at the exit boundary — eager snap past the range. Boundary positions render
+        // at the same visual location as the far side, so stopping there always feels
+        // like a dead keypress (true for l/h/arrows AND for w/b/counted motions).
+        if (forward && pos === iter.from) { snapTo = iter.to; break }
+        if (!forward && pos === iter.to) { snapTo = iter.from; break }
         iter.next()
       }
       if (snapTo === null) return
