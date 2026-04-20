@@ -472,13 +472,60 @@ const markdownDecorationPlugin = ViewPlugin.fromClass(
   },
   {
     decorations: (v) => v.decorations,
-    // Respected by CM6 native motion commands and VIM INSERT-mode arrow keys.
-    // @replit/codemirror-vim NORMAL-mode motions (h/l/w/b/e) walk by document offsets
-    // and ignore this facet — cursor can land inside hidden ranges and visually disappear.
+    // Respected natively by CM6 motion commands and INSERT-mode arrow keys.
+    // NORMAL-mode VIM motions bypass this facet; atomicCursorSnap below catches them.
     provide: (plugin) =>
       EditorView.atomicRanges.of(
         (view) => view.plugin(plugin)?.atomicRanges ?? RangeSet.empty
       ),
+  }
+)
+
+// Snap the cursor out of any hidden (atomic) range that a motion lands it inside,
+// and eagerly across when a forward motion lands on a range's entry boundary (or a
+// backward motion on its exit boundary). Entry/exit boundaries render at the same
+// visual position as the far side of the hidden range in preview mode, so stopping
+// there feels like a dead keypress.
+//
+// Needed because @replit/codemirror-vim NORMAL-mode motions (h/l/w/b/e, arrow keys
+// in NORMAL) walk by document offsets and don't consult EditorView.atomicRanges.
+// Also catches mouse clicks and programmatic dispatches that land mid-range.
+const atomicCursorSnap = ViewPlugin.fromClass(
+  class {
+    update(update: ViewUpdate) {
+      if (!update.selectionSet || update.docChanged) return
+      const sel = update.state.selection.main
+      if (!sel.empty) return
+      const pos = sel.head
+      const plugin = update.view.plugin(markdownDecorationPlugin)
+      if (!plugin) return
+      const oldPos = update.startState.selection.main.head
+      const delta = pos - oldPos
+      const forward = delta >= 0
+      const singleStep = Math.abs(delta) === 1
+      let snapTo: number | null = null
+      const iter = plugin.atomicRanges.iter()
+      while (iter.value && iter.from <= pos) {
+        // Strictly inside a hidden range — always snap in the motion's direction.
+        if (pos > iter.from && pos < iter.to) {
+          snapTo = forward ? iter.to : iter.from
+          break
+        }
+        // At an entry boundary from a single-step motion — eager snap past the range.
+        // Gated on delta=1 so programmatic dispatches (setCursor, click, onDocLoad)
+        // that happen to land on a boundary don't get moved.
+        if (singleStep) {
+          if (forward && pos === iter.from) { snapTo = iter.to; break }
+          if (!forward && pos === iter.to) { snapTo = iter.from; break }
+        }
+        iter.next()
+      }
+      if (snapTo === null) return
+      const target = snapTo
+      queueMicrotask(() => {
+        update.view.dispatch({ selection: { anchor: target } })
+      })
+    }
   }
 )
 
@@ -743,6 +790,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         oneDark,
         renderModeField,
         markdownDecorationPlugin,
+        atomicCursorSnap,
         statMarkerExtension(),
         noteMarkerExtension(),
         statblockMarkerExtension(),
