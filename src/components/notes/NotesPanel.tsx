@@ -1,18 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, ChevronDown, ChevronRight, CornerDownRight, Trash2 } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
+import { ChevronDown, ChevronRight, CornerDownRight, Tag, Trash2, Unlink } from 'lucide-react'
 import type { EditorView } from '@codemirror/view'
 import { useNotesStore } from '../../stores/notesStore'
 import { useStoryletStore } from '../../stores/storyletStore'
-import { extractNotes, insertNoteMarker, removeNoteMarker } from '../../lib/noteUtils'
+import { extractNotes } from '../../lib/noteUtils'
 import { checkNoteConsistency } from '../../lib/noteConsistency'
 import type {
-  NoteConsistencyIssue,
   PositionNote,
   Storylet,
   StoryletNote,
 } from '../../types'
 import { TagChipInput } from './TagChipInput'
 import { ColorPickerPopover } from './ColorPickerPopover'
+import { TagPopover } from './TagPopover'
 
 interface Props {
   open: boolean
@@ -48,6 +56,22 @@ function matchesTagFilter(
   return filter.every((f) => noteTags.includes(f))
 }
 
+/** First non-empty line of a note body, trimmed for preview. */
+function firstLine(body: string): string {
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed) return trimmed
+  }
+  return ''
+}
+
+/** Resize a textarea to fit its content — call after every value change. */
+function autosize(el: HTMLTextAreaElement | null): void {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+
 // ---------------------------------------------------------------------------
 // StoryletNoteRow — inline-edited textarea + tag chips + color swatch with
 // debounced auto-save (400ms).
@@ -56,9 +80,15 @@ function matchesTagFilter(
 interface StoryletNoteRowProps {
   storyletId: string
   note: StoryletNote
+  /** When true, render expanded on initial mount (e.g. just created). */
+  initiallyExpanded?: boolean
 }
 
-function StoryletNoteRow({ storyletId, note }: StoryletNoteRowProps) {
+function StoryletNoteRow({
+  storyletId,
+  note,
+  initiallyExpanded = false,
+}: StoryletNoteRowProps) {
   const updateStoryletNote = useNotesStore((s) => s.updateStoryletNote)
   const removeStoryletNote = useNotesStore((s) => s.removeStoryletNote)
 
@@ -66,11 +96,23 @@ function StoryletNoteRow({ storyletId, note }: StoryletNoteRowProps) {
   const [lastSyncedUpdatedAt, setLastSyncedUpdatedAt] = useState<string>(
     note.updatedAt,
   )
+  const [expanded, setExpanded] = useState<boolean>(
+    initiallyExpanded || !note.body.trim(),
+  )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const [colorAnchor, setColorAnchor] = useState({ top: 0, left: 0 })
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false)
+  const [tagAnchor, setTagAnchor] = useState({ top: 0, left: 0 })
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const colorSwatchRef = useRef<HTMLButtonElement>(null)
+  const tagButtonRef = useRef<HTMLButtonElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Autosize textarea to its content whenever the draft (or expansion) changes.
+  useLayoutEffect(() => {
+    if (expanded) autosize(textareaRef.current)
+  }, [draft, expanded])
 
   // Reconcile external updates (file load, undo) using the "derived state
   // from props" pattern. When the store-owned updatedAt moves forward and we
@@ -126,72 +168,128 @@ function StoryletNoteRow({ storyletId, note }: StoryletNoteRowProps) {
     setColorPickerOpen(true)
   }
 
+  function openTagPopover() {
+    const rect = tagButtonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setTagAnchor({ top: rect.bottom + 4, left: rect.left })
+    setTagPopoverOpen(true)
+  }
+
   const color = note.color
+  const tagCount = note.tags?.length ?? 0
+  const preview = firstLine(draft)
 
   return (
     <div
       data-testid="storylet-note-row"
       data-note-id={note.id}
-      className="relative group space-y-1"
+      data-expanded={expanded}
+      className="relative group"
     >
-      <div className="relative">
-        <textarea
-          data-testid="storylet-note-textarea"
-          value={draft}
-          onChange={(e) => handleChange(e.target.value)}
-          placeholder="Write a storylet note…"
-          className="w-full min-h-[60px] resize-none bg-gray-800/40 border border-gray-700 rounded px-2 py-1.5 pr-14 text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-blue-500"
-        />
-        <div className="absolute top-1 right-1 flex items-center gap-1">
-          <button
-            ref={colorSwatchRef}
-            type="button"
-            onClick={openColorPicker}
-            title={color ? `Color ${color}` : 'Set color'}
-            className="w-3.5 h-3.5 rounded border border-gray-600"
-            style={{
-              backgroundColor: color ?? 'transparent',
-              backgroundImage: color
-                ? undefined
-                : 'repeating-linear-gradient(45deg,#374151,#374151 2px,#4b5563 2px,#4b5563 4px)',
-            }}
-            data-testid="storylet-note-color"
+      {expanded ? (
+        <div className="relative">
+          <textarea
+            ref={textareaRef}
+            data-testid="storylet-note-textarea"
+            value={draft}
+            onChange={(e) => handleChange(e.target.value)}
+            placeholder="Write a storylet note…"
+            className="w-full resize-none overflow-hidden bg-gray-800/40 border border-gray-700 rounded px-2 py-1.5 pr-24 text-[11px] text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-blue-500"
+            style={{ minHeight: 60 }}
           />
-          {confirmDelete ? (
-            <>
-              <button
-                data-testid="storylet-note-delete-confirm"
-                onClick={handleDelete}
-                className="text-[10px] bg-red-900 hover:bg-red-800 text-red-200 rounded px-1.5 py-0.5"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-1.5 py-0.5"
-              >
-                No
-              </button>
-            </>
-          ) : (
+          <div className="absolute top-1 right-1 flex items-center gap-1">
             <button
-              data-testid="storylet-note-delete"
-              onClick={() => setConfirmDelete(true)}
-              title="Delete note"
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-500 hover:text-red-400 p-0.5 transition-opacity"
+              type="button"
+              onClick={() => setExpanded(false)}
+              title="Collapse"
+              className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
+              data-testid="storylet-note-collapse"
             >
-              <Trash2 size={12} />
+              <ChevronDown size={12} />
             </button>
-          )}
+            <button
+              ref={colorSwatchRef}
+              type="button"
+              onClick={openColorPicker}
+              title={color ? `Color ${color}` : 'Set color'}
+              className="w-3.5 h-3.5 rounded border border-gray-600"
+              style={{
+                backgroundColor: color ?? 'transparent',
+                backgroundImage: color
+                  ? undefined
+                  : 'repeating-linear-gradient(45deg,#374151,#374151 2px,#4b5563 2px,#4b5563 4px)',
+              }}
+              data-testid="storylet-note-color"
+            />
+            <button
+              ref={tagButtonRef}
+              type="button"
+              onClick={openTagPopover}
+              title={tagCount ? `${tagCount} tag${tagCount === 1 ? '' : 's'}` : 'Add tags'}
+              className={`relative p-0.5 rounded hover:bg-gray-800 ${
+                tagCount > 0 ? 'text-gray-300' : 'text-gray-500 hover:text-gray-300'
+              }`}
+              data-testid="storylet-note-tag-toggle"
+            >
+              <Tag size={12} />
+              {tagCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 text-[8px] leading-none bg-blue-500 text-white rounded-full w-3 h-3 flex items-center justify-center font-semibold">
+                  {tagCount}
+                </span>
+              )}
+            </button>
+            {confirmDelete ? (
+              <>
+                <button
+                  data-testid="storylet-note-delete-confirm"
+                  onClick={handleDelete}
+                  className="text-[10px] bg-red-900 hover:bg-red-800 text-red-200 rounded px-1.5 py-0.5"
+                >
+                  Yes
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-1.5 py-0.5"
+                >
+                  No
+                </button>
+              </>
+            ) : (
+              <button
+                data-testid="storylet-note-delete"
+                onClick={() => setConfirmDelete(true)}
+                title="Delete note"
+                className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-500 hover:text-red-400 p-0.5 transition-opacity"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      <TagChipInput
-        tags={note.tags ?? []}
-        onChange={handleTagsChange}
-        placeholder="tag"
-        size="sm"
-        testId="storylet-note-tags"
-      />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          data-testid="storylet-note-collapsed"
+          className="w-full flex items-center gap-1.5 px-2 py-1 text-[11px] text-left text-gray-300 bg-gray-800/40 border border-gray-700 rounded hover:bg-gray-800/70 hover:border-gray-600"
+        >
+          <ChevronRight size={12} className="text-gray-500 shrink-0" />
+          {color && (
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: color }}
+            />
+          )}
+          <span className="flex-1 truncate">
+            {preview || <span className="italic text-gray-500">(empty)</span>}
+          </span>
+          {tagCount > 0 && (
+            <span className="text-[9px] text-gray-500 shrink-0">
+              {tagCount} tag{tagCount === 1 ? '' : 's'}
+            </span>
+          )}
+        </button>
+      )}
       <ColorPickerPopover
         open={colorPickerOpen}
         onClose={() => setColorPickerOpen(false)}
@@ -200,6 +298,13 @@ function StoryletNoteRow({ storyletId, note }: StoryletNoteRowProps) {
           updateStoryletNote(storyletId, note.id, { color: c })
         }}
         anchorRect={colorAnchor}
+      />
+      <TagPopover
+        open={tagPopoverOpen}
+        onClose={() => setTagPopoverOpen(false)}
+        tags={note.tags ?? []}
+        onChange={handleTagsChange}
+        anchorRect={tagAnchor}
       />
     </div>
   )
@@ -216,6 +321,8 @@ interface StoryletNotesGroupProps {
 
 function StoryletNotesGroup({ storylet, notes }: StoryletNotesGroupProps) {
   const addStoryletNote = useNotesStore((s) => s.addStoryletNote)
+  const [collapsed, setCollapsed] = useState(false)
+  const [justAddedId, setJustAddedId] = useState<string | null>(null)
 
   const handleAdd = useCallback(() => {
     const timestamp = nowIso()
@@ -228,7 +335,9 @@ function StoryletNotesGroup({ storylet, notes }: StoryletNotesGroupProps) {
       updatedAt: timestamp,
     }
     addStoryletNote(storylet.id, newNote)
-  }, [storylet.id, addStoryletNote])
+    setJustAddedId(newNote.id)
+    if (collapsed) setCollapsed(false)
+  }, [storylet.id, addStoryletNote, collapsed])
 
   return (
     <div
@@ -236,9 +345,20 @@ function StoryletNotesGroup({ storylet, notes }: StoryletNotesGroupProps) {
       className="space-y-2"
     >
       <div className="flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wide text-gray-400">
-          {storylet.name}
-        </span>
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          data-testid={`storylet-notes-group-toggle-${storylet.id}`}
+          className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-gray-400 hover:text-gray-200"
+        >
+          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          <span>{storylet.name}</span>
+          {collapsed && notes.length > 0 && (
+            <span className="text-gray-500 lowercase tracking-normal">
+              ({notes.length})
+            </span>
+          )}
+        </button>
         <button
           data-testid="storylet-note-add"
           onClick={handleAdd}
@@ -247,21 +367,23 @@ function StoryletNotesGroup({ storylet, notes }: StoryletNotesGroupProps) {
           + Note
         </button>
       </div>
-      {notes.length === 0 ? (
-        <div className="text-[11px] text-gray-600 italic px-1">
-          No storylet notes yet.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {notes.map((note) => (
-            <StoryletNoteRow
-              key={note.id}
-              storyletId={storylet.id}
-              note={note}
-            />
-          ))}
-        </div>
-      )}
+      {!collapsed &&
+        (notes.length === 0 ? (
+          <div className="text-[11px] text-gray-600 italic px-1">
+            No storylet notes yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {notes.map((note) => (
+              <StoryletNoteRow
+                key={note.id}
+                storyletId={storylet.id}
+                note={note}
+                initiallyExpanded={note.id === justAddedId}
+              />
+            ))}
+          </div>
+        ))}
     </div>
   )
 }
@@ -296,12 +418,18 @@ function PositionNoteRow({
   const [lastSyncedUpdatedAt, setLastSyncedUpdatedAt] = useState<string>(
     note.updatedAt,
   )
+  const [expanded, setExpanded] = useState<boolean>(
+    autoFocusTextarea || !note.body.trim(),
+  )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const [colorAnchor, setColorAnchor] = useState({ top: 0, left: 0 })
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false)
+  const [tagAnchor, setTagAnchor] = useState({ top: 0, left: 0 })
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const colorSwatchRef = useRef<HTMLButtonElement>(null)
+  const tagButtonRef = useRef<HTMLButtonElement>(null)
 
   // Reconcile external updates (file load, undo) — mirrors StoryletNoteRow.
   if (note.updatedAt !== lastSyncedUpdatedAt) {
@@ -309,11 +437,22 @@ function PositionNoteRow({
     if (note.body !== draft) setDraft(note.body)
   }
 
-  // Focus the textarea when this row becomes the focused one (new note,
-  // marker click).
+  // When the row becomes focused (new note, marker click), expand and focus.
+  // Track the last-seen autoFocus value so we react to false→true transitions
+  // without writing setState from inside an effect.
+  const [lastAutoFocus, setLastAutoFocus] = useState<boolean>(autoFocusTextarea)
+  if (autoFocusTextarea !== lastAutoFocus) {
+    setLastAutoFocus(autoFocusTextarea)
+    if (autoFocusTextarea && !expanded) setExpanded(true)
+  }
   useEffect(() => {
     if (autoFocusTextarea) textareaRef.current?.focus()
   }, [autoFocusTextarea])
+
+  // Autosize textarea to its content while expanded.
+  useLayoutEffect(() => {
+    if (expanded) autosize(textareaRef.current)
+  }, [draft, expanded])
 
   // Flush on unmount.
   useEffect(() => {
@@ -351,86 +490,154 @@ function PositionNoteRow({
     setColorPickerOpen(true)
   }
 
+  function openTagPopover() {
+    const rect = tagButtonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setTagAnchor({ top: rect.bottom + 4, left: rect.left })
+    setTagPopoverOpen(true)
+  }
+
   const color = note.color
+  const tagCount = note.tags?.length ?? 0
+  const preview = firstLine(draft)
 
   return (
     <li
       ref={(el) => registerRowRef(id, el)}
       data-testid="notes-panel-note-row"
       data-note-id={id}
-      className="group relative space-y-1 px-2 py-2"
+      data-expanded={expanded}
+      className="group relative px-2 py-2"
     >
-      <div className="relative">
-        <textarea
-          ref={textareaRef}
-          data-testid="position-note-textarea"
-          value={draft}
-          onChange={(e) => handleChange(e.target.value)}
-          placeholder="Write a note…"
-          className="w-full min-h-[60px] resize-none bg-gray-800/40 border border-gray-700 rounded px-2 py-1.5 pr-24 text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-blue-500"
-        />
-        <div className="absolute top-1 right-1 flex items-center gap-1">
-          <button
-            ref={colorSwatchRef}
-            type="button"
-            onClick={openColorPicker}
-            title={color ? `Color ${color}` : 'Set color'}
-            className="w-3.5 h-3.5 rounded border border-gray-600"
-            style={{
-              backgroundColor: color ?? 'transparent',
-              backgroundImage: color
-                ? undefined
-                : 'repeating-linear-gradient(45deg,#374151,#374151 2px,#4b5563 2px,#4b5563 4px)',
-            }}
-            data-testid="position-note-color"
+      {expanded ? (
+        <div className="relative">
+          <textarea
+            ref={textareaRef}
+            data-testid="position-note-textarea"
+            value={draft}
+            onChange={(e) => handleChange(e.target.value)}
+            placeholder="Write a note…"
+            className="w-full resize-none overflow-hidden bg-gray-800/40 border border-gray-700 rounded px-2 py-1.5 pr-32 text-[11px] text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-blue-500"
+            style={{ minHeight: 60 }}
           />
+          <div className="absolute top-1 right-1 flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              title="Collapse"
+              className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
+              data-testid="position-note-collapse"
+            >
+              <ChevronDown size={12} />
+            </button>
+            <button
+              ref={colorSwatchRef}
+              type="button"
+              onClick={openColorPicker}
+              title={color ? `Color ${color}` : 'Set color'}
+              className="w-3.5 h-3.5 rounded border border-gray-600"
+              style={{
+                backgroundColor: color ?? 'transparent',
+                backgroundImage: color
+                  ? undefined
+                  : 'repeating-linear-gradient(45deg,#374151,#374151 2px,#4b5563 2px,#4b5563 4px)',
+              }}
+              data-testid="position-note-color"
+            />
+            <button
+              ref={tagButtonRef}
+              type="button"
+              onClick={openTagPopover}
+              title={tagCount ? `${tagCount} tag${tagCount === 1 ? '' : 's'}` : 'Add tags'}
+              className={`relative p-0.5 rounded hover:bg-gray-800 ${
+                tagCount > 0 ? 'text-gray-300' : 'text-gray-500 hover:text-gray-300'
+              }`}
+              data-testid="position-note-tag-toggle"
+            >
+              <Tag size={12} />
+              {tagCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 text-[8px] leading-none bg-blue-500 text-white rounded-full w-3 h-3 flex items-center justify-center font-semibold">
+                  {tagCount}
+                </span>
+              )}
+            </button>
+            <button
+              data-testid="notes-panel-jump"
+              type="button"
+              onClick={() => onJump(id)}
+              title="Jump to note in editor"
+              className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
+            >
+              <CornerDownRight size={12} />
+            </button>
+            {confirmDelete ? (
+              <>
+                <button
+                  data-testid="position-note-delete-confirm"
+                  onClick={() => {
+                    setConfirmDelete(false)
+                    onDelete(id)
+                  }}
+                  className="text-[10px] bg-red-900 hover:bg-red-800 text-red-200 rounded px-1.5 py-0.5"
+                >
+                  Yes
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-1.5 py-0.5"
+                >
+                  No
+                </button>
+              </>
+            ) : (
+              <button
+                data-testid="position-note-delete"
+                onClick={() => setConfirmDelete(true)}
+                title="Delete note"
+                className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-500 hover:text-red-400 p-0.5 transition-opacity"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div
+          data-testid="position-note-collapsed"
+          className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-gray-300 bg-gray-800/40 border border-gray-700 rounded hover:bg-gray-800/70 hover:border-gray-600"
+        >
           <button
-            data-testid="notes-panel-jump"
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="flex flex-1 items-center gap-1.5 min-w-0 text-left"
+          >
+            <ChevronRight size={12} className="text-gray-500 shrink-0" />
+            {color && (
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: color }}
+              />
+            )}
+            <span className="flex-1 truncate">
+              {preview || <span className="italic text-gray-500">(empty)</span>}
+            </span>
+            {tagCount > 0 && (
+              <span className="text-[9px] text-gray-500 shrink-0">
+                {tagCount} tag{tagCount === 1 ? '' : 's'}
+              </span>
+            )}
+          </button>
+          <button
             type="button"
             onClick={() => onJump(id)}
             title="Jump to note in editor"
-            className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800"
+            className="text-gray-500 hover:text-gray-200 p-0.5 rounded hover:bg-gray-800 shrink-0"
+            data-testid="notes-panel-jump-collapsed"
           >
             <CornerDownRight size={12} />
           </button>
-          {confirmDelete ? (
-            <>
-              <button
-                data-testid="position-note-delete-confirm"
-                onClick={() => {
-                  setConfirmDelete(false)
-                  onDelete(id)
-                }}
-                className="text-[10px] bg-red-900 hover:bg-red-800 text-red-200 rounded px-1.5 py-0.5"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="text-[10px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-1.5 py-0.5"
-              >
-                No
-              </button>
-            </>
-          ) : (
-            <button
-              data-testid="position-note-delete"
-              onClick={() => setConfirmDelete(true)}
-              title="Delete note"
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-500 hover:text-red-400 p-0.5 transition-opacity"
-            >
-              <Trash2 size={12} />
-            </button>
-          )}
         </div>
-      </div>
-      <TagChipInput
-        tags={note.tags ?? []}
-        onChange={handleTagsChange}
-        placeholder="tag"
-        size="sm"
-        testId="position-note-tags"
-      />
+      )}
       <ColorPickerPopover
         open={colorPickerOpen}
         onClose={() => setColorPickerOpen(false)}
@@ -438,7 +645,86 @@ function PositionNoteRow({
         onSelect={(c) => updatePositionNote(id, { color: c })}
         anchorRect={colorAnchor}
       />
+      <TagPopover
+        open={tagPopoverOpen}
+        onClose={() => setTagPopoverOpen(false)}
+        tags={note.tags ?? []}
+        onChange={handleTagsChange}
+        anchorRect={tagAnchor}
+      />
     </li>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PositionNotesSection — collapsible storylet card holding position-note rows.
+// Auto-expands when a contained note is focused (e.g. clicked from the editor).
+// ---------------------------------------------------------------------------
+
+interface PositionNotesSectionProps {
+  section: StoryletSection
+  focusedNoteId: string | null
+  registerRowRef: (id: string, el: HTMLLIElement | null) => void
+  onJump: (id: string) => void
+  onDelete: (id: string) => void
+}
+
+function PositionNotesSection({
+  section,
+  focusedNoteId,
+  registerRowRef,
+  onJump,
+  onDelete,
+}: PositionNotesSectionProps) {
+  const [collapsed, setCollapsed] = useState(false)
+  const containsFocused =
+    !!focusedNoteId && section.notes.some((n) => n.id === focusedNoteId)
+
+  // Auto-expand the section when a focused note lives inside it. Uses the
+  // "derived state during render" pattern so we don't setState in an effect.
+  const [lastFocusedSeen, setLastFocusedSeen] = useState<string | null>(null)
+  if (containsFocused && focusedNoteId !== lastFocusedSeen) {
+    setLastFocusedSeen(focusedNoteId)
+    if (collapsed) setCollapsed(false)
+  } else if (!containsFocused && lastFocusedSeen !== null) {
+    setLastFocusedSeen(null)
+  }
+
+  return (
+    <div
+      data-testid={`notes-panel-section-${section.storylet.id}`}
+      className="border border-gray-800 rounded overflow-hidden"
+    >
+      <button
+        type="button"
+        onClick={() => setCollapsed((v) => !v)}
+        data-testid={`notes-panel-section-toggle-${section.storylet.id}`}
+        className="w-full flex items-center gap-1 px-2 py-1.5 bg-gray-800/60 hover:bg-gray-800 text-[11px] uppercase tracking-wide text-gray-400 hover:text-gray-200"
+      >
+        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+        <span>{section.storylet.name}</span>
+        {collapsed && (
+          <span className="text-gray-500 lowercase tracking-normal ml-1">
+            ({section.notes.length})
+          </span>
+        )}
+      </button>
+      {!collapsed && (
+        <ul className="divide-y divide-gray-800/60">
+          {section.notes.map(({ id, note }) => (
+            <PositionNoteRow
+              key={id}
+              id={id}
+              note={note}
+              autoFocusTextarea={focusedNoteId === id}
+              registerRowRef={registerRowRef}
+              onJump={onJump}
+              onDelete={onDelete}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -459,21 +745,15 @@ export function NotesPanel({
   const setActiveStorylet = useStoryletStore((s) => s.setActiveStorylet)
   const positionNotes = useNotesStore((s) => s.positionNotes)
   const storyletNotes = useNotesStore((s) => s.storyletNotes)
-  const addPositionNote = useNotesStore((s) => s.addPositionNote)
   const removePositionNote = useNotesStore((s) => s.removePositionNote)
-  const removeAllNotesForStorylet = useNotesStore(
-    (s) => s.removeAllNotesForStorylet,
-  )
   const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map())
 
   // Tag filter — chips with AND semantics across all note kinds.
   const [filterTags, setFilterTags] = useState<string[]>([])
 
-  // Issues section: default collapsed, but auto-expand once when the panel
-  // first opens with orphans to surface. `autoExpanded` latches after the
-  // first auto-expand so the user can re-collapse without us re-expanding.
-  const [issuesExpanded, setIssuesExpanded] = useState(false)
-  const [autoExpanded, setAutoExpanded] = useState(false)
+  // Unanchored-notes section: default expanded so authors can immediately see
+  // and resolve unanchored notes when they open the panel.
+  const [unanchoredExpanded, setUnanchoredExpanded] = useState(true)
 
   // Jump from a panel row to the anchor in the editor. Mirrors
   // CharacterPanel.jumpToMarker but uses the notesStore / noteUtils pattern.
@@ -512,37 +792,38 @@ export function NotesPanel({
   )
 
   // -------------------------------------------------------------------------
-  // Issues (orphan detection) — recomputes when book or notes state changes.
+  // Unanchored notes — store entries whose anchor is missing from every
+  // storylet's content. The non-orphan `inverseOrphanNote` /
+  // `orphanStoryletNote` consistency checks are still detected silently; they
+  // represent rare data-integrity edge cases that don't fit this surface.
   // -------------------------------------------------------------------------
-  const issues = useMemo<NoteConsistencyIssue[]>(
-    () => checkNoteConsistency(book, { positionNotes, storyletNotes }),
+  const unanchoredNotes = useMemo<Array<{ id: string; note: PositionNote }>>(
+    () => {
+      const issues = checkNoteConsistency(book, { positionNotes, storyletNotes })
+      return issues
+        .filter((i): i is Extract<typeof i, { kind: 'orphanNote' }> =>
+          i.kind === 'orphanNote',
+        )
+        .map((i) => ({ id: i.id, note: positionNotes[i.id]! }))
+        .filter((entry) => entry.note !== undefined)
+    },
     [book, positionNotes, storyletNotes],
   )
-  const issueCount = issues.length
-
-  // First time the panel opens while issues exist, auto-expand. `autoExpanded`
-  // latches after the first trigger so the user's subsequent collapse sticks.
-  // Uses the "derived state during render" pattern (same as StoryletNoteRow's
-  // lastSyncedUpdatedAt reconcile) to avoid react-hooks/set-state-in-effect.
-  if (open && issueCount > 0 && !autoExpanded) {
-    setAutoExpanded(true)
-    if (!issuesExpanded) setIssuesExpanded(true)
-  }
+  const unanchoredCount = unanchoredNotes.length
 
   // Resolve handlers -------------------------------------------------------
 
-  /** Delete the store entry for an orphanNote (anchor is missing, user wants
-   *  to abandon the stub). */
-  const handleDeleteOrphanNoteEntry = useCallback(
+  /** Delete the store entry for an unanchored note. */
+  const handleDeleteUnanchoredNote = useCallback(
     (noteId: string) => {
       removePositionNote(noteId)
     },
     [removePositionNote],
   )
 
-  /** Insert an anchor for an orphanNote at the current editor cursor on the
-   *  active storylet. */
-  const handleInsertAnchorForOrphan = useCallback(
+  /** Insert an anchor for an unanchored note at the current editor cursor on
+   *  the active storylet. */
+  const handleInsertAnchorForUnanchored = useCallback(
     (noteId: string) => {
       const view = editorView
       if (!view || !book) return
@@ -568,61 +849,6 @@ export function NotesPanel({
       }
     },
     [editorView, book, activeStoryletId, setActiveStorylet],
-  )
-
-  /** Remove the `<!-- note:<id> -->` anchor from the storylet that owns it
-   *  (inverseOrphanNote). Mirrors CharacterPanel.onRemoveOrphanFromText —
-   *  switches to that storylet first if it isn't already active, then
-   *  dispatches the deletion through the editor so undo history stays intact. */
-  const handleRemoveAnchorFromText = useCallback(
-    (noteId: string, storyletId: string) => {
-      if (!book) return
-      const storylet = book.storylets.find((s) => s.id === storyletId)
-      if (!storylet) return
-      const content = storylet.content ?? ''
-      const escaped = noteId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const re = new RegExp(`<!--\\s*note:${escaped}\\s*-->`)
-      const match = content.match(re)
-      if (!match || typeof match.index !== 'number') return
-      const doRemove = () => {
-        const v = editorView
-        if (!v) return
-        v.dispatch({
-          changes: {
-            from: match.index as number,
-            to: (match.index as number) + match[0].length,
-            insert: '',
-          },
-        })
-      }
-      if (storyletId === activeStoryletId) {
-        doRemove()
-      } else {
-        setActiveStorylet(storyletId)
-        setTimeout(doRemove, 30)
-      }
-      // Silence unused-imports lint — these helpers are surfaced on the panel
-      // for future resolve-action expansion without needing a new import.
-      void insertNoteMarker
-      void removeNoteMarker
-    },
-    [book, activeStoryletId, editorView, setActiveStorylet],
-  )
-
-  /** Create an empty store entry so an orphaned anchor has metadata. */
-  const handleCreateEntryForOrphan = useCallback(
-    (noteId: string) => {
-      addPositionNote(noteId, { body: '' })
-    },
-    [addPositionNote],
-  )
-
-  /** Drop all storylet-notes keyed to a deleted storylet. */
-  const handleDeleteOrphanStoryletNotes = useCallback(
-    (storyletId: string) => {
-      removeAllNotesForStorylet(storyletId)
-    },
-    [removeAllNotesForStorylet],
   )
 
   // Flash + scroll into view when a row becomes focused.
@@ -763,140 +989,11 @@ export function NotesPanel({
 
   const body = (
     <>
-      {/* Issues section (collapsible) */}
-      <div
-        data-testid="notes-panel-issues"
-        className="border-b border-gray-800"
-      >
-        <button
-          data-testid="notes-panel-issues-toggle"
-          onClick={() => setIssuesExpanded((v) => !v)}
-          className={`w-full flex items-center gap-1.5 px-3 py-2 text-[11px] transition-colors ${
-            issueCount > 0
-              ? 'text-amber-300 hover:bg-gray-800/60'
-              : 'text-gray-500 hover:bg-gray-800/40'
-          }`}
-        >
-          {issuesExpanded ? (
-            <ChevronDown size={12} />
-          ) : (
-            <ChevronRight size={12} />
-          )}
-          <AlertTriangle size={12} />
-          <span className="uppercase tracking-wider font-semibold">Issues</span>
-          {issueCount > 0 && (
-            <span
-              data-testid="notes-panel-issues-badge"
-              className="ml-auto inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/80 text-[9px] text-gray-900 font-semibold tabular-nums"
-            >
-              {issueCount}
-            </span>
-          )}
-          {issueCount === 0 && (
-            <span className="ml-auto text-gray-600 text-[10px]">all clear</span>
-          )}
-        </button>
-        {issuesExpanded && (
-          <div className="px-3 pb-3 pt-0">
-            {issueCount === 0 ? (
-              <div
-                data-testid="notes-panel-issues-empty"
-                className="text-[11px] text-gray-500 italic px-1 py-2"
-              >
-                No orphan notes detected.
-              </div>
-            ) : (
-              <ul className="space-y-1.5">
-                {issues.map((issue, i) => (
-                  <li
-                    key={`${issue.kind}-${i}-${issue.id ?? issue.storyletId ?? ''}`}
-                    data-testid={`notes-panel-issue-${issue.kind}`}
-                    data-issue-kind={issue.kind}
-                    className="text-[11px] text-gray-300 border border-gray-800 rounded px-2 py-1.5 space-y-1"
-                  >
-                    {issue.kind === 'orphanNote' && (
-                      <>
-                        <div>
-                          <span className="text-gray-500">Store entry </span>
-                          <code className="text-gray-400">
-                            {issue.id.slice(0, 8)}
-                            {issue.id.length > 8 ? '\u2026' : ''}
-                          </code>
-                          <span className="text-gray-500"> has no anchor in any storylet.</span>
-                        </div>
-                        <div className="flex gap-1.5 flex-wrap">
-                          <IssueButton
-                            onClick={() => handleDeleteOrphanNoteEntry(issue.id)}
-                          >
-                            Delete entry
-                          </IssueButton>
-                          <IssueButton
-                            onClick={() => handleInsertAnchorForOrphan(issue.id)}
-                          >
-                            Insert anchor at cursor
-                          </IssueButton>
-                        </div>
-                      </>
-                    )}
-                    {issue.kind === 'inverseOrphanNote' && (
-                      <>
-                        <div>
-                          <span className="text-gray-500">Anchor </span>
-                          <code className="text-gray-400">
-                            {issue.id.slice(0, 8)}
-                            {issue.id.length > 8 ? '\u2026' : ''}
-                          </code>
-                          <span className="text-gray-500"> in text has no store entry.</span>
-                        </div>
-                        <div className="flex gap-1.5 flex-wrap">
-                          <IssueButton
-                            onClick={() =>
-                              handleRemoveAnchorFromText(issue.id, issue.storyletId)
-                            }
-                          >
-                            Remove from text
-                          </IssueButton>
-                          <IssueButton
-                            onClick={() => handleCreateEntryForOrphan(issue.id)}
-                          >
-                            Create empty entry
-                          </IssueButton>
-                        </div>
-                      </>
-                    )}
-                    {issue.kind === 'orphanStoryletNote' && (
-                      <>
-                        <div>
-                          <span className="text-gray-500">Storylet notes on deleted storylet </span>
-                          <code className="text-gray-400">
-                            {issue.storyletId.slice(0, 8)}
-                            {issue.storyletId.length > 8 ? '\u2026' : ''}
-                          </code>
-                        </div>
-                        <div className="flex gap-1.5 flex-wrap">
-                          <IssueButton
-                            onClick={() =>
-                              handleDeleteOrphanStoryletNotes(issue.storyletId)
-                            }
-                          >
-                            Delete
-                          </IssueButton>
-                        </div>
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
-
       {/* Filter bar */}
       <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/60">
         <div className="flex items-center gap-1.5 mb-1">
           <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
-            Filter
+            Filter notes
           </span>
           {filterActive && (
             <button
@@ -928,9 +1025,6 @@ export function NotesPanel({
               data-testid="storylet-notes-section"
               className="space-y-3"
             >
-              <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
-                Storylet notes
-              </div>
               {(!filterActive || storyletNotesSections.active.notes.length > 0) && (
                 <StoryletNotesGroup
                   storylet={storyletNotesSections.active.storylet}
@@ -961,28 +1055,14 @@ export function NotesPanel({
               Position notes
             </div>
             {sections.map((section) => (
-              <div
+              <PositionNotesSection
                 key={section.storylet.id}
-                data-testid={`notes-panel-section-${section.storylet.id}`}
-                className="border border-gray-800 rounded overflow-hidden"
-              >
-                <div className="px-2 py-1.5 bg-gray-800/60 text-[11px] uppercase tracking-wide text-gray-400">
-                  {section.storylet.name}
-                </div>
-                <ul className="divide-y divide-gray-800/60">
-                  {section.notes.map(({ id, note }) => (
-                    <PositionNoteRow
-                      key={id}
-                      id={id}
-                      note={note}
-                      autoFocusTextarea={focusedNoteId === id}
-                      registerRowRef={registerRowRef}
-                      onJump={jumpToNote}
-                      onDelete={handleDeletePositionNote}
-                    />
-                  ))}
-                </ul>
-              </div>
+                section={section}
+                focusedNoteId={focusedNoteId}
+                registerRowRef={registerRowRef}
+                onJump={jumpToNote}
+                onDelete={handleDeletePositionNote}
+              />
             ))}
           </section>
         )}
@@ -1010,6 +1090,70 @@ export function NotesPanel({
           >
             No notes yet.
           </div>
+        )}
+
+        {/* Unanchored notes — only rendered when at least one exists.
+            Sits at the bottom so unresolved notes don't push primary content
+            below the fold. */}
+        {unanchoredCount > 0 && (
+          <section
+            data-testid="notes-panel-unanchored"
+            className="pt-3 border-t border-gray-800"
+          >
+            <button
+              data-testid="notes-panel-unanchored-toggle"
+              onClick={() => setUnanchoredExpanded((v) => !v)}
+              className="w-full flex items-center gap-1.5 py-1 text-[11px] text-amber-300 hover:text-amber-200 transition-colors"
+            >
+              {unanchoredExpanded ? (
+                <ChevronDown size={12} />
+              ) : (
+                <ChevronRight size={12} />
+              )}
+              <Unlink size={12} />
+              <span className="uppercase tracking-wider font-semibold">
+                Unanchored notes
+              </span>
+              <span
+                data-testid="notes-panel-unanchored-badge"
+                className="ml-auto inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500/80 text-[9px] text-gray-900 font-semibold tabular-nums"
+              >
+                {unanchoredCount}
+              </span>
+            </button>
+            {unanchoredExpanded && (
+              <ul className="mt-2 space-y-1.5">
+                {unanchoredNotes.map(({ id, note }) => (
+                  <li
+                    key={id}
+                    data-testid="notes-panel-unanchored-row"
+                    data-note-id={id}
+                    className="text-[12px] text-gray-300 border border-gray-800 rounded px-2 py-1.5 space-y-1.5"
+                  >
+                    {note.body.trim() ? (
+                      <div className="whitespace-pre-wrap break-words">
+                        {note.body}
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 italic">(empty note)</div>
+                    )}
+                    <div className="flex gap-1.5 flex-wrap">
+                      <IssueButton
+                        onClick={() => handleInsertAnchorForUnanchored(id)}
+                      >
+                        Insert anchor at cursor
+                      </IssueButton>
+                      <IssueButton
+                        onClick={() => handleDeleteUnanchoredNote(id)}
+                      >
+                        Delete
+                      </IssueButton>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         )}
       </div>
     </>
@@ -1044,7 +1188,7 @@ export function NotesPanel({
 }
 
 // ---------------------------------------------------------------------------
-// IssueButton — compact action pill used inside the Issues section.
+// IssueButton — compact action pill used in the Unanchored notes section.
 // ---------------------------------------------------------------------------
 
 function IssueButton({
