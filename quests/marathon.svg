@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#fbbf24" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trophy" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="400" fill="#0c0a09"/>
+  <circle cx="200" cy="180" r="120" fill="url(#glow)"/>
+  <path d="M160 140 L160 220 Q160 260 200 270 Q240 260 240 220 L240 140Z" fill="url(#trophy)"/>
+  <path d="M160 160 Q120 160 120 190 Q120 220 160 220" fill="none" stroke="#b45309" stroke-width="8"/>
+  <path d="M240 160 Q280 160 280 190 Q280 220 240 220" fill="none" stroke="#b45309" stroke-width="8"/>
+  <rect x="170" y="130" width="60" height="8" rx="3" fill="#fde68a"/>
+  <rect x="185" y="270" width="30" height="30" fill="#92400e"/>
+  <rect x="165" y="298" width="70" height="12" rx="4" fill="#78350f"/>
+  <circle cx="200" cy="190" r="20" fill="#fbbf24" opacity="0.3"/>
+  <text x="200" y="198" text-anchor="middle" font-size="24" fill="#fde68a" font-family="serif">★</text>
+</svg>
