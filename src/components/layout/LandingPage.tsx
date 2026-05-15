@@ -1,6 +1,12 @@
 import { useRecentFilesStore } from '../../stores/recentFilesStore'
 import { useStoryletStore } from '../../stores/storyletStore'
-import { openFile, setStoredFileHandle, parseFileJSON } from '../../lib/fileSystem'
+import {
+  openFile,
+  setStoredFileHandle,
+  parseFileJSON,
+  createBookWithFile,
+  supportsFileSystemAccess,
+} from '../../lib/fileSystem'
 import type { RecentFile } from '../../types'
 
 // requestPermission is a Chrome-only extension to the File System Access API
@@ -49,7 +55,25 @@ export function LandingPage() {
   const recentFiles = useRecentFilesStore((s) => s.recentFiles)
 
   async function handleCreateBook() {
-    useStoryletStore.getState().createBook('Untitled Book')
+    // On browsers without the File System Access API (Safari, Firefox) saves are
+    // forced through the download path — we can't tether a handle. Prompt for
+    // the book title; localforage will persist their work in-browser.
+    if (!supportsFileSystemAccess()) {
+      const title = window.prompt('Name your book:', 'Untitled Book')
+      if (title === null) return
+      const trimmed = title.trim() || 'Untitled Book'
+      await useStoryletStore.getState().createBook(trimmed)
+      return
+    }
+
+    // FSA path: open the save picker as the FIRST action from this click so
+    // transient user activation is preserved. The filename the user picks
+    // becomes the book title. Only create the book if they confirm.
+    try {
+      await createBookWithFile('Untitled Book')
+    } catch (err) {
+      console.error('Failed to create book:', err)
+    }
   }
 
   async function handleOpenFile() {

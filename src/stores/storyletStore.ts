@@ -28,7 +28,7 @@ function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
 }
 import { createSnapshot, getAllSnapshots, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
-import { clearFileHandle, getHandleState } from '../lib/fileSystem'
+import { clearFileHandle, getHandleState, supportsFileSystemAccess } from '../lib/fileSystem'
 import { showToast } from './genericToastStore'
 import { useImageRevealStore, hydrateImageReveal } from './imageRevealStore'
 import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
@@ -96,10 +96,15 @@ function generateId(): string {
 // when the book is loaded but no granted file handle is present.
 // Safety net for mutation paths that might bypass UI-level disabling
 // (programmatic dispatch, shortcuts, modals).
-// Mirrors the logic in fileLock.ts — 'unknown' permission is treated as OK
-// so freshly-opened files don't briefly lock while queryPermission resolves.
+// Mirrors the logic in fileLock.ts:
+//  - browsers without the File System Access API (Safari, Firefox) can never
+//    tether a handle, so localforage is the source of truth — edits always OK;
+//    without this the toast fires on every keystroke.
+//  - 'unknown' permission is treated as OK so freshly-opened files don't
+//    briefly lock while queryPermission resolves.
 let lastLockToastAt = 0
 function bailIfLocked(action: string): boolean {
+  if (!supportsFileSystemAccess()) return false
   const handle = getHandleState()
   if (handle.hasHandle && handle.permission !== 'denied' && handle.permission !== 'prompt') return false
   const ts = Date.now()

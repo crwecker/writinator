@@ -10,8 +10,9 @@ import { ExportDialog } from './ExportDialog'
 import { HamburgerMenu, type MenuAction } from './HamburgerMenu'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt } from '../../lib/fileSystem'
+import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt, supportsFileSystemAccess } from '../../lib/fileSystem'
 import { reconcileWithFile } from '../../lib/reconcile'
+import { showToast } from '../../stores/genericToastStore'
 import { createSnapshot } from '../../stores/snapshotStore'
 import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
 import { FindInBook } from './FindInBook'
@@ -90,6 +91,8 @@ export function AppShell() {
   const toggleRenderMode = useEditorStore((s) => s.toggleRenderMode)
   const sidebarOpen = useEditorStore((s) => s.sidebarOpen)
   const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
+  const vimEnabled = useEditorStore((s) => s.vimMode)
+  const toggleVimMode = useEditorStore((s) => s.toggleVimMode)
 
   const activeStorylet = book?.storylets?.find((storylet) => storylet.id === activeStoryletId)
 
@@ -256,6 +259,18 @@ export function AppShell() {
     const snapshotPromise = storylet?.content
       ? createSnapshot(docId!, storylet.content, 'manual')
       : Promise.resolve(null)
+
+    // No File System Access API (Safari, Firefox): there's no tethered file to
+    // write back to, and falling through to a download triggers Safari's
+    // download-permission prompt on every Cmd+S. The book already auto-persists
+    // to localforage, so just confirm the snapshot and tell the user.
+    if (!supportsFileSystemAccess()) {
+      void snapshotPromise.then(() => {
+        showToast('Saved in browser. Use Export to download a copy.', 'success')
+      })
+      return
+    }
+
     snapshotPromise.then(() =>
       quickSave(currentBook, globalSettings).then((saved) => {
         if (!saved) saveAsNewFile(currentBook, globalSettings)
@@ -330,6 +345,11 @@ export function AppShell() {
         handleInsertNote()
         return
       }
+      if (km.toggleVim && matchesEvent(km.toggleVim, e)) {
+        e.preventDefault()
+        toggleVimMode()
+        return
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
@@ -342,6 +362,7 @@ export function AppShell() {
     toggleCharacterPanel,
     toggleNotesPanel,
     togglePublishedSnapshots,
+    toggleVimMode,
   ])
 
   // Auto-snapshot every 5 minutes
@@ -487,6 +508,7 @@ export function AppShell() {
     { action: 'toggleTypewriter', label: 'Toggle typewriter mode', onSelect: toggleDistractionFree },
     { action: 'toggleRenderMode', label: 'Cycle presentation', onSelect: toggleRenderMode },
     { action: 'toggleFileTree', label: 'Toggle file tree', onSelect: () => useEditorStore.getState().toggleSidebar() },
+    { action: 'toggleVim', label: vimEnabled ? 'Turn off VIM mode' : 'Turn on VIM mode', onSelect: toggleVimMode },
     { action: 'findInBook', label: 'Find in book', onSelect: () => setFindOpen((prev) => !prev) },
     { action: 'snapshotHistory', label: 'History', onSelect: togglePublishedSnapshots },
     { action: 'toggleCharacterPanel', label: 'Character stats', onSelect: toggleCharacterPanel },
@@ -756,7 +778,7 @@ export function AppShell() {
               {coins.toLocaleString()}
             </span>
           </button>
-          <VimStatusLine mode={vimCurrentMode} />
+          {vimEnabled && <VimStatusLine mode={vimCurrentMode} />}
         </div>
       </div>
     </div>

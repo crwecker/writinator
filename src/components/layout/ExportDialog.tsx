@@ -10,6 +10,7 @@ import {
   exportAsEpub,
   exportAsZip,
 } from '../../lib/export'
+import { exportWritinatorFile } from '../../lib/fileSystem'
 import type { Book, DocumentStyles } from '../../types'
 
 type ExportFn = (book: Book, documentStyles?: DocumentStyles) => void | Promise<void>
@@ -73,6 +74,23 @@ export function ExportDialog({ open, onClose }: Props) {
     }
   }, [onClose])
 
+  // The .writinator file needs the full globalSettings (not just documentStyles),
+  // so it can't go through the ExportFn-shaped `formats` array.
+  const runProjectFileExport = useCallback(async () => {
+    const book = useStoryletStore.getState().book
+    if (!book) return
+    useStoryletStore.getState()._flushContentUpdate()
+    const currentBook = useStoryletStore.getState().book!
+    const globalSettings = useStoryletStore.getState().globalSettings
+    setExporting('Writinator file')
+    try {
+      await exportWritinatorFile(currentBook, globalSettings)
+    } finally {
+      setExporting(null)
+      onClose()
+    }
+  }, [onClose])
+
   if (!open) return null
 
   const cellClass =
@@ -99,6 +117,20 @@ export function ExportDialog({ open, onClose }: Props) {
         </div>
 
         <div className="flex flex-col gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">Project file (full backup)</div>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                disabled={exporting !== null}
+                onClick={() => void runProjectFileExport()}
+                className={cellClass}
+              >
+                <span className="font-medium">{exporting === 'Writinator file' ? 'Saving…' : 'Writinator file'}</span>
+                <span className="text-[10px] text-gray-500 font-mono">.writinator</span>
+              </button>
+            </div>
+          </div>
+
           <div>
             <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">Single file</div>
             <div className="grid grid-cols-3 gap-2">

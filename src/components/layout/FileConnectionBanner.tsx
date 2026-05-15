@@ -2,6 +2,7 @@ import {
   getHandleState,
   restoreStoredFileHandleFromRecents,
   openFile,
+  saveAsNewFile,
 } from '../../lib/fileSystem'
 import { useIsFileLocked } from '../../lib/fileLock'
 import { useStoryletStore } from '../../stores/storyletStore'
@@ -35,6 +36,23 @@ export function FileConnectionBanner() {
     } catch (err) {
       console.error('Failed to connect file:', err)
       showToast('Failed to open file. See console for details.', 'warning')
+    }
+  }
+
+  async function handleSaveAsNew() {
+    const book = useStoryletStore.getState().book
+    if (!book) return
+    const globalSettings = useStoryletStore.getState().globalSettings
+    try {
+      const result = await saveAsNewFile(book, globalSettings)
+      if (result === 'saved') {
+        showToast('Saved.', 'success')
+      } else if (result === 'loaded') {
+        showToast('Loaded existing file.', 'success')
+      }
+    } catch (err) {
+      console.error('Failed to save new file:', err)
+      showToast('Failed to save file. See console for details.', 'warning')
     }
   }
 
@@ -96,14 +114,22 @@ export function FileConnectionBanner() {
     <div className={bannerClass} role="alert">
       <span>
         <span className="font-semibold text-amber-300">Read-only —</span>{' '}
-        not saved to a file. Connect to start editing.
+        not saved to a file. Choose where to save your story to start editing.
       </span>
-      <button
-        onClick={() => { void handleConnect() }}
-        className="bg-amber-500 hover:bg-amber-400 text-gray-900 font-medium px-3 py-1 rounded text-xs transition-colors"
-      >
-        Connect to file…
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => { void handleSaveAsNew() }}
+          className="bg-amber-500 hover:bg-amber-400 text-gray-900 font-medium px-3 py-1 rounded text-xs transition-colors"
+        >
+          Save to file…
+        </button>
+        <button
+          onClick={() => { void handleConnect() }}
+          className="text-amber-200 hover:text-amber-50 px-3 py-1 rounded text-xs transition-colors"
+        >
+          Open existing file…
+        </button>
+      </div>
     </div>
   )
 }

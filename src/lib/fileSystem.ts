@@ -158,6 +158,25 @@ export async function saveFile(
   useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now())
 }
 
+/**
+ * Downloads the full project state as a .writinator file. Always uses the
+ * browser download path (never the FSA picker), so it works as a "save a copy"
+ * / backup action on every browser — this is the only way Safari/Firefox users
+ * can get their .writinator file onto disk. Does NOT tether a handle or advance
+ * save state: it's a copy, parallel to the other Export formats. Passing the
+ * current counter through unchanged keeps reconcile.ts honest for any tethered
+ * file on browsers that have one.
+ */
+export async function exportWritinatorFile(
+  book: Book,
+  globalSettings: GlobalSettings
+): Promise<void> {
+  const currentCounter = useStoryletStore.getState().lastSavedCounter
+  const file = await buildWritinatorFile(book, globalSettings, currentCounter)
+  const json = JSON.stringify(file, null, 2)
+  saveWithDownload(json, book.title)
+}
+
 export async function quickSave(
   book: Book,
   globalSettings: GlobalSettings
@@ -247,6 +266,87 @@ export async function saveAsNewFile(
   })
   await saveFile(book, globalSettings)
   return 'saved'
+}
+
+/**
+ * "Create new book" flow: opens the save picker FIRST (synchronously from the
+ * click handler, so transient user activation is preserved), then either:
+ *   - 'loaded':    the picked file already contains a valid book → load it
+ *   - 'created':   the file is empty/new → create a book using the filename
+ *                  (sans extension) as the book title and write it to disk
+ *   - 'cancelled': user dismissed the picker → no state change
+ *
+ * Returns null on unsupported browsers (caller should fall back to a download
+ * flow). On 'created', current book (if any) is orphan-snapshotted first.
+ */
+export async function createBookWithFile(
+  suggestedTitle: string
+): Promise<'created' | 'loaded' | 'cancelled' | null> {
+  if (!supportsFileSystemAccess()) return null
+
+  let handle: FileSystemFileHandle
+  try {
+    handle = await window.showSaveFilePicker({
+      suggestedName: `${sanitizeFilename(suggestedTitle)}${FILE_EXTENSION}`,
+      types: [
+        {
+          description: 'Writinator Book',
+          accept: { [MIME_TYPE]: [FILE_EXTENSION] },
+        },
+      ],
+    })
+  } catch {
+    return 'cancelled'
+  }
+
+  // If the picked file already holds a valid Writinator book, prefer loading
+  // over clobbering — user almost certainly meant to "Open" that file.
+  try {
+    const existing = await handle.getFile()
+    if (existing.size > 0) {
+      const text = await existing.text()
+      const parsed = parseFileJSON(text)
+      if (parsed) {
+        const currentBook = useStoryletStore.getState().book
+        if (currentBook) {
+          await snapshotBook(currentBook, 'orphan')
+        }
+        storedFileHandle = handle
+        notifyHandleChange()
+        useRecentFilesStore.getState().addRecent({
+          handle,
+          name: handle.name,
+          lastOpenedAt: Date.now(),
+        })
+        await useStoryletStore.getState().loadFile(parsed)
+        useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
+        return 'loaded'
+      }
+    }
+  } catch (err) {
+    console.warn('createBookWithFile: could not inspect existing file, proceeding with create:', err)
+  }
+
+  // Derive the book title from the chosen filename (strip extension). Falls
+  // back to suggestedTitle if the user typed something nonsensical.
+  const filenameTitle = handle.name.replace(new RegExp(`${FILE_EXTENSION}$`), '').trim()
+  const title = filenameTitle || suggestedTitle
+
+  await useStoryletStore.getState().createBook(title)
+  storedFileHandle = handle
+  notifyHandleChange()
+  useRecentFilesStore.getState().addRecent({
+    handle,
+    name: handle.name,
+    lastOpenedAt: Date.now(),
+  })
+
+  const book = useStoryletStore.getState().book
+  const globalSettings = useStoryletStore.getState().globalSettings
+  if (book) {
+    await saveFile(book, globalSettings)
+  }
+  return 'created'
 }
 
 // ---------------------------------------------------------------------------

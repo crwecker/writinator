@@ -19,7 +19,7 @@ Book-writing app. React + TypeScript + CodeMirror 6 + Zustand + Tailwind CSS v4 
 ## Key Conventions
 
 - **No `any` types.** Use proper interfaces and type narrowing.
-- **VIM mode is always on** via `@replit/codemirror-vim`. New shortcuts must not conflict with VIM bindings.
+- **VIM mode is opt-in** via `@replit/codemirror-vim`, toggled by `editorStore.vimMode` (default off; `vim()` lives in a `Compartment` in `Editor.tsx`). When designing new shortcuts, assume VIM may be on and avoid conflicts with its bindings.
 - **Tailwind v4** via `@tailwindcss/vite` plugin. No PostCSS config.
 - **Dark theme**: gray-700/800/900 backgrounds, gray-200/400/500 text.
 - **Editor max-width**: 800px, centered.

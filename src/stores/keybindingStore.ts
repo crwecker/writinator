@@ -16,6 +16,7 @@ export type ActionName =
   | 'exportBook'
   | 'findInBook'
   | 'openFile'
+  | 'toggleVim'
 
 export interface KeyCombo {
   key: string  // e.g. 'f', 's', 'h'
@@ -42,6 +43,7 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   exportBook: 'Export book',
   findInBook: 'Find in book',
   openFile: 'Open file',
+  toggleVim: 'Toggle VIM mode',
 }
 
 export const DEFAULT_KEYMAP: KeyMap = {
@@ -57,6 +59,7 @@ export const DEFAULT_KEYMAP: KeyMap = {
   insertNote: { key: 'n', ctrl: true, shift: true },
   exportBook: { key: 'e', ctrl: true, shift: true },
   findInBook: { key: 'f', ctrl: true, shift: true },
+  toggleVim: { key: 'v', ctrl: true, alt: true },
 }
 
 export function comboToString(combo: KeyCombo): string {

@@ -708,6 +708,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const documentStyles = useStoryletStore((s) => s.globalSettings.documentStyles)
 
   const distractionFree = useEditorStore((s) => s.distractionFree)
+  const vimMode = useEditorStore((s) => s.vimMode)
   const locked = useIsFileLocked()
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -721,6 +722,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const typewriterCompartmentRef = useRef<Compartment | null>(null)
   const docStylesCompartmentRef = useRef<Compartment | null>(null)
   const lockCompartmentRef = useRef<Compartment | null>(null)
+  const vimCompartmentRef = useRef<Compartment | null>(null)
   // Cached word count for sub-second WPM delta computation. Updated on every doc change.
   const prevWordCountRef = useRef<number>(0)
 
@@ -766,18 +768,22 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const typewriterComp = new Compartment()
     const docStylesComp = new Compartment()
     const lockComp = new Compartment()
+    const vimComp = new Compartment()
     fontCompartmentRef.current = fontComp
     fontSizeCompartmentRef.current = fontSizeComp
     typewriterCompartmentRef.current = typewriterComp
     docStylesCompartmentRef.current = docStylesComp
     lockCompartmentRef.current = lockComp
+    vimCompartmentRef.current = vimComp
 
     const updateContent = useStoryletStore.getState().updateStoryletContent
 
     const state = EditorState.create({
       doc: '',
       extensions: [
-        vim(),
+        // vim() must come first so its keymap precedes defaultKeymap. Compartmented
+        // so the toggleVim action can swap it in/out without rebuilding the view.
+        vimComp.of(useEditorStore.getState().vimMode ? vim() : []),
         drawSelection(),
         kjExitInsertMode(),
         history(),
@@ -952,10 +958,23 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
       typewriterCompartmentRef.current = null
       docStylesCompartmentRef.current = null
       lockCompartmentRef.current = null
+      vimCompartmentRef.current = null
       callbacksRef.current.onEditorView?.(null)
       view.destroy()
     }
   }, [])
+
+  // Toggle VIM extension. Reconfiguring the compartment teardowns the vim
+  // StateField when disabled and re-mounts it (in NORMAL mode) when enabled.
+  useEffect(() => {
+    const view = viewRef.current
+    const comp = vimCompartmentRef.current
+    if (!view || !comp) return
+    view.dispatch({ effects: comp.reconfigure(vimMode ? vim() : []) })
+    // When vim turns off, reset the displayed mode so a stale INSERT/VISUAL
+    // label doesn't reappear if it's later re-enabled.
+    if (!vimMode) callbacksRef.current.onVimModeChange?.('NORMAL')
+  }, [vimMode])
 
   // Load storylet content when active storylet changes
   const loadStorylet = useCallback(() => {
