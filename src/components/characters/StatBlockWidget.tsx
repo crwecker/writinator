@@ -35,6 +35,12 @@ function formatScalar(v: StatValue): string {
         .join(' • ')
     case 'rank':
       return v.tier
+    case 'inventory':
+      return v.items.length === 0 ? '(none)' : `${v.items.length} items`
+    case 'spellList':
+      return v.items.length === 0 ? '(none)' : `${v.items.length} items`
+    case 'skillList':
+      return v.items.length === 0 ? '(none)' : `${v.items.length} items`
   }
 }
 

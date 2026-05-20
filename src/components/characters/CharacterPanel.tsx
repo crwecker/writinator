@@ -54,6 +54,12 @@ function formatValue(v: StatValue | undefined): string {
         .join('  ')
     case 'rank':
       return v.tier
+    case 'inventory':
+      return v.items.length === 0 ? '(empty)' : `${v.items.length} items`
+    case 'spellList':
+      return v.items.length === 0 ? '(empty)' : `${v.items.length} items`
+    case 'skillList':
+      return v.items.length === 0 ? '(empty)' : `${v.items.length} items`
   }
 }
 
@@ -82,6 +88,20 @@ function valuesEqual(a: StatValue | undefined, b: StatValue | undefined): boolea
     }
     case 'rank':
       return b.kind === 'rank' && a.tier === b.tier
+    case 'inventory':
+    case 'spellList':
+    case 'skillList': {
+      if (b.kind !== a.kind) return false
+      if (a.items.length !== b.items.length) return false
+      return a.items.every((aItem, i) => {
+        const bItem = b.items[i]
+        if (aItem.name !== bItem.name) return false
+        const aKeys = Object.keys(aItem.fields)
+        const bKeys = Object.keys(bItem.fields)
+        if (aKeys.length !== bKeys.length) return false
+        return aKeys.every((k) => aItem.fields[k] === bItem.fields[k])
+      })
+    }
   }
 }
 
@@ -884,6 +904,14 @@ function summarizeOp(op: StatDeltaOp, character: Character | undefined): string 
       return op.direction === 'set'
         ? `${statName(op.statId)} = ${op.value ?? ''}`
         : `${statName(op.statId)} rank ${op.direction}`
+    case 'fill':
+      return `${statName(op.statId)} → max`
+    case 'itemAdd':
+      return `${statName(op.statId)} + ${op.name}`
+    case 'itemRemove':
+      return `${statName(op.statId)} − ${op.name}`
+    case 'itemFieldAdjust':
+      return `${op.name} ${op.field} ${op.delta >= 0 ? '+' : ''}${op.delta}`
   }
 }
 

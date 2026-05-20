@@ -10,6 +10,7 @@ import type {
   StatDefinition,
   StatDelta,
   StatDeltaOp,
+  StatListItem,
   StatModifier,
   StatValue,
 } from '../types'
@@ -30,6 +31,12 @@ function cloneStatValue(v: StatValue): StatValue {
       return { kind: 'attributeSet', values: { ...v.values } }
     case 'rank':
       return { kind: 'rank', tier: v.tier }
+    case 'inventory':
+      return { kind: 'inventory', items: v.items.map((it) => ({ name: it.name, fields: { ...it.fields } })) }
+    case 'spellList':
+      return { kind: 'spellList', items: v.items.map((it) => ({ name: it.name, fields: { ...it.fields } })) }
+    case 'skillList':
+      return { kind: 'skillList', items: v.items.map((it) => ({ name: it.name, fields: { ...it.fields } })) }
   }
 }
 
@@ -81,6 +88,46 @@ export function applyListRemove(current: string[], toRemove: string[]): string[]
     }
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// Per-kind allowed fields for itemFieldAdjust validation
+// ---------------------------------------------------------------------------
+const ITEM_KIND_ALLOWED_FIELDS: Record<'inventory' | 'spellList' | 'skillList', string[]> = {
+  inventory: ['qty'],
+  spellList: ['level', 'mana'],
+  skillList: ['level'],
+}
+
+// ---------------------------------------------------------------------------
+// Pure item helpers — never mutate inputs
+// ---------------------------------------------------------------------------
+
+function itemAdd(items: StatListItem[], name: string, fields: Record<string, number>): StatListItem[] {
+  const key = name.toLowerCase()
+  const exists = items.some((it) => it.name.toLowerCase() === key)
+  if (exists) return items
+  return [...items, { name, fields: { ...fields } }]
+}
+
+function itemRemove(items: StatListItem[], name: string): StatListItem[] {
+  const key = name.toLowerCase()
+  return items.filter((it) => it.name.toLowerCase() !== key)
+}
+
+function itemFieldAdjust(
+  items: StatListItem[],
+  name: string,
+  field: string,
+  delta: number
+): StatListItem[] {
+  const key = name.toLowerCase()
+  const idx = items.findIndex((it) => it.name.toLowerCase() === key)
+  if (idx === -1) return items
+  return items.map((it, i) => {
+    if (i !== idx) return it
+    return { name: it.name, fields: { ...it.fields, [field]: (it.fields[field] ?? 0) + delta } }
+  })
 }
 
 function cloneBase(base: Record<string, StatValue>): Record<string, StatValue> {
@@ -225,6 +272,35 @@ export function applyDeltaOp(
       // For 'up' / 'down' we need the definition's rankTiers — handled by
       // computeStateAt, which passes `character` through. Here we fall back to
       // no-op when direction is up/down since applyDeltaOp doesn't know tiers.
+      break
+    }
+    case 'fill': {
+      const cur = next.base[op.statId]
+      if (!cur || cur.kind !== 'numberWithMax') break
+      next.base[op.statId] = { kind: 'numberWithMax', value: cur.max, max: cur.max }
+      break
+    }
+    case 'itemAdd': {
+      const cur = next.base[op.statId]
+      if (!cur) break
+      if (cur.kind !== 'inventory' && cur.kind !== 'spellList' && cur.kind !== 'skillList') break
+      next.base[op.statId] = { ...cur, items: itemAdd(cur.items, op.name, op.fields) }
+      break
+    }
+    case 'itemRemove': {
+      const cur = next.base[op.statId]
+      if (!cur) break
+      if (cur.kind !== 'inventory' && cur.kind !== 'spellList' && cur.kind !== 'skillList') break
+      next.base[op.statId] = { ...cur, items: itemRemove(cur.items, op.name) }
+      break
+    }
+    case 'itemFieldAdjust': {
+      const cur = next.base[op.statId]
+      if (!cur) break
+      if (cur.kind !== 'inventory' && cur.kind !== 'spellList' && cur.kind !== 'skillList') break
+      const allowed = ITEM_KIND_ALLOWED_FIELDS[cur.kind]
+      if (!allowed.includes(op.field)) break
+      next.base[op.statId] = { ...cur, items: itemFieldAdjust(cur.items, op.name, op.field, op.delta) }
       break
     }
   }

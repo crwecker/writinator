@@ -42,6 +42,12 @@ function defaultValueFor(
       const tiers = rankTiers && rankTiers.length > 0 ? rankTiers : DEFAULT_RANK_TIERS
       return { kind: 'rank', tier: tiers[0] }
     }
+    case 'inventory':
+      return { kind: 'inventory', items: [] }
+    case 'spellList':
+      return { kind: 'spellList', items: [] }
+    case 'skillList':
+      return { kind: 'skillList', items: [] }
   }
 }
 

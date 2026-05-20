@@ -262,6 +262,9 @@ export type StatType =
   | 'text'
   | 'attributeSet'
   | 'rank'
+  | 'inventory'
+  | 'spellList'
+  | 'skillList'
 
 export interface StatDefinition {
   id: string                 // stable id within the character
@@ -270,6 +273,7 @@ export interface StatDefinition {
   // Optional configuration per stat type
   attributeKeys?: string[]   // for attributeSet — ordered keys (e.g., ['STR','DEX',...])
   rankTiers?: string[]       // for rank — ordered tiers (e.g., ['F','E','D','C','B','A','S'])
+  manaStatId?: string        // for spellList — points at the mana/MP stat id
 }
 
 // Value shapes, one per StatType
@@ -299,6 +303,16 @@ export interface RankStatValue {
   tier: string               // must be one of StatDefinition.rankTiers
 }
 
+/** Shared item shape for structured list stats (inventory, spellList, skillList). */
+export interface StatListItem {
+  name: string
+  fields: Record<string, number>
+}
+
+export interface InventoryStatValue { kind: 'inventory'; items: StatListItem[] }
+export interface SpellListStatValue { kind: 'spellList'; items: StatListItem[] }
+export interface SkillListStatValue { kind: 'skillList'; items: StatListItem[] }
+
 export type StatValue =
   | NumberStatValue
   | NumberWithMaxStatValue
@@ -306,6 +320,9 @@ export type StatValue =
   | TextStatValue
   | AttributeSetStatValue
   | RankStatValue
+  | InventoryStatValue
+  | SpellListStatValue
+  | SkillListStatValue
 
 export interface StatModifier {
   statId: string
@@ -337,6 +354,10 @@ export type StatDeltaOp =
       direction: 'up' | 'down' | 'set'
       value?: string           // required when direction === 'set'
     }
+  | { kind: 'fill'; statId: string }
+  | { kind: 'itemAdd'; statId: string; name: string; fields: Record<string, number> }
+  | { kind: 'itemRemove'; statId: string; name: string }
+  | { kind: 'itemFieldAdjust'; statId: string; name: string; field: string; delta: number }
 
 export interface StatDelta {
   id: string                  // uuid — matches one entry in the ops list of a marker

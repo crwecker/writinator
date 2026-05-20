@@ -17,6 +17,7 @@ type OpKind = StatDeltaOp['kind']
 const OP_KINDS: OpKind[] = [
   'adjust',
   'maxAdjust',
+  'fill',
   'set',
   'listAdd',
   'listRemove',
@@ -30,6 +31,7 @@ const OP_KINDS: OpKind[] = [
 const OP_KIND_LABELS: Record<OpKind, string> = {
   adjust: 'adjust',
   maxAdjust: 'adjust max',
+  fill: 'set to max',
   set: 'set',
   listAdd: 'list add',
   listRemove: 'list remove',
@@ -38,6 +40,9 @@ const OP_KIND_LABELS: Record<OpKind, string> = {
   buffApply: 'apply buff',
   buffRemove: 'remove buff',
   rankChange: 'rank change',
+  itemAdd: 'item add',
+  itemRemove: 'item remove',
+  itemFieldAdjust: 'item adjust',
 }
 
 interface Props {
@@ -74,6 +79,12 @@ function defaultValueFor(def: StatDefinition): StatValue {
       const tiers = def.rankTiers ?? []
       return { kind: 'rank', tier: tiers[0] ?? '' }
     }
+    case 'inventory':
+      return { kind: 'inventory', items: [] }
+    case 'spellList':
+      return { kind: 'spellList', items: [] }
+    case 'skillList':
+      return { kind: 'skillList', items: [] }
   }
 }
 
@@ -132,6 +143,22 @@ function defaultOpFor(kind: OpKind, character: Character | undefined): StatDelta
     case 'rankChange': {
       const s = firstStatOfType(character, ['rank'])
       return { kind: 'rankChange', statId: s?.id ?? '', direction: 'up' }
+    }
+    case 'fill': {
+      const s = firstStatOfType(character, ['numberWithMax'])
+      return { kind: 'fill', statId: s?.id ?? '' }
+    }
+    case 'itemAdd': {
+      const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
+      return { kind: 'itemAdd', statId: s?.id ?? '', name: '', fields: {} }
+    }
+    case 'itemRemove': {
+      const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
+      return { kind: 'itemRemove', statId: s?.id ?? '', name: '' }
+    }
+    case 'itemFieldAdjust': {
+      const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
+      return { kind: 'itemFieldAdjust', statId: s?.id ?? '', name: '', field: '', delta: 0 }
     }
   }
 }
@@ -530,6 +557,12 @@ function OpParams({ op, character, onChange }: OpParamsProps) {
       return <BuffRemoveParams op={op} onChange={onChange} />
     case 'rankChange':
       return <RankChangeParams op={op} character={character} onChange={onChange} />
+    case 'fill':
+      return <FillParams op={op} character={character} onChange={onChange} />
+    case 'itemAdd':
+    case 'itemRemove':
+    case 'itemFieldAdjust':
+      return null
   }
 }
 
@@ -1037,5 +1070,35 @@ function RankChangeParams({
         </label>
       )}
     </div>
+  )
+}
+
+function FillParams({
+  op,
+  character,
+  onChange,
+}: {
+  op: Extract<StatDeltaOp, { kind: 'fill' }>
+  character: Character | undefined
+  onChange: (op: StatDeltaOp) => void
+}) {
+  const stats = (character?.stats ?? []).filter((s) => s.type === 'numberWithMax')
+  return (
+    <label className="flex items-center gap-1.5">
+      <span className="text-xs text-gray-400">Stat</span>
+      <select
+        data-testid="delta-stat"
+        value={op.statId}
+        onChange={(e) => onChange({ ...op, statId: e.target.value })}
+        className={INPUT_CLS}
+      >
+        {stats.length === 0 && <option value="">(none)</option>}
+        {stats.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }

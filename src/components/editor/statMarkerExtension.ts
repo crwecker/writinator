@@ -145,6 +145,14 @@ function formatOp(
         return `${statName(op.statId)} → ${op.value ?? '?'}`
       }
       return `${statName(op.statId)} rank ${op.direction}`
+    case 'fill':
+      return `${statName(op.statId)} → max`
+    case 'itemAdd':
+      return `+${op.name} → ${statName(op.statId)}`
+    case 'itemRemove':
+      return `-${op.name} from ${statName(op.statId)}`
+    case 'itemFieldAdjust':
+      return `${op.name}.${op.field} ${op.delta >= 0 ? '+' : ''}${op.delta}`
   }
 }
 

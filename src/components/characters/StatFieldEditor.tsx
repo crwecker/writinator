@@ -136,6 +136,18 @@ export function StatFieldEditor({ definition, value, onChange, readOnly }: Props
     )
   }
 
+  if (
+    (definition.type === 'inventory' && value.kind === 'inventory') ||
+    (definition.type === 'spellList' && value.kind === 'spellList') ||
+    (definition.type === 'skillList' && value.kind === 'skillList')
+  ) {
+    return (
+      <span className="text-xs text-gray-400 italic">
+        {value.items.length === 0 ? '0 items' : `${value.items.length} items`}
+      </span>
+    )
+  }
+
   return (
     <span className="text-xs text-red-400 italic">
       Incompatible value for stat type "{definition.type}"

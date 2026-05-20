@@ -201,6 +201,12 @@ function formatStatValueForExport(v: StatValue): string {
         .join(' • ')
     case 'rank':
       return v.tier
+    case 'inventory':
+    case 'spellList':
+    case 'skillList':
+      return v.items.length === 0
+        ? '(none)'
+        : v.items.map((it) => it.name).join(', ')
   }
 }
 
