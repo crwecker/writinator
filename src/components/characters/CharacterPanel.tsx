@@ -131,7 +131,7 @@ function StatRow({ character, def, base, effective, testId }: StatRowProps) {
     prevEffectiveRef.current = effective
   }, [effective])
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-0.5 rounded bg-gray-800 px-1.5 py-1">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[11px] uppercase tracking-wide text-gray-500 shrink-0">
           {def.name}
@@ -197,6 +197,7 @@ function CharacterSection({ character, computed }: SectionProps) {
   }, [character.stats])
 
   const equippedSlots = Object.keys(state.equipped)
+  const GRID_KINDS = new Set(['numberWithMax', 'number'])
 
   return (
     <div
@@ -217,10 +218,10 @@ function CharacterSection({ character, computed }: SectionProps) {
         <span className="text-[10px] text-gray-500">{expanded ? '\u25BC' : '\u25B6'}</span>
       </button>
       {expanded && (
-        <div className="px-2 py-2 space-y-2 bg-gray-900/40">
+        <div className="px-2 py-1.5 space-y-1.5 bg-gray-900/40">
           {(['numberWithMax', 'number', 'text', 'rank'] as const).map((kind) =>
             groups[kind].length > 0 ? (
-              <div key={kind} className="space-y-1">
+              <div key={kind} className={GRID_KINDS.has(kind) ? 'grid grid-cols-2 gap-1' : 'space-y-1'}>
                 {groups[kind].map((def) => (
                   <StatRow
                     key={def.id}
