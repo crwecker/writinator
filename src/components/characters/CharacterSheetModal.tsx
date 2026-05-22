@@ -176,6 +176,7 @@ export function CharacterSheetModal({ open, onClose }: Props) {
                 onAddStat={(stat, def) => addStat(selected.id, stat, def)}
                 onRemoveStat={(statId) => removeStat(selected.id, statId)}
                 onRenameStat={(statId, name) => updateStat(selected.id, statId, { name })}
+                onUpdateStatDef={(statId, patch) => updateStat(selected.id, statId, patch)}
                 onReorderStats={(statIds) => reorderStats(selected.id, statIds)}
                 onEquipmentSlotsChange={(slots) => setEquipmentSlots(selected.id, slots)}
               />
@@ -211,6 +212,7 @@ interface SheetProps {
   onAddStat: (stat: StatDefinition, defaultValue: StatValue) => void
   onRemoveStat: (statId: string) => void
   onRenameStat: (statId: string, name: string) => void
+  onUpdateStatDef: (statId: string, patch: Partial<Omit<StatDefinition, 'id'>>) => void
   onReorderStats: (statIds: string[]) => void
   onEquipmentSlotsChange: (slots: string[]) => void
 }
@@ -224,6 +226,7 @@ function CharacterSheet({
   onAddStat,
   onRemoveStat,
   onRenameStat,
+  onUpdateStatDef,
   onReorderStats,
   onEquipmentSlotsChange,
 }: SheetProps) {
@@ -234,8 +237,19 @@ function CharacterSheet({
   const [newStatType, setNewStatType] = useState<StatType>('number')
   const [newStatTiers, setNewStatTiers] = useState('F,E,D,C,B,A,S')
   const [newStatAttrs, setNewStatAttrs] = useState('STR,DEX,CON,INT,WIS,CHA')
+  const [newStatManaId, setNewStatManaId] = useState('')
   const [renamingStatId, setRenamingStatId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
+
+  const manaStats = character.stats.filter((s) => s.type === 'numberWithMax')
+
+  useEffect(() => {
+    if (newStatType === 'spellList') {
+      const defaultId = manaStats.find((s) => s.id === 'mp')?.id ?? manaStats[0]?.id ?? ''
+      setNewStatManaId(defaultId)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newStatType])
 
   function commitNewStat() {
     const name = newStatName.trim()
@@ -257,6 +271,14 @@ function CharacterSheet({
         .filter(Boolean)
       stat = { id, name, type: 'attributeSet', attributeKeys: keys }
       defValue = defaultValueFor('attributeSet', keys)
+    } else if (newStatType === 'spellList') {
+      stat = {
+        id,
+        name,
+        type: 'spellList',
+        ...(newStatManaId ? { manaStatId: newStatManaId } : {}),
+      }
+      defValue = defaultValueFor('spellList')
     } else {
       stat = { id, name, type: newStatType }
       defValue = defaultValueFor(newStatType)
@@ -267,6 +289,7 @@ function CharacterSheet({
     setNewStatType('number')
     setNewStatTiers('F,E,D,C,B,A,S')
     setNewStatAttrs('STR,DEX,CON,INT,WIS,CHA')
+    setNewStatManaId('')
   }
 
   function moveStat(statId: string, dir: -1 | 1) {
@@ -491,6 +514,28 @@ function CharacterSheet({
                     </button>
                   </div>
                 </div>
+                {stat.type === 'spellList' && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <label className="text-xs text-gray-400 shrink-0">Mana stat</label>
+                    <select
+                      data-testid={`character-sheet-mana-picker-${stat.id}`}
+                      value={stat.manaStatId ?? ''}
+                      onChange={(e) =>
+                        onUpdateStatDef(stat.id, {
+                          manaStatId: e.target.value || undefined,
+                        })
+                      }
+                      className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500"
+                    >
+                      <option value="">— none —</option>
+                      {manaStats.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.id})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {value && (
                   <StatFieldEditor
                     definition={stat}
@@ -541,6 +586,7 @@ function CharacterSheet({
                   <option value="attributeSet">attributeSet</option>
                   <option value="rank">rank</option>
                   <option value="inventory">inventory</option>
+                  <option value="spellList">Spell list</option>
                 </select>
               </div>
               {newStatType === 'rank' && (
@@ -561,6 +607,24 @@ function CharacterSheet({
                   onChange={(e) => setNewStatAttrs(e.target.value)}
                   className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500 w-full"
                 />
+              )}
+              {newStatType === 'spellList' && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-400 shrink-0">Mana stat</label>
+                  <select
+                    data-testid="character-sheet-mana-picker-new"
+                    value={newStatManaId}
+                    onChange={(e) => setNewStatManaId(e.target.value)}
+                    className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500"
+                  >
+                    <option value="">— none —</option>
+                    {manaStats.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
               <div className="flex gap-2">
                 <button

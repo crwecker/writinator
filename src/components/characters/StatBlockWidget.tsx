@@ -130,6 +130,29 @@ function StatRow({
       </div>
     )
   }
+  if (value.kind === 'spellList') {
+    return (
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 py-0.5">
+        <span className="text-[11px] uppercase tracking-wider text-gray-400">
+          {def.name}
+        </span>
+        {value.items.length === 0 ? (
+          <span className="text-xs text-gray-500 italic">none</span>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {value.items.map((it, i) => (
+              <span
+                key={`${it.name}-${i}`}
+                className="rounded bg-gray-700/70 px-1.5 py-0.5 text-[11px] text-gray-200"
+              >
+                {it.name} · Lv {it.fields.level ?? 1} · MP {it.fields.mana ?? 0}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
   return (
     <div className="flex items-baseline justify-between py-0.5">
       <span className="text-[11px] uppercase tracking-wider text-gray-400">

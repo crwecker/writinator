@@ -368,6 +368,189 @@ function InventorySection({ character, def, effective, canEdit, editorView }: In
   )
 }
 
+// ---------------------------------------------------------------------------
+// Spell list stat section (mirrors InventorySection with level/mana fields + Cast)
+// ---------------------------------------------------------------------------
+
+interface SpellSectionProps {
+  character: Character
+  def: StatDefinition
+  effective: StatValue | undefined
+  canEdit: boolean
+  editorView: EditorView | null
+}
+
+function SpellSection({ character, def, effective, canEdit, editorView }: SpellSectionProps) {
+  const [addName, setAddName] = useState('')
+
+  const emit = (op: StatDeltaOp) => {
+    if (!editorView || !canEdit) return
+    insertStatDelta(editorView, character.id, op)
+  }
+
+  const items = effective?.kind === 'spellList' ? effective.items : []
+  const levelMin = LIST_STAT_FIELDS.spellList.find((f) => f.key === 'level')!.min
+  const manaMin = LIST_STAT_FIELDS.spellList.find((f) => f.key === 'mana')!.min
+  const manaStatExists = !!def.manaStatId && character.stats.some((s) => s.id === def.manaStatId)
+
+  const handleAdd = () => {
+    const trimmed = addName.trim()
+    if (!trimmed) return
+    emit({ kind: 'itemAdd', statId: def.id, name: trimmed, fields: defaultItemFields('spellList') })
+    setAddName('')
+  }
+
+  const btnCls =
+    'text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
+
+  return (
+    <div className="space-y-0.5">
+      <span className="text-[11px] uppercase tracking-wide text-gray-500">{def.name}</span>
+      {items.length === 0 ? (
+        <div className="text-[11px] text-gray-600">(no spells)</div>
+      ) : (
+        <ul className="space-y-0.5">
+          {items.map((spell) => {
+            const level = spell.fields.level ?? 0
+            const mana = spell.fields.mana ?? 0
+            const slug = itemSlug(spell.name)
+            const castDisabled = !canEdit || !def.manaStatId || !manaStatExists || mana <= 0
+            return (
+              <li
+                key={spell.name}
+                className="flex items-center gap-1 text-[11px] rounded bg-gray-800 px-1.5 py-0.5"
+              >
+                <span className="flex-1 text-gray-200 truncate min-w-0">
+                  {spell.name}
+                  <span className="text-gray-500"> · Lv {level} · MP {mana}</span>
+                </span>
+                <button
+                  data-testid={`character-panel-spell-level-dec-${character.id}-${def.id}-${slug}`}
+                  disabled={!canEdit || level <= levelMin}
+                  onClick={() =>
+                    emit({
+                      kind: 'itemFieldAdjust',
+                      statId: def.id,
+                      name: spell.name,
+                      field: 'level',
+                      delta: -1,
+                    })
+                  }
+                  title={`${spell.name} level −1`}
+                  className={btnCls}
+                >
+                  −
+                </button>
+                <button
+                  data-testid={`character-panel-spell-level-inc-${character.id}-${def.id}-${slug}`}
+                  disabled={!canEdit}
+                  onClick={() =>
+                    emit({
+                      kind: 'itemFieldAdjust',
+                      statId: def.id,
+                      name: spell.name,
+                      field: 'level',
+                      delta: 1,
+                    })
+                  }
+                  title={`${spell.name} level +1`}
+                  className={btnCls}
+                >
+                  +
+                </button>
+                <span className="text-[10px] text-gray-600 px-0.5 shrink-0">mp</span>
+                <button
+                  data-testid={`character-panel-spell-mana-dec-${character.id}-${def.id}-${slug}`}
+                  disabled={!canEdit || mana <= manaMin}
+                  onClick={() =>
+                    emit({
+                      kind: 'itemFieldAdjust',
+                      statId: def.id,
+                      name: spell.name,
+                      field: 'mana',
+                      delta: -1,
+                    })
+                  }
+                  title={`${spell.name} mana −1`}
+                  className={btnCls}
+                >
+                  −
+                </button>
+                <button
+                  data-testid={`character-panel-spell-mana-inc-${character.id}-${def.id}-${slug}`}
+                  disabled={!canEdit}
+                  onClick={() =>
+                    emit({
+                      kind: 'itemFieldAdjust',
+                      statId: def.id,
+                      name: spell.name,
+                      field: 'mana',
+                      delta: 1,
+                    })
+                  }
+                  title={`${spell.name} mana +1`}
+                  className={btnCls}
+                >
+                  +
+                </button>
+                <button
+                  data-testid={`character-panel-spell-cast-${character.id}-${def.id}-${slug}`}
+                  disabled={castDisabled}
+                  onClick={() => {
+                    if (!editorView || castDisabled) return
+                    insertStatDelta(editorView, character.id, {
+                      kind: 'adjust',
+                      statId: def.manaStatId!,
+                      delta: -mana,
+                    })
+                  }}
+                  title={`Cast ${spell.name}`}
+                  className={`${btnCls} text-blue-400 hover:text-blue-300`}
+                >
+                  Cast
+                </button>
+                <button
+                  data-testid={`character-panel-spell-remove-${character.id}-${def.id}-${slug}`}
+                  disabled={!canEdit}
+                  onClick={() =>
+                    emit({ kind: 'itemRemove', statId: def.id, name: spell.name })
+                  }
+                  title={`Remove ${spell.name}`}
+                  className={`${btnCls} text-gray-500 hover:text-red-400`}
+                >
+                  ×
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {/* Add-spell affordance */}
+      <div className="flex items-center gap-1 pt-0.5">
+        <input
+          data-testid={`character-panel-spell-add-input-${character.id}-${def.id}`}
+          value={addName}
+          onChange={(e) => setAddName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleAdd()
+          }}
+          disabled={!canEdit}
+          placeholder="spell name…"
+          className="flex-1 text-[10px] bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-gray-300 placeholder-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
+        />
+        <button
+          data-testid={`character-panel-spell-add-${character.id}-${def.id}`}
+          disabled={!canEdit || !addName.trim()}
+          onClick={handleAdd}
+          className={btnCls}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface SectionProps {
   character: Character
   computed: { state: CharacterState; effective: Record<string, StatValue> }
@@ -389,6 +572,7 @@ function CharacterSection({ character, computed, canEdit, editorView }: SectionP
       attributeSet: [],
       list: [],
       inventory: [],
+      spellList: [],
     }
     for (const s of character.stats) {
       if (byKind[s.type]) byKind[s.type].push(s)
@@ -531,6 +715,21 @@ function CharacterSection({ character, computed, canEdit, editorView }: SectionP
             <div className="space-y-1.5">
               {groups.inventory.map((def) => (
                 <InventorySection
+                  key={def.id}
+                  character={character}
+                  def={def}
+                  effective={effective[def.id]}
+                  canEdit={canEdit}
+                  editorView={editorView}
+                />
+              ))}
+            </div>
+          )}
+
+          {groups.spellList.length > 0 && (
+            <div className="space-y-1.5">
+              {groups.spellList.map((def) => (
+                <SpellSection
                   key={def.id}
                   character={character}
                   def={def}
