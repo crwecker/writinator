@@ -21,7 +21,7 @@ export const LIST_STAT_FIELDS: Record<ListStatKind, ListStatFieldDef[]> = {
   inventory: [{ key: 'qty', label: 'Qty', default: 1, min: 0 }],
   spellList: [
     { key: 'level', label: 'Level', default: 1, min: 0 },
-    { key: 'mana', label: 'Mana', default: 0, min: 0 },
+    { key: 'mana', label: 'Cost', default: 0, min: 0 },
   ],
   skillList: [{ key: 'level', label: 'Level', default: 1, min: 0 }],
 }

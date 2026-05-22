@@ -9,6 +9,18 @@ const ALL_STAT_TYPES: StatType[] = [
   'inventory', 'spellList', 'skillList',
 ]
 
+const STAT_TYPE_LABELS: Record<StatType, string> = {
+  number: 'Number',
+  numberWithMax: 'Number with max',
+  list: 'List',
+  text: 'Text',
+  attributeSet: 'Attribute set',
+  rank: 'Rank',
+  inventory: 'Counted list',
+  spellList: 'Leveled list with cost',
+  skillList: 'Leveled list',
+}
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -499,7 +511,7 @@ function CharacterSheet({
                       >
                         {ALL_STAT_TYPES.map((t) => (
                           <option key={t} value={t} className="bg-gray-900 text-gray-200 normal-case tracking-normal">
-                            {t}
+                            {STAT_TYPE_LABELS[t]}
                           </option>
                         ))}
                       </select>
@@ -543,7 +555,7 @@ function CharacterSheet({
                 </div>
                 {stat.type === 'spellList' && (
                   <div className="flex items-center gap-2 mb-2">
-                    <label className="text-xs text-gray-400 shrink-0">Mana stat</label>
+                    <label className="text-xs text-gray-400 shrink-0">Cost</label>
                     <select
                       data-testid={`character-sheet-mana-picker-${stat.id}`}
                       value={stat.manaStatId ?? ''}
@@ -606,15 +618,11 @@ function CharacterSheet({
                   onChange={(e) => setNewStatType(e.target.value as StatType)}
                   className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500"
                 >
-                  <option value="number">number</option>
-                  <option value="numberWithMax">numberWithMax</option>
-                  <option value="list">list</option>
-                  <option value="text">text</option>
-                  <option value="attributeSet">attributeSet</option>
-                  <option value="rank">rank</option>
-                  <option value="inventory">inventory</option>
-                  <option value="spellList">Spell list</option>
-                  <option value="skillList">Skill list</option>
+                  {ALL_STAT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {STAT_TYPE_LABELS[t]}
+                    </option>
+                  ))}
                 </select>
               </div>
               {newStatType === 'rank' && (
@@ -638,7 +646,7 @@ function CharacterSheet({
               )}
               {newStatType === 'spellList' && (
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-400 shrink-0">Mana stat</label>
+                  <label className="text-xs text-gray-400 shrink-0">Cost</label>
                   <select
                     data-testid="character-sheet-mana-picker-new"
                     value={newStatManaId}

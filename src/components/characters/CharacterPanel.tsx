@@ -369,7 +369,7 @@ function InventorySection({ character, def, effective, canEdit, editorView }: In
 }
 
 // ---------------------------------------------------------------------------
-// Spell list stat section (mirrors InventorySection with level/mana fields + Cast)
+// Spell list stat section (mirrors InventorySection with level/cost fields + Use)
 // ---------------------------------------------------------------------------
 
 interface SpellSectionProps {
@@ -422,7 +422,7 @@ function SpellSection({ character, def, effective, canEdit, editorView }: SpellS
               >
                 <span className="flex-1 text-gray-200 truncate min-w-0">
                   {spell.name}
-                  <span className="text-gray-500"> · Lv {level} · MP {mana}</span>
+                  <span className="text-gray-500"> · Lv {level} · Cost {mana}</span>
                 </span>
                 <button
                   data-testid={`character-panel-spell-level-dec-${character.id}-${def.id}-${slug}`}
@@ -458,7 +458,7 @@ function SpellSection({ character, def, effective, canEdit, editorView }: SpellS
                 >
                   +
                 </button>
-                <span className="text-[10px] text-gray-600 px-0.5 shrink-0">mp</span>
+                <span className="text-[10px] text-gray-600 px-0.5 shrink-0">cost</span>
                 <button
                   data-testid={`character-panel-spell-mana-dec-${character.id}-${def.id}-${slug}`}
                   disabled={!canEdit || mana <= manaMin}
@@ -471,7 +471,7 @@ function SpellSection({ character, def, effective, canEdit, editorView }: SpellS
                       delta: -1,
                     })
                   }
-                  title={`${spell.name} mana −1`}
+                  title={`${spell.name} cost −1`}
                   className={btnCls}
                 >
                   −
@@ -488,7 +488,7 @@ function SpellSection({ character, def, effective, canEdit, editorView }: SpellS
                       delta: 1,
                     })
                   }
-                  title={`${spell.name} mana +1`}
+                  title={`${spell.name} cost +1`}
                   className={btnCls}
                 >
                   +
@@ -504,10 +504,10 @@ function SpellSection({ character, def, effective, canEdit, editorView }: SpellS
                       delta: -mana,
                     })
                   }}
-                  title={`Cast ${spell.name}`}
+                  title={`Use ${spell.name}`}
                   className={`${btnCls} text-blue-400 hover:text-blue-300`}
                 >
-                  Cast
+                  Use
                 </button>
                 <button
                   data-testid={`character-panel-spell-remove-${character.id}-${def.id}-${slug}`}

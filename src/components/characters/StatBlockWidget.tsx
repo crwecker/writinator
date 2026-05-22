@@ -145,7 +145,7 @@ function StatRow({
                 key={`${it.name}-${i}`}
                 className="rounded bg-gray-700/70 px-1.5 py-0.5 text-[11px] text-gray-200"
               >
-                {it.name} · Lv {it.fields.level ?? 1} · MP {it.fields.mana ?? 0}
+                {it.name} · Lv {it.fields.level ?? 1} · Cost {it.fields.mana ?? 0}
               </span>
             ))}
           </div>
