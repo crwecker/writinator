@@ -858,7 +858,6 @@ function CharacterSection({ character, computed, canEdit, editorView }: SectionP
     return byKind
   }, [character.stats])
 
-  const equippedSlots = Object.keys(state.equipped)
   const GRID_KINDS = new Set(['numberWithMax', 'number'])
 
   return (
@@ -1021,57 +1020,6 @@ function CharacterSection({ character, computed, canEdit, editorView }: SectionP
               ))}
             </div>
           )}
-
-          {/* Equipment */}
-          <div className="space-y-1 pt-1 border-t border-gray-800">
-            <span className="text-[11px] uppercase tracking-wide text-gray-500">
-              Equipment
-            </span>
-            {character.equipmentSlots.length === 0 && equippedSlots.length === 0 ? (
-              <div className="text-[11px] text-gray-600">(no slots)</div>
-            ) : (
-              <div className="space-y-0.5">
-                {character.equipmentSlots.map((slot) => {
-                  const eq = state.equipped[slot]
-                  return (
-                    <div key={slot} className="flex items-baseline justify-between gap-2 text-[11px]">
-                      <span className="text-gray-500 shrink-0">{slot}</span>
-                      {eq ? (
-                        <span className="text-gray-300 truncate text-right">
-                          {eq.itemName ?? eq.itemId}
-                          {eq.modifiers.length > 0 && (
-                            <span className="text-gray-500">
-                              {' '}
-                              ({eq.modifiers
-                                .map((m) => formatModifier(m, character.stats))
-                                .join(', ')})
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="text-gray-600">—</span>
-                      )}
-                    </div>
-                  )
-                })}
-                {/* Any equipped slots not in the declared list */}
-                {equippedSlots
-                  .filter((s) => !character.equipmentSlots.includes(s))
-                  .map((slot) => {
-                    const eq = state.equipped[slot]
-                    if (!eq) return null
-                    return (
-                      <div key={slot} className="flex items-baseline justify-between gap-2 text-[11px]">
-                        <span className="text-gray-500 italic shrink-0">{slot}</span>
-                        <span className="text-gray-300 truncate text-right">
-                          {eq.itemName ?? eq.itemId}
-                        </span>
-                      </div>
-                    )
-                  })}
-              </div>
-            )}
-          </div>
 
           {/* Active buffs */}
           <div className="space-y-1 pt-1 border-t border-gray-800">
