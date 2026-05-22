@@ -6,6 +6,7 @@ import { useEditorStore } from '../../stores/editorStore'
 import { checkConsistency, computeStateAt, getStoryletTreeOrder } from '../../lib/characterState'
 import { extractMarkers } from '../../lib/markerUtils'
 import { insertStatDelta } from '../../lib/insertStatDelta'
+import { LIST_STAT_FIELDS, defaultItemFields } from '../../lib/listStatFields'
 import { ProgressionGraph } from './ProgressionGraph'
 import type {
   Character,
@@ -235,6 +236,138 @@ function StatRow({ character, def, base, effective, testId, canEdit, editorView 
   )
 }
 
+// ---------------------------------------------------------------------------
+// Inventory stat section (full-width, per-item rows with qty ×N, −/+, remove, add)
+// ---------------------------------------------------------------------------
+
+/** Lower-kebab slug used in data-testid attributes. */
+function itemSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '-')
+}
+
+interface InventorySectionProps {
+  character: Character
+  def: StatDefinition
+  effective: StatValue | undefined
+  canEdit: boolean
+  editorView: EditorView | null
+}
+
+function InventorySection({ character, def, effective, canEdit, editorView }: InventorySectionProps) {
+  const [addName, setAddName] = useState('')
+
+  const emit = (op: StatDeltaOp) => {
+    if (!editorView || !canEdit) return
+    insertStatDelta(editorView, character.id, op)
+  }
+
+  const items = effective?.kind === 'inventory' ? effective.items : []
+  const qtyMin = LIST_STAT_FIELDS.inventory[0].min  // 0
+
+  const handleAdd = () => {
+    const trimmed = addName.trim()
+    if (!trimmed) return
+    emit({ kind: 'itemAdd', statId: def.id, name: trimmed, fields: defaultItemFields('inventory') })
+    setAddName('')
+  }
+
+  const btnCls =
+    'text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
+
+  return (
+    <div className="space-y-0.5">
+      <span className="text-[11px] uppercase tracking-wide text-gray-500">{def.name}</span>
+      {items.length === 0 ? (
+        <div className="text-[11px] text-gray-600">(no items)</div>
+      ) : (
+        <ul className="space-y-0.5">
+          {items.map((item) => {
+            const qty = item.fields.qty ?? 0
+            const slug = itemSlug(item.name)
+            return (
+              <li
+                key={item.name}
+                className="flex items-center gap-1 text-[11px] rounded bg-gray-800 px-1.5 py-0.5"
+              >
+                <span className="flex-1 text-gray-200 truncate">
+                  {item.name} <span className="text-gray-500">×{qty}</span>
+                </span>
+                <button
+                  data-testid={`character-panel-item-dec-${character.id}-${def.id}-${slug}`}
+                  disabled={!canEdit || qty <= qtyMin}
+                  onClick={() =>
+                    emit({
+                      kind: 'itemFieldAdjust',
+                      statId: def.id,
+                      name: item.name,
+                      field: 'qty',
+                      delta: -1,
+                    })
+                  }
+                  title={`${item.name} qty −1`}
+                  className={btnCls}
+                >
+                  −
+                </button>
+                <button
+                  data-testid={`character-panel-item-inc-${character.id}-${def.id}-${slug}`}
+                  disabled={!canEdit}
+                  onClick={() =>
+                    emit({
+                      kind: 'itemFieldAdjust',
+                      statId: def.id,
+                      name: item.name,
+                      field: 'qty',
+                      delta: 1,
+                    })
+                  }
+                  title={`${item.name} qty +1`}
+                  className={btnCls}
+                >
+                  +
+                </button>
+                <button
+                  data-testid={`character-panel-item-remove-${character.id}-${def.id}-${slug}`}
+                  disabled={!canEdit}
+                  onClick={() =>
+                    emit({ kind: 'itemRemove', statId: def.id, name: item.name })
+                  }
+                  title={`Remove ${item.name}`}
+                  className={`${btnCls} text-gray-500 hover:text-red-400`}
+                >
+                  ×
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {/* Add-item affordance */}
+      <div className="flex items-center gap-1 pt-0.5">
+        <input
+          data-testid={`character-panel-item-add-input-${character.id}-${def.id}`}
+          value={addName}
+          onChange={(e) => setAddName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleAdd()
+          }}
+          disabled={!canEdit}
+          placeholder="item name…"
+          className="flex-1 text-[10px] bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-gray-300 placeholder-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
+        />
+        <button
+          data-testid={`character-panel-item-add-${character.id}-${def.id}`}
+          disabled={!canEdit || !addName.trim()}
+          onClick={handleAdd}
+          className={btnCls}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface SectionProps {
   character: Character
   computed: { state: CharacterState; effective: Record<string, StatValue> }
@@ -255,6 +388,7 @@ function CharacterSection({ character, computed, canEdit, editorView }: SectionP
       rank: [],
       attributeSet: [],
       list: [],
+      inventory: [],
     }
     for (const s of character.stats) {
       if (byKind[s.type]) byKind[s.type].push(s)
@@ -390,6 +524,21 @@ function CharacterSection({ character, computed, canEdit, editorView }: SectionP
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {groups.inventory.length > 0 && (
+            <div className="space-y-1.5">
+              {groups.inventory.map((def) => (
+                <InventorySection
+                  key={def.id}
+                  character={character}
+                  def={def}
+                  effective={effective[def.id]}
+                  canEdit={canEdit}
+                  editorView={editorView}
+                />
+              ))}
             </div>
           )}
 

@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import type { StatDefinition, StatValue } from '../../types'
+import type { StatDefinition, StatListItem, StatValue } from '../../types'
+import { LIST_STAT_FIELDS, makeListItem } from '../../lib/listStatFields'
+import type { ListStatKind } from '../../lib/listStatFields'
 
 interface Props {
   definition: StatDefinition
@@ -141,10 +143,18 @@ export function StatFieldEditor({ definition, value, onChange, readOnly }: Props
     (definition.type === 'spellList' && value.kind === 'spellList') ||
     (definition.type === 'skillList' && value.kind === 'skillList')
   ) {
+    const kind = definition.type as ListStatKind
     return (
-      <span className="text-xs text-gray-400 italic">
-        {value.items.length === 0 ? '0 items' : `${value.items.length} items`}
-      </span>
+      <ListItemsEditor
+        kind={kind}
+        items={value.items}
+        readOnly={readOnly}
+        onChange={(items) => {
+          if (kind === 'inventory') onChange({ kind: 'inventory', items })
+          else if (kind === 'spellList') onChange({ kind: 'spellList', items })
+          else onChange({ kind: 'skillList', items })
+        }}
+      />
     )
   }
 
@@ -204,6 +214,111 @@ function ListEditor({ items, readOnly, onChange }: ListEditorProps) {
             value={draft}
             placeholder="Add item..."
             onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addItem()
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={addItem}
+            className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 rounded px-2 py-1"
+          >
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ListItemsEditor — structured item editor for inventory / spellList / skillList
+// ---------------------------------------------------------------------------
+
+interface ListItemsEditorProps {
+  kind: ListStatKind
+  items: StatListItem[]
+  readOnly?: boolean
+  onChange: (items: StatListItem[]) => void
+}
+
+function ListItemsEditor({ kind, items, readOnly, onChange }: ListItemsEditorProps) {
+  const [draftName, setDraftName] = useState('')
+  const fieldDefs = LIST_STAT_FIELDS[kind]
+
+  function addItem() {
+    const name = draftName.trim()
+    if (!name) return
+    onChange([...items, makeListItem(kind, name)])
+    setDraftName('')
+  }
+
+  function removeItem(i: number) {
+    onChange(items.filter((_, idx) => idx !== i))
+  }
+
+  function updateField(itemIdx: number, fieldKey: string, val: number) {
+    onChange(
+      items.map((it, idx) =>
+        idx === itemIdx
+          ? { ...it, fields: { ...it.fields, [fieldKey]: val } }
+          : it,
+      ),
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {items.length > 0 && (
+        <div className="flex items-center gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1">
+          <span className="flex-1">Name</span>
+          {fieldDefs.map((f) => (
+            <span key={f.key} className="w-16 text-center">
+              {f.label}
+            </span>
+          ))}
+          <span className="w-5" />
+        </div>
+      )}
+      {items.map((item, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span className="flex-1 text-sm text-gray-200 truncate min-w-0">{item.name}</span>
+          {fieldDefs.map((f) => (
+            <input
+              key={f.key}
+              type="number"
+              value={item.fields[f.key] ?? f.default}
+              disabled={readOnly}
+              onChange={(e) => updateField(i, f.key, parseNumber(e.target.value, f.default))}
+              className={`${INPUT_CLS} w-16`}
+            />
+          ))}
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => removeItem(i)}
+              className="text-xs text-gray-500 hover:text-red-400 w-5 text-center shrink-0"
+              title="Remove"
+            >
+              &#x2715;
+            </button>
+          )}
+        </div>
+      ))}
+      {items.length === 0 && (
+        <span className="text-xs text-gray-600 italic">empty</span>
+      )}
+      {!readOnly && (
+        <div className="flex items-center gap-1.5">
+          <input
+            type="text"
+            className={`${INPUT_CLS} flex-1`}
+            value={draftName}
+            placeholder="Add item..."
+            onChange={(e) => setDraftName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()

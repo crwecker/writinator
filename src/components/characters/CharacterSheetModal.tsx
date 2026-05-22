@@ -540,6 +540,7 @@ function CharacterSheet({
                   <option value="text">text</option>
                   <option value="attributeSet">attributeSet</option>
                   <option value="rank">rank</option>
+                  <option value="inventory">inventory</option>
                 </select>
               </div>
               {newStatType === 'rank' && (

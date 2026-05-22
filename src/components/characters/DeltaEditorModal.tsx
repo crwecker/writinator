@@ -11,6 +11,7 @@ import type {
   StatValue,
 } from '../../types'
 import { STAT_MARKER_REGEX } from '../../lib/markerUtils'
+import { LIST_STAT_FIELDS, defaultItemFields } from '../../lib/listStatFields'
 
 type OpKind = StatDeltaOp['kind']
 
@@ -21,6 +22,9 @@ const OP_KINDS: OpKind[] = [
   'set',
   'listAdd',
   'listRemove',
+  'itemAdd',
+  'itemRemove',
+  'itemFieldAdjust',
   'equip',
   'unequip',
   'buffApply',
@@ -150,7 +154,11 @@ function defaultOpFor(kind: OpKind, character: Character | undefined): StatDelta
     }
     case 'itemAdd': {
       const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
-      return { kind: 'itemAdd', statId: s?.id ?? '', name: '', fields: {} }
+      const seed =
+        s && (s.type === 'inventory' || s.type === 'spellList' || s.type === 'skillList')
+          ? defaultItemFields(s.type)
+          : {}
+      return { kind: 'itemAdd', statId: s?.id ?? '', name: '', fields: seed }
     }
     case 'itemRemove': {
       const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
@@ -158,7 +166,11 @@ function defaultOpFor(kind: OpKind, character: Character | undefined): StatDelta
     }
     case 'itemFieldAdjust': {
       const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
-      return { kind: 'itemFieldAdjust', statId: s?.id ?? '', name: '', field: '', delta: 0 }
+      const field =
+        s && (s.type === 'inventory' || s.type === 'spellList' || s.type === 'skillList')
+          ? LIST_STAT_FIELDS[s.type][0]?.key ?? ''
+          : ''
+      return { kind: 'itemFieldAdjust', statId: s?.id ?? '', name: '', field, delta: 0 }
     }
   }
 }
@@ -562,7 +574,7 @@ function OpParams({ op, character, onChange }: OpParamsProps) {
     case 'itemAdd':
     case 'itemRemove':
     case 'itemFieldAdjust':
-      return null
+      return <ItemOpParams op={op} character={character} onChange={onChange} />
   }
 }
 
@@ -1100,5 +1112,104 @@ function FillParams({
         ))}
       </select>
     </label>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ItemOpParams — shared UI for itemAdd / itemRemove / itemFieldAdjust
+// ---------------------------------------------------------------------------
+
+const LIST_STAT_TYPES: StatDefinition['type'][] = ['inventory', 'spellList', 'skillList']
+
+function ItemOpParams({
+  op,
+  character,
+  onChange,
+}: {
+  op: Extract<StatDeltaOp, { kind: 'itemAdd' | 'itemRemove' | 'itemFieldAdjust' }>
+  character: Character | undefined
+  onChange: (op: StatDeltaOp) => void
+}) {
+  const stats = (character?.stats ?? []).filter((s) => LIST_STAT_TYPES.includes(s.type))
+  const currentStat = stats.find((s) => s.id === op.statId)
+
+  if (stats.length === 0) {
+    return (
+      <p className="text-xs text-gray-600 italic">No list-type stats on this character.</p>
+    )
+  }
+
+  function handleStatChange(statId: string) {
+    const nextStat = stats.find((s) => s.id === statId)
+    if (
+      op.kind === 'itemFieldAdjust' &&
+      nextStat &&
+      (nextStat.type === 'inventory' || nextStat.type === 'spellList' || nextStat.type === 'skillList')
+    ) {
+      const firstField = LIST_STAT_FIELDS[nextStat.type][0]?.key ?? ''
+      onChange({ ...op, statId, field: firstField })
+    } else {
+      onChange({ ...op, statId })
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="flex items-center gap-1.5">
+        <span className="text-xs text-gray-400">Stat</span>
+        <select
+          value={op.statId}
+          onChange={(e) => handleStatChange(e.target.value)}
+          className={INPUT_CLS}
+        >
+          {stats.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1.5">
+        <span className="text-xs text-gray-400">Name</span>
+        <input
+          type="text"
+          value={op.name}
+          onChange={(e) => onChange({ ...op, name: e.target.value })}
+          placeholder="item name"
+          className={INPUT_CLS}
+        />
+      </label>
+      {op.kind === 'itemFieldAdjust' &&
+        currentStat &&
+        (currentStat.type === 'inventory' ||
+          currentStat.type === 'spellList' ||
+          currentStat.type === 'skillList') && (
+          <>
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">Field</span>
+              <select
+                value={op.field}
+                onChange={(e) => onChange({ ...op, field: e.target.value })}
+                className={INPUT_CLS}
+              >
+                {LIST_STAT_FIELDS[currentStat.type].map((def) => (
+                  <option key={def.key} value={def.key}>
+                    {def.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">Delta</span>
+              <input
+                type="number"
+                value={op.delta}
+                onChange={(e) => onChange({ ...op, delta: numberOr(e.target.value, 0) })}
+                className={`${INPUT_CLS} w-24`}
+              />
+            </label>
+          </>
+        )}
+    </div>
   )
 }

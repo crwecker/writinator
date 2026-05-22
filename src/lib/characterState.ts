@@ -15,6 +15,7 @@ import type {
   StatValue,
 } from '../types'
 import { extractMarkers } from './markerUtils'
+import { LIST_STAT_FIELD_KEYS } from './listStatFields'
 
 /** Deep-clone a StatValue (each tagged variant). */
 function cloneStatValue(v: StatValue): StatValue {
@@ -88,15 +89,6 @@ export function applyListRemove(current: string[], toRemove: string[]): string[]
     }
   }
   return out
-}
-
-// ---------------------------------------------------------------------------
-// Per-kind allowed fields for itemFieldAdjust validation
-// ---------------------------------------------------------------------------
-const ITEM_KIND_ALLOWED_FIELDS: Record<'inventory' | 'spellList' | 'skillList', string[]> = {
-  inventory: ['qty'],
-  spellList: ['level', 'mana'],
-  skillList: ['level'],
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +290,7 @@ export function applyDeltaOp(
       const cur = next.base[op.statId]
       if (!cur) break
       if (cur.kind !== 'inventory' && cur.kind !== 'spellList' && cur.kind !== 'skillList') break
-      const allowed = ITEM_KIND_ALLOWED_FIELDS[cur.kind]
+      const allowed = LIST_STAT_FIELD_KEYS[cur.kind]
       if (!allowed.includes(op.field)) break
       next.base[op.statId] = { ...cur, items: itemFieldAdjust(cur.items, op.name, op.field, op.delta) }
       break
