@@ -45,7 +45,7 @@ function cloneStatValue(v: StatValue): StatValue {
 // Missing suffix = 1. Used by inventory-style lists; harmless on plain lists.
 const QTY_RE = /\s+x(\d+)$/i
 
-function parseQty(raw: string): { name: string; qty: number } {
+export function parseQty(raw: string): { name: string; qty: number } {
   const m = raw.match(QTY_RE)
   if (!m || m.index === undefined) return { name: raw, qty: 1 }
   const qty = parseInt(m[1], 10)
@@ -53,7 +53,7 @@ function parseQty(raw: string): { name: string; qty: number } {
   return { name: raw.slice(0, m.index).trimEnd(), qty }
 }
 
-function formatQty(name: string, qty: number): string {
+export function formatQty(name: string, qty: number): string {
   return qty > 1 ? `${name} x${qty}` : name
 }
 

@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCharacterStore, DEFAULT_RANK_TIERS } from '../../stores/characterStore'
 import { StatFieldEditor } from './StatFieldEditor'
+import { coerceStatValue } from '../../lib/coerceStatValue'
 import type { StatDefinition, StatType, StatValue } from '../../types'
+
+const ALL_STAT_TYPES: StatType[] = [
+  'number', 'numberWithMax', 'list', 'text', 'attributeSet', 'rank',
+  'inventory', 'spellList', 'skillList',
+]
 
 interface Props {
   open: boolean
@@ -292,6 +298,18 @@ function CharacterSheet({
     setNewStatManaId('')
   }
 
+  function handleTypeChange(statId: string, newType: StatType) {
+    const def = character.stats.find((s) => s.id === statId)
+    if (!def || def.type === newType) return
+    const currentValue = character.baseValues[statId]
+    if (!currentValue) return
+    const coerced = coerceStatValue(currentValue, newType)
+    const patch: Partial<Omit<StatDefinition, 'id'>> = { type: newType }
+    if (def.type === 'spellList' && newType !== 'spellList') patch.manaStatId = undefined
+    onUpdateStatDef(statId, patch)
+    onBaseValueChange(statId, coerced)
+  }
+
   function moveStat(statId: string, dir: -1 | 1) {
     const ids = character.stats.map((s) => s.id)
     const i = ids.indexOf(statId)
@@ -473,9 +491,18 @@ function CharacterSheet({
                       <span className="text-sm text-gray-200 font-medium truncate">
                         {stat.name}
                       </span>
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wide">
-                        {stat.type}
-                      </span>
+                      <select
+                        data-testid={`character-sheet-type-changer-${stat.id}`}
+                        value={stat.type}
+                        onChange={(e) => handleTypeChange(stat.id, e.target.value as StatType)}
+                        className="text-[10px] text-gray-500 uppercase tracking-wide bg-transparent border-none outline-none cursor-pointer hover:text-gray-300 max-w-[120px]"
+                      >
+                        {ALL_STAT_TYPES.map((t) => (
+                          <option key={t} value={t} className="bg-gray-900 text-gray-200 normal-case tracking-normal">
+                            {t}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   )}
                   <div className="flex items-center gap-1 shrink-0">
@@ -587,6 +614,7 @@ function CharacterSheet({
                   <option value="rank">rank</option>
                   <option value="inventory">inventory</option>
                   <option value="spellList">Spell list</option>
+                  <option value="skillList">Skill list</option>
                 </select>
               </div>
               {newStatType === 'rank' && (
