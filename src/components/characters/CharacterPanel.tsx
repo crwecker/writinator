@@ -119,6 +119,7 @@ interface StatRowProps {
 
 function StatRow({ character, def, base, effective, testId, canEdit, editorView }: StatRowProps) {
   const [expanded, setExpanded] = useState(false)
+  const [editingText, setEditingText] = useState<string | null>(null)
   const differs = !valuesEqual(base, effective)
   const valueRef = useRef<HTMLSpanElement>(null)
   const prevEffectiveRef = useRef<StatValue | undefined>(effective)
@@ -134,6 +135,19 @@ function StatRow({ character, def, base, effective, testId, canEdit, editorView 
     }
     prevEffectiveRef.current = effective
   }, [effective])
+  const isTextEditable = def.type === 'text' && canEdit && !!editorView
+  const commitText = (raw: string) => {
+    setEditingText(null)
+    if (!editorView) return
+    const next = raw.trim()
+    const current = effective?.kind === 'text' ? effective.value : ''
+    if (next === current) return
+    insertStatDelta(editorView, character.id, {
+      kind: 'set',
+      statId: def.id,
+      value: { kind: 'text', value: next },
+    })
+  }
   const stepBtnCls =
     'flex-1 text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
   const inlineStepBtnCls =
@@ -149,16 +163,41 @@ function StatRow({ character, def, base, effective, testId, canEdit, editorView 
           {def.name}
         </span>
         <div className="flex items-center gap-1.5 min-w-0">
-          <span
-            ref={valueRef}
-            data-testid={testId}
-            className={`text-sm tabular-nums truncate ${
-              differs ? 'text-blue-300' : 'text-gray-200'
-            }`}
-            title={formatValue(effective)}
-          >
-            {formatValue(effective)}
-          </span>
+          {editingText !== null ? (
+            <input
+              data-testid={`character-panel-text-input-${character.id}-${def.id}`}
+              autoFocus
+              value={editingText}
+              onChange={(e) => setEditingText(e.target.value)}
+              onBlur={(e) => commitText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  ;(e.target as HTMLInputElement).blur()
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setEditingText(null)
+                }
+              }}
+              className="text-sm bg-gray-900 border border-blue-500 rounded px-1 py-0 outline-none text-gray-200 min-w-0 flex-1"
+            />
+          ) : (
+            <span
+              ref={valueRef}
+              data-testid={testId}
+              onClick={() => {
+                if (isTextEditable) {
+                  setEditingText(effective?.kind === 'text' ? effective.value : '')
+                }
+              }}
+              className={`text-sm tabular-nums truncate ${
+                differs ? 'text-blue-300' : 'text-gray-200'
+              } ${isTextEditable ? 'cursor-text hover:text-gray-100' : ''}`}
+              title={isTextEditable ? 'Click to edit' : formatValue(effective)}
+            >
+              {formatValue(effective)}
+            </span>
+          )}
           {differs && (
             <button
               onClick={() => setExpanded((p) => !p)}
