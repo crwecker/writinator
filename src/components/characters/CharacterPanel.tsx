@@ -134,6 +134,12 @@ function StatRow({ character, def, base, effective, testId, canEdit, editorView 
     prevEffectiveRef.current = effective
   }, [effective])
   const isScalar = def.type === 'number' || def.type === 'numberWithMax'
+  const stepBtnCls =
+    'flex-1 text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
+  const emit = (op: StatDeltaOp) => {
+    if (!editorView || !canEdit) return
+    insertStatDelta(editorView, character.id, op)
+  }
   return (
     <div className="flex flex-col gap-0.5 rounded bg-gray-800 px-1.5 py-1">
       <div className="flex items-baseline justify-between gap-2">
@@ -172,41 +178,56 @@ function StatRow({ character, def, base, effective, testId, canEdit, editorView 
         </div>
       )}
       {isScalar && (
-        <div className="flex gap-0.5 mt-0.5">
+        <div className="flex items-center gap-0.5 mt-0.5">
           <button
             data-testid={`character-panel-stat-dec-${character.id}-${def.id}`}
             disabled={!canEdit}
-            onClick={() => {
-              if (!editorView || !canEdit) return
-              insertStatDelta(editorView, character.id, { kind: 'adjust', statId: def.id, delta: -1 })
-            }}
-            className="flex-1 text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => emit({ kind: 'adjust', statId: def.id, delta: -1 })}
+            title={`${def.name} −1`}
+            className={stepBtnCls}
           >
             −
           </button>
           <button
             data-testid={`character-panel-stat-inc-${character.id}-${def.id}`}
             disabled={!canEdit}
-            onClick={() => {
-              if (!editorView || !canEdit) return
-              insertStatDelta(editorView, character.id, { kind: 'adjust', statId: def.id, delta: 1 })
-            }}
-            className="flex-1 text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => emit({ kind: 'adjust', statId: def.id, delta: 1 })}
+            title={`${def.name} +1`}
+            className={stepBtnCls}
           >
             +
           </button>
           {def.type === 'numberWithMax' && (
-            <button
-              data-testid={`character-panel-stat-max-${character.id}-${def.id}`}
-              disabled={!canEdit}
-              onClick={() => {
-                if (!editorView || !canEdit) return
-                insertStatDelta(editorView, character.id, { kind: 'fill', statId: def.id })
-              }}
-              className="text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1.5 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              max
-            </button>
+            <>
+              <span className="text-[10px] text-gray-500 px-0.5 shrink-0">/</span>
+              <button
+                data-testid={`character-panel-stat-maxdec-${character.id}-${def.id}`}
+                disabled={!canEdit}
+                onClick={() => emit({ kind: 'maxAdjust', statId: def.id, delta: -1 })}
+                title={`${def.name} max −1`}
+                className={stepBtnCls}
+              >
+                −
+              </button>
+              <button
+                data-testid={`character-panel-stat-maxinc-${character.id}-${def.id}`}
+                disabled={!canEdit}
+                onClick={() => emit({ kind: 'maxAdjust', statId: def.id, delta: 1 })}
+                title={`${def.name} max +1`}
+                className={stepBtnCls}
+              >
+                +
+              </button>
+              <button
+                data-testid={`character-panel-stat-max-${character.id}-${def.id}`}
+                disabled={!canEdit}
+                onClick={() => emit({ kind: 'fill', statId: def.id })}
+                title={`${def.name} → max`}
+                className="text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1.5 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              >
+                max
+              </button>
+            </>
           )}
         </div>
       )}

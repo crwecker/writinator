@@ -37,16 +37,17 @@ export type StatDeltaMergeDecision =
   | { kind: 'create' }
 
 /**
- * Decide whether a new adjust-op should be merged into an existing abutting
- * marker or create a fresh one.
+ * Decide whether a new numeric-delta op should be merged into an existing
+ * abutting marker or create a fresh one.
  *
  * Merge rule (decision E):
- *   - Only `adjust` ops ever merge; all other kinds immediately create.
+ *   - Only `adjust` and `maxAdjust` ops ever merge; all other kinds immediately
+ *     create. The two never merge into each other — only same-kind ops combine.
  *   - An abutting marker is one whose `to === cursor` (ends at cursor) or
  *     `from === cursor` (begins at cursor). Ends-at candidates are checked first.
  *   - The abutting marker must have exactly one delta in the store, that delta
- *     must be an `adjust` op, and it must match `characterId`, `statId`, and
- *     `attributeKey` (undefined === undefined is considered equal).
+ *     must be the same op kind, and it must match `characterId`, `statId`, and
+ *     (for `adjust`) `attributeKey` (undefined === undefined is considered equal).
  *   - On a full match the delta amounts are summed; the existing delta id is kept.
  */
 export function decideStatDeltaMerge(args: {
@@ -56,9 +57,10 @@ export function decideStatDeltaMerge(args: {
   characterId: string
   op: StatDeltaOp
 }): StatDeltaMergeDecision {
-  if (args.op.kind !== 'adjust') return { kind: 'create' }
+  const op = args.op
+  if (op.kind !== 'adjust' && op.kind !== 'maxAdjust') return { kind: 'create' }
 
-  // args.op is now narrowed to the adjust arm for the rest of the function.
+  // op is now narrowed to the adjust | maxAdjust arms for the rest.
   const endsAt = args.docMarkers.filter((m) => m.to === args.cursor)
   const beginsAt = args.docMarkers.filter((m) => m.from === args.cursor)
 
@@ -66,18 +68,22 @@ export function decideStatDeltaMerge(args: {
     const deltas = args.markers[marker.id]
     if (!deltas || deltas.length !== 1) continue
 
-    const existingDelta = deltas[0]
-    if (existingDelta.op.kind !== 'adjust') continue
-    if (existingDelta.characterId !== args.characterId) continue
-    if (existingDelta.op.statId !== args.op.statId) continue
-    if (existingDelta.op.attributeKey !== args.op.attributeKey) continue
+    const existing = deltas[0]
+    const eOp = existing.op
+    // Only same-kind ops merge; `attributeKey` distinguishes attributeSet
+    // adjusts and exists on `adjust` only.
+    if (op.kind === 'adjust') {
+      if (eOp.kind !== 'adjust') continue
+      if (eOp.attributeKey !== op.attributeKey) continue
+    } else {
+      if (eOp.kind !== 'maxAdjust') continue
+    }
+    if (existing.characterId !== args.characterId) continue
+    if (eOp.statId !== op.statId) continue
 
     const mergedDelta: StatDelta = {
-      ...existingDelta,
-      op: {
-        ...existingDelta.op,
-        delta: existingDelta.op.delta + args.op.delta,
-      },
+      ...existing,
+      op: { ...eOp, delta: eOp.delta + op.delta },
     }
     return { kind: 'merge', markerId: marker.id, deltas: [mergedDelta] }
   }
