@@ -5,6 +5,7 @@ import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { checkConsistency, computeStateAt, getStoryletTreeOrder } from '../../lib/characterState'
 import { extractMarkers } from '../../lib/markerUtils'
+import { insertStatDelta } from '../../lib/insertStatDelta'
 import { ProgressionGraph } from './ProgressionGraph'
 import type {
   Character,
@@ -111,9 +112,11 @@ interface StatRowProps {
   base: StatValue | undefined
   effective: StatValue | undefined
   testId: string
+  canEdit: boolean
+  editorView: EditorView | null
 }
 
-function StatRow({ character, def, base, effective, testId }: StatRowProps) {
+function StatRow({ character, def, base, effective, testId, canEdit, editorView }: StatRowProps) {
   const [expanded, setExpanded] = useState(false)
   const differs = !valuesEqual(base, effective)
   const valueRef = useRef<HTMLSpanElement>(null)
@@ -130,6 +133,7 @@ function StatRow({ character, def, base, effective, testId }: StatRowProps) {
     }
     prevEffectiveRef.current = effective
   }, [effective])
+  const isScalar = def.type === 'number' || def.type === 'numberWithMax'
   return (
     <div className="flex flex-col gap-0.5 rounded bg-gray-800 px-1.5 py-1">
       <div className="flex items-baseline justify-between gap-2">
@@ -167,6 +171,45 @@ function StatRow({ character, def, base, effective, testId }: StatRowProps) {
           </div>
         </div>
       )}
+      {isScalar && (
+        <div className="flex gap-0.5 mt-0.5">
+          <button
+            data-testid={`character-panel-stat-dec-${character.id}-${def.id}`}
+            disabled={!canEdit}
+            onClick={() => {
+              if (!editorView || !canEdit) return
+              insertStatDelta(editorView, character.id, { kind: 'adjust', statId: def.id, delta: -1 })
+            }}
+            className="flex-1 text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            −
+          </button>
+          <button
+            data-testid={`character-panel-stat-inc-${character.id}-${def.id}`}
+            disabled={!canEdit}
+            onClick={() => {
+              if (!editorView || !canEdit) return
+              insertStatDelta(editorView, character.id, { kind: 'adjust', statId: def.id, delta: 1 })
+            }}
+            className="flex-1 text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            +
+          </button>
+          {def.type === 'numberWithMax' && (
+            <button
+              data-testid={`character-panel-stat-max-${character.id}-${def.id}`}
+              disabled={!canEdit}
+              onClick={() => {
+                if (!editorView || !canEdit) return
+                insertStatDelta(editorView, character.id, { kind: 'fill', statId: def.id })
+              }}
+              className="text-[10px] tabular-nums rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1.5 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              max
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -174,9 +217,11 @@ function StatRow({ character, def, base, effective, testId }: StatRowProps) {
 interface SectionProps {
   character: Character
   computed: { state: CharacterState; effective: Record<string, StatValue> }
+  canEdit: boolean
+  editorView: EditorView | null
 }
 
-function CharacterSection({ character, computed }: SectionProps) {
+function CharacterSection({ character, computed, canEdit, editorView }: SectionProps) {
   const [expanded, setExpanded] = useState(true)
   const { state, effective } = computed
 
@@ -230,6 +275,8 @@ function CharacterSection({ character, computed }: SectionProps) {
                     base={state.base[def.id]}
                     effective={effective[def.id]}
                     testId={`character-panel-effective-${character.id}-${def.id}`}
+                    canEdit={canEdit}
+                    editorView={editorView}
                   />
                 ))}
               </div>
@@ -250,17 +297,41 @@ function CharacterSection({ character, computed }: SectionProps) {
                     </span>
                     <div
                       data-testid={`character-panel-effective-${character.id}-${def.id}`}
-                      className="grid grid-cols-4 gap-1"
+                      className="grid grid-cols-2 gap-1"
                     >
                       {Object.entries(eff.values).map(([k, n]) => (
                         <div
                           key={k}
-                          className={`text-[11px] tabular-nums rounded bg-gray-800 px-1 py-0.5 text-center ${
+                          className={`flex items-center gap-0.5 text-[11px] tabular-nums rounded bg-gray-800 px-1 py-0.5 ${
                             differs ? 'text-blue-300' : 'text-gray-300'
                           }`}
                         >
-                          <span className="text-gray-500 mr-0.5">{k}</span>
-                          {n}
+                          <button
+                            data-testid={`character-panel-attr-dec-${character.id}-${def.id}-${k}`}
+                            disabled={!canEdit}
+                            onClick={() => {
+                              if (!editorView || !canEdit) return
+                              insertStatDelta(editorView, character.id, { kind: 'adjust', statId: def.id, delta: -1, attributeKey: k })
+                            }}
+                            className="text-[10px] rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                          >
+                            −
+                          </button>
+                          <span className="flex-1 text-center">
+                            <span className="text-gray-500 mr-0.5">{k}</span>
+                            {n}
+                          </span>
+                          <button
+                            data-testid={`character-panel-attr-inc-${character.id}-${def.id}-${k}`}
+                            disabled={!canEdit}
+                            onClick={() => {
+                              if (!editorView || !canEdit) return
+                              insertStatDelta(editorView, character.id, { kind: 'adjust', statId: def.id, delta: 1, attributeKey: k })
+                            }}
+                            className="text-[10px] rounded bg-gray-700 hover:bg-gray-600 text-gray-300 px-1 py-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                          >
+                            +
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -423,6 +494,8 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
     return map
   }, [characters, markers, book, activeStoryletId, cursorOffset])
 
+  const canEdit = !!activeStoryletId && !!editorView
+
   const jumpToMarker = (docId: string, offset: number) => {
     if (!editorView) return
     if (docId !== activeStoryletId) {
@@ -500,7 +573,7 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
                 const computed = computedPerCharacter.get(c.id)
                 if (!computed) return null
                 return (
-                  <CharacterSection key={c.id} character={c} computed={computed} />
+                  <CharacterSection key={c.id} character={c} computed={computed} canEdit={canEdit} editorView={editorView} />
                 )
               })
             )}
