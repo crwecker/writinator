@@ -1,6 +1,6 @@
 import type { StatDeltaOp, StatType } from '../types'
 import { defaultItemFields, type ListStatKind } from './listStatFields'
-import { parseQty, formatQty } from './characterState'
+import { parseQty, parseQtyLoose, formatQty } from './characterState'
 import { coerceStatValue } from './coerceStatValue'
 
 const STRUCTURED_KINDS: readonly ListStatKind[] = ['inventory', 'spellList', 'skillList']
@@ -41,7 +41,8 @@ export function migrateStatDeltaOp(
       if (newType === 'list') return [op]
       if (isStructured(newType)) {
         return op.items.map((s) => {
-          const parsed = parseQty(s)
+          // Loose qty parsing only when targeting inventory; spell/skill discard qty.
+          const parsed = newType === 'inventory' ? parseQtyLoose(s) : parseQty(s)
           return {
             kind: 'itemAdd' as const,
             statId: op.statId,
@@ -60,7 +61,7 @@ export function migrateStatDeltaOp(
         return op.items.map((s) => ({
           kind: 'itemRemove' as const,
           statId: op.statId,
-          name: parseQty(s).name,
+          name: (newType === 'inventory' ? parseQtyLoose(s) : parseQty(s)).name,
         }))
       }
       return []

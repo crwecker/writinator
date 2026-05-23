@@ -53,6 +53,22 @@ export function parseQty(raw: string): { name: string; qty: number } {
   return { name: raw.slice(0, m.index).trimEnd(), qty }
 }
 
+// Like parseQty but also accepts a leading "N Name" form (e.g. "29 Darts").
+// Used only for list → counted-list conversion — the strict parseQty stays in
+// place for the plain-list dedupe engine so item names like "3 Coins" aren't
+// accidentally split.
+const QTY_PREFIX_RE = /^(\d+)\s+(\S.*)$/
+export function parseQtyLoose(raw: string): { name: string; qty: number } {
+  const trimmed = raw.trim()
+  const suffix = parseQty(trimmed)
+  if (suffix.qty !== 1 || suffix.name !== trimmed) return suffix
+  const m = trimmed.match(QTY_PREFIX_RE)
+  if (!m) return suffix
+  const qty = parseInt(m[1], 10)
+  if (!Number.isFinite(qty) || qty < 1) return suffix
+  return { name: m[2].trim(), qty }
+}
+
 export function formatQty(name: string, qty: number): string {
   return qty > 1 ? `${name} x${qty}` : name
 }

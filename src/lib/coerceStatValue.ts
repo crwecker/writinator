@@ -1,5 +1,5 @@
 import type { StatType, StatValue } from '../types'
-import { parseQty, formatQty } from './characterState'
+import { parseQty, parseQtyLoose, formatQty } from './characterState'
 import { defaultItemFields } from './listStatFields'
 import type { ListStatKind } from './listStatFields'
 
@@ -36,7 +36,7 @@ export function coerceStatValue(current: StatValue, targetType: StatType): StatV
       return {
         kind: 'inventory',
         items: current.items.map((s) => {
-          const { name, qty } = parseQty(s)
+          const { name, qty } = parseQtyLoose(s)
           return { name, fields: { qty } }
         }),
       }
