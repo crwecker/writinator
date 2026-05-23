@@ -1,0 +1,1 @@
+import{v as e}from"./storyletStore-BZGdyOch.js";export{e as restoreStoredFileHandleFromRecents};
