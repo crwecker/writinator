@@ -501,7 +501,10 @@ export type NoteConsistencyIssue =
     }
 
 export interface RecentFile {
-  handle: FileSystemFileHandle
+  /** Web (File System Access API) tether — present in browsers with FSA. */
+  handle?: FileSystemFileHandle
+  /** Tauri filesystem path — present when running in the desktop app. */
+  path?: string
   name: string
   lastOpenedAt: number
 }

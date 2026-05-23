@@ -11,6 +11,17 @@ import { serializeImageReveal, hydrateImageReveal } from '../stores/imageRevealS
 import { serializeWriteathon, hydrateWriteathon } from '../stores/writeathonStore'
 import { serializeMetrics, hydrateMetrics } from '../stores/metricsStore'
 import { serializeNotes, hydrateNotes } from '../stores/notesStore'
+import {
+  isTauri,
+  readTauriTextFile,
+  showTauriOpenDialog,
+  showTauriSaveDialog,
+  stripWritinatorExt,
+  tauriBasename,
+  tauriFileExists,
+  tauriFileMtime,
+  writeTauriTextFile,
+} from './tauri'
 
 // ---------------------------------------------------------------------------
 // Section registry — add/remove cross-store sections here
@@ -46,6 +57,7 @@ const FILE_EXTENSION = '.writinator'
 const MIME_TYPE = 'application/json'
 
 let storedFileHandle: FileSystemFileHandle | null = null
+let storedFilePath: string | null = null
 let lastLocalWriteAt = 0
 
 export function getLastLocalWriteAt(): number {
@@ -75,6 +87,17 @@ export function getHandleState(): HandleState {
 }
 
 function notifyHandleChange(): void {
+  if (storedFilePath) {
+    // Tauri path tether — permission is always granted, no async query needed.
+    handleState = {
+      hasHandle: true,
+      name: tauriBasename(storedFilePath),
+      permission: 'granted',
+    }
+    for (const fn of handleListeners) fn()
+    return
+  }
+
   if (!storedFileHandle) {
     handleState = { hasHandle: false, name: null, permission: 'unknown' }
     for (const fn of handleListeners) fn()
@@ -107,6 +130,15 @@ function notifyHandleChange(): void {
  */
 export function supportsFileSystemAccess(): boolean {
   return 'showSaveFilePicker' in window && 'showOpenFilePicker' in window
+}
+
+/**
+ * Whether the runtime can tether to a real file (FSA in supported browsers,
+ * native filesystem in Tauri). Drives the "file lock" gating: on platforms
+ * with no tethering, localforage is the source of truth and edits are free.
+ */
+export function hasFileTetherCapability(): boolean {
+  return isTauri() || supportsFileSystemAccess()
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +182,9 @@ export async function saveFile(
   const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1)
   const json = JSON.stringify(file, null, 2)
 
-  if (supportsFileSystemAccess()) {
+  if (isTauri()) {
+    await saveWithTauri(json, book.title)
+  } else if (supportsFileSystemAccess()) {
     await saveWithFileSystemAccess(json, book.title)
   } else {
     saveWithDownload(json, book.title)
@@ -181,15 +215,19 @@ export async function quickSave(
   book: Book,
   globalSettings: GlobalSettings
 ): Promise<boolean> {
-  if (!storedFileHandle) return false
+  if (!storedFileHandle && !storedFilePath) return false
 
   const currentCounter = useStoryletStore.getState().lastSavedCounter
   const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1)
   const json = JSON.stringify(file, null, 2)
 
-  const writable = await storedFileHandle.createWritable()
-  await writable.write(json)
-  await writable.close()
+  if (storedFilePath) {
+    await writeTauriTextFile(storedFilePath, json)
+  } else if (storedFileHandle) {
+    const writable = await storedFileHandle.createWritable()
+    await writable.write(json)
+    await writable.close()
+  }
   lastLocalWriteAt = Date.now()
   useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now())
   return true
@@ -206,6 +244,10 @@ export async function saveAsNewFile(
   book: Book,
   globalSettings: GlobalSettings
 ): Promise<'saved' | 'loaded' | 'cancelled' | null> {
+  if (isTauri()) {
+    return await saveAsNewFileTauri(book, globalSettings)
+  }
+
   if (!supportsFileSystemAccess()) {
     storedFileHandle = null
     notifyHandleChange()
@@ -282,6 +324,10 @@ export async function saveAsNewFile(
 export async function createBookWithFile(
   suggestedTitle: string
 ): Promise<'created' | 'loaded' | 'cancelled' | null> {
+  if (isTauri()) {
+    return await createBookWithFileTauri(suggestedTitle)
+  }
+
   if (!supportsFileSystemAccess()) return null
 
   let handle: FileSystemFileHandle
@@ -354,6 +400,9 @@ export async function createBookWithFile(
 // ---------------------------------------------------------------------------
 
 export async function openFile(): Promise<WritinatorFile | null> {
+  if (isTauri()) {
+    return openWithTauri()
+  }
   if (supportsFileSystemAccess()) {
     return openWithFileSystemAccess()
   }
@@ -432,15 +481,17 @@ function openWithFileInput(): Promise<WritinatorFile | null> {
 
 export function clearFileHandle(): void {
   storedFileHandle = null
+  storedFilePath = null
   notifyHandleChange()
 }
 
 export function hasFileHandle(): boolean {
-  return storedFileHandle !== null
+  return storedFileHandle !== null || storedFilePath !== null
 }
 
 export function setStoredFileHandle(handle: FileSystemFileHandle | null): void {
   storedFileHandle = handle
+  if (handle) storedFilePath = null
   notifyHandleChange()
 }
 
@@ -448,21 +499,68 @@ export function getStoredFileHandle(): FileSystemFileHandle | null {
   return storedFileHandle
 }
 
+export function setStoredFilePath(path: string | null): void {
+  storedFilePath = path
+  if (path) storedFileHandle = null
+  notifyHandleChange()
+}
+
+export function getStoredFilePath(): string | null {
+  return storedFilePath
+}
+
 /**
- * Checks the most-recent entry in recentFilesStore. If the handle already has
- * 'granted' readwrite permission (no user gesture required), sets storedFileHandle
- * and returns true. Does NOT call requestPermission — that requires a user gesture.
+ * Reads the contents of whatever is currently tethered (Tauri path or FSA handle).
+ * Returns null if nothing is tethered, or on read failure.
+ */
+export async function readStoredFile(): Promise<{ text: string; mtime: number } | null> {
+  if (storedFilePath) {
+    try {
+      const text = await readTauriTextFile(storedFilePath)
+      const mtime = (await tauriFileMtime(storedFilePath)) ?? Date.now()
+      return { text, mtime }
+    } catch {
+      return null
+    }
+  }
+  if (storedFileHandle) {
+    try {
+      const f = await storedFileHandle.getFile()
+      return { text: await f.text(), mtime: f.lastModified }
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/**
+ * Checks the most-recent entry in recentFilesStore. If a Tauri path entry, it's
+ * restored when the file still exists. Otherwise, an FSA handle is restored only
+ * if it already has 'granted' readwrite permission (no user gesture required).
  */
 export async function restoreStoredFileHandleFromRecents(): Promise<boolean> {
   const { recentFiles } = useRecentFilesStore.getState()
   if (recentFiles.length === 0) return false
   const mostRecent = recentFiles[0]
+
+  if (mostRecent.path && isTauri()) {
+    if (await tauriFileExists(mostRecent.path)) {
+      storedFilePath = mostRecent.path
+      storedFileHandle = null
+      notifyHandleChange()
+      return true
+    }
+    return false
+  }
+
   if (!mostRecent.handle) return false
   try {
     const handleWithQuery = mostRecent.handle as FileSystemHandleWithQueryPermission
     const permission = await handleWithQuery.queryPermission({ mode: 'readwrite' })
     if (permission === 'granted') {
       storedFileHandle = mostRecent.handle
+      storedFilePath = null
       notifyHandleChange()
       return true
     }
@@ -527,6 +625,152 @@ export function parseFileJSON(text: string): WritinatorFile | null {
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_\- ]/g, '').trim() || 'untitled'
+}
+
+// ---------------------------------------------------------------------------
+// Tauri implementations (parallel to FSA helpers above)
+// ---------------------------------------------------------------------------
+
+async function saveWithTauri(json: string, title: string): Promise<void> {
+  if (!storedFilePath) {
+    const picked = await showTauriSaveDialog({
+      suggestedName: `${sanitizeFilename(title)}${FILE_EXTENSION}`,
+    })
+    if (!picked) return
+    storedFilePath = picked
+    storedFileHandle = null
+    notifyHandleChange()
+    useRecentFilesStore.getState().addRecent({
+      path: picked,
+      name: tauriBasename(picked),
+      lastOpenedAt: Date.now(),
+    })
+  }
+  await writeTauriTextFile(storedFilePath!, json)
+  lastLocalWriteAt = Date.now()
+}
+
+async function saveAsNewFileTauri(
+  book: Book,
+  globalSettings: GlobalSettings
+): Promise<'saved' | 'loaded' | 'cancelled'> {
+  const picked = await showTauriSaveDialog({
+    suggestedName: `${sanitizeFilename(book.title)}${FILE_EXTENSION}`,
+  })
+  if (!picked) return 'cancelled'
+
+  // If the picked file already holds a valid Writinator book, prefer loading
+  // over clobbering — matches the FSA flow.
+  if (await tauriFileExists(picked)) {
+    try {
+      const existing = await readTauriTextFile(picked)
+      if (existing.length > 0) {
+        const parsed = parseFileJSON(existing)
+        if (parsed) {
+          const currentBook = useStoryletStore.getState().book
+          if (currentBook) await snapshotBook(currentBook, 'orphan')
+          storedFilePath = picked
+          storedFileHandle = null
+          notifyHandleChange()
+          useRecentFilesStore.getState().addRecent({
+            path: picked,
+            name: tauriBasename(picked),
+            lastOpenedAt: Date.now(),
+          })
+          await useStoryletStore.getState().loadFile(parsed)
+          useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
+          return 'loaded'
+        }
+      }
+    } catch (err) {
+      console.warn('saveAsNewFileTauri: could not inspect existing file:', err)
+    }
+  }
+
+  storedFilePath = picked
+  storedFileHandle = null
+  notifyHandleChange()
+  useRecentFilesStore.getState().addRecent({
+    path: picked,
+    name: tauriBasename(picked),
+    lastOpenedAt: Date.now(),
+  })
+  await saveFile(book, globalSettings)
+  return 'saved'
+}
+
+async function createBookWithFileTauri(
+  suggestedTitle: string
+): Promise<'created' | 'loaded' | 'cancelled'> {
+  const picked = await showTauriSaveDialog({
+    suggestedName: `${sanitizeFilename(suggestedTitle)}${FILE_EXTENSION}`,
+  })
+  if (!picked) return 'cancelled'
+
+  if (await tauriFileExists(picked)) {
+    try {
+      const existing = await readTauriTextFile(picked)
+      if (existing.length > 0) {
+        const parsed = parseFileJSON(existing)
+        if (parsed) {
+          const currentBook = useStoryletStore.getState().book
+          if (currentBook) await snapshotBook(currentBook, 'orphan')
+          storedFilePath = picked
+          storedFileHandle = null
+          notifyHandleChange()
+          useRecentFilesStore.getState().addRecent({
+            path: picked,
+            name: tauriBasename(picked),
+            lastOpenedAt: Date.now(),
+          })
+          await useStoryletStore.getState().loadFile(parsed)
+          useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
+          return 'loaded'
+        }
+      }
+    } catch (err) {
+      console.warn('createBookWithFileTauri: could not inspect existing file:', err)
+    }
+  }
+
+  const filenameTitle = stripWritinatorExt(tauriBasename(picked)).trim()
+  const title = filenameTitle || suggestedTitle
+
+  await useStoryletStore.getState().createBook(title)
+  storedFilePath = picked
+  storedFileHandle = null
+  notifyHandleChange()
+  useRecentFilesStore.getState().addRecent({
+    path: picked,
+    name: tauriBasename(picked),
+    lastOpenedAt: Date.now(),
+  })
+  const newBook = useStoryletStore.getState().book
+  const settings = useStoryletStore.getState().globalSettings
+  if (newBook) await saveFile(newBook, settings)
+  return 'created'
+}
+
+async function openWithTauri(): Promise<WritinatorFile | null> {
+  const picked = await showTauriOpenDialog()
+  if (!picked) return null
+
+  const currentBook = useStoryletStore.getState().book
+  if (currentBook) await snapshotBook(currentBook, 'orphan')
+
+  const text = await readTauriTextFile(picked)
+  const parsed = parseFileJSON(text)
+  if (!parsed) return null
+
+  storedFilePath = picked
+  storedFileHandle = null
+  notifyHandleChange()
+  useRecentFilesStore.getState().addRecent({
+    path: picked,
+    name: tauriBasename(picked),
+    lastOpenedAt: Date.now(),
+  })
+  return parsed
 }
 
 if (import.meta.env.DEV) {

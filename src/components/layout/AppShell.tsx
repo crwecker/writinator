@@ -10,7 +10,8 @@ import { ExportDialog } from './ExportDialog'
 import { HamburgerMenu, type MenuAction } from './HamburgerMenu'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
-import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt, supportsFileSystemAccess } from '../../lib/fileSystem'
+import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt, hasFileTetherCapability } from '../../lib/fileSystem'
+import { isTauri } from '../../lib/tauri'
 import { reconcileWithFile } from '../../lib/reconcile'
 import { showToast } from '../../stores/genericToastStore'
 import { createSnapshot } from '../../stores/snapshotStore'
@@ -260,11 +261,11 @@ export function AppShell() {
       ? createSnapshot(docId!, storylet.content, 'manual')
       : Promise.resolve(null)
 
-    // No File System Access API (Safari, Firefox): there's no tethered file to
+    // No file tethering available (Safari/Firefox web): there's no file to
     // write back to, and falling through to a download triggers Safari's
     // download-permission prompt on every Cmd+S. The book already auto-persists
     // to localforage, so just confirm the snapshot and tell the user.
-    if (!supportsFileSystemAccess()) {
+    if (!hasFileTetherCapability()) {
       void snapshotPromise.then(() => {
         showToast('Saved in browser. Use Export to download a copy.', 'success')
       })
@@ -381,8 +382,11 @@ export function AppShell() {
     return () => clearInterval(interval)
   }, [])
 
-  // mtime poll — detect external edits to the connected file and reconcile
+  // mtime poll — detect external edits to the connected file and reconcile.
+  // Tauri: skipped for now (no FSA handle; external-edit sync less load-bearing
+  // in a desktop context where the user edits in-app).
   useEffect(() => {
+    if (isTauri()) return
     let intervalId: ReturnType<typeof setInterval> | null = null
     let lastSeenMtime = 0
     const TOLERANCE_MS = 200

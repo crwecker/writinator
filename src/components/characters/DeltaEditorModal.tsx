@@ -195,11 +195,19 @@ export function DeltaEditorModal({
 
   const [drafts, setDrafts] = useState<StatDelta[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const dragRef = useRef<{
+    startX: number
+    startY: number
+    baseX: number
+    baseY: number
+  } | null>(null)
 
   // Initialize/reset drafts when opened.
   useEffect(() => {
     if (!open) return
     setConfirmDelete(false)
+    setDragOffset({ x: 0, y: 0 })
     const existing = markerId ? markers[markerId] : undefined
     if (existing && existing.length > 0) {
       setDrafts(
@@ -245,22 +253,6 @@ export function DeltaEditorModal({
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  useEffect(() => {
-    if (!open) return
-    function onDown(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    // Defer registration by one tick so the same native event that opened the
-    // modal doesn't immediately fire the outside-click handler.
-    const t = setTimeout(() => document.addEventListener('mousedown', onDown), 0)
-    return () => {
-      clearTimeout(t)
-      document.removeEventListener('mousedown', onDown)
-    }
-  }, [open, onClose])
-
   const firstCharacterName = useMemo(() => {
     const ids = new Set(drafts.map((d) => d.characterId))
     const names = characters
@@ -277,6 +269,43 @@ export function DeltaEditorModal({
 
   function removeDraft(idx: number) {
     setDrafts((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  function moveDraft(idx: number, dir: -1 | 1) {
+    setDrafts((prev) => {
+      const next = idx + dir
+      if (next < 0 || next >= prev.length) return prev
+      const copy = [...prev]
+      ;[copy[idx], copy[next]] = [copy[next], copy[idx]]
+      return copy
+    })
+  }
+
+  // Drag the dialog by its header so it can be moved off content being referenced.
+  function startDrag(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).closest('button')) return
+    e.preventDefault()
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      baseX: dragOffset.x,
+      baseY: dragOffset.y,
+    }
+    function onMove(ev: globalThis.MouseEvent) {
+      const d = dragRef.current
+      if (!d) return
+      setDragOffset({
+        x: d.baseX + (ev.clientX - d.startX),
+        y: d.baseY + (ev.clientY - d.startY),
+      })
+    }
+    function onUp() {
+      dragRef.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   function addDraft() {
@@ -321,13 +350,17 @@ export function DeltaEditorModal({
   const shortId = markerId.slice(0, 8)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
       <div
         ref={panelRef}
         data-testid="delta-editor-modal"
-        className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-[min(92vw,820px)] max-h-[90vh] flex flex-col"
+        style={{ transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` }}
+        className="pointer-events-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-[min(92vw,820px)] max-h-[90vh] flex flex-col"
       >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
+        <div
+          onMouseDown={startDrag}
+          className="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0 cursor-move select-none"
+        >
           <div className="flex flex-col">
             <span className="text-sm font-medium text-gray-200">
               {mode === 'create' ? 'New Stat Change' : 'Edit Stat Change'}
@@ -354,10 +387,15 @@ export function DeltaEditorModal({
             <DeltaRow
               key={draft.id}
               draft={draft}
+              idx={idx}
               characters={characters}
               onChange={(next) => updateDraft(idx, next)}
               onRemove={() => removeDraft(idx)}
               canRemove={drafts.length > 1}
+              onMoveUp={() => moveDraft(idx, -1)}
+              onMoveDown={() => moveDraft(idx, 1)}
+              canMoveUp={idx > 0}
+              canMoveDown={idx < drafts.length - 1}
             />
           ))}
           {drafts.length === 0 && (
@@ -428,13 +466,29 @@ export function DeltaEditorModal({
 
 interface DeltaRowProps {
   draft: StatDelta
+  idx: number
   characters: Character[]
   onChange: (next: StatDelta) => void
   onRemove: () => void
   canRemove: boolean
+  onMoveUp: () => void
+  onMoveDown: () => void
+  canMoveUp: boolean
+  canMoveDown: boolean
 }
 
-function DeltaRow({ draft, characters, onChange, onRemove, canRemove }: DeltaRowProps) {
+function DeltaRow({
+  draft,
+  idx,
+  characters,
+  onChange,
+  onRemove,
+  canRemove,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp,
+  canMoveDown,
+}: DeltaRowProps) {
   const character = characters.find((c) => c.id === draft.characterId)
 
   function setCharacterId(id: string) {
@@ -496,15 +550,35 @@ function DeltaRow({ draft, characters, onChange, onRemove, canRemove }: DeltaRow
             ))}
           </select>
         </label>
-        {canRemove && (
+        <div className="ml-auto flex items-center gap-1">
           <button
-            onClick={onRemove}
-            className="ml-auto text-xs text-gray-500 hover:text-red-400"
-            title="Remove delta"
+            data-testid={`delta-move-up-${idx}`}
+            onClick={onMoveUp}
+            disabled={!canMoveUp}
+            className="text-xs text-gray-500 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed px-1"
+            title="Move delta up"
           >
-            &#x2715;
+            &#x25B2;
           </button>
-        )}
+          <button
+            data-testid={`delta-move-down-${idx}`}
+            onClick={onMoveDown}
+            disabled={!canMoveDown}
+            className="text-xs text-gray-500 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed px-1"
+            title="Move delta down"
+          >
+            &#x25BC;
+          </button>
+          {canRemove && (
+            <button
+              onClick={onRemove}
+              className="text-xs text-gray-500 hover:text-red-400 px-1"
+              title="Remove delta"
+            >
+              &#x2715;
+            </button>
+          )}
+        </div>
       </div>
 
       <OpParams op={draft.op} character={character} onChange={setOp} />

@@ -58,6 +58,15 @@ export function FileConnectionBanner() {
 
   async function handleReconnect() {
     if (!mostRecent) return
+    // Tauri path entry: no permission request needed, restore directly.
+    if (mostRecent.path) {
+      const ok = await restoreStoredFileHandleFromRecents()
+      if (!ok) {
+        showToast('Saved file no longer exists at that path.', 'warning')
+        useRecentFilesStore.getState().removeRecent(mostRecent.name)
+      }
+      return
+    }
     const handleWithPermission = mostRecent.handle as FileSystemHandleWithPermission | null
     if (!handleWithPermission || typeof handleWithPermission.requestPermission !== 'function') {
       showToast('Saved file reference is no longer valid — please reconnect manually.', 'warning')

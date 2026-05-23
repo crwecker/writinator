@@ -28,7 +28,7 @@ function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
 }
 import { createSnapshot, getAllSnapshots, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
 import { loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
-import { clearFileHandle, getHandleState, supportsFileSystemAccess } from '../lib/fileSystem'
+import { clearFileHandle, getHandleState, hasFileTetherCapability } from '../lib/fileSystem'
 import { showToast } from './genericToastStore'
 import { useImageRevealStore, hydrateImageReveal } from './imageRevealStore'
 import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
@@ -104,7 +104,7 @@ function generateId(): string {
 //    briefly lock while queryPermission resolves.
 let lastLockToastAt = 0
 function bailIfLocked(action: string): boolean {
-  if (!supportsFileSystemAccess()) return false
+  if (!hasFileTetherCapability()) return false
   const handle = getHandleState()
   if (handle.hasHandle && handle.permission !== 'denied' && handle.permission !== 'prompt') return false
   const ts = Date.now()

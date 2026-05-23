@@ -3,10 +3,12 @@ import { useStoryletStore } from '../../stores/storyletStore'
 import {
   openFile,
   setStoredFileHandle,
+  setStoredFilePath,
   parseFileJSON,
   createBookWithFile,
-  supportsFileSystemAccess,
+  hasFileTetherCapability,
 } from '../../lib/fileSystem'
+import { isTauri, readTauriTextFile, tauriBasename, tauriFileExists } from '../../lib/tauri'
 import type { RecentFile } from '../../types'
 
 // requestPermission is a Chrome-only extension to the File System Access API
@@ -55,10 +57,10 @@ export function LandingPage() {
   const recentFiles = useRecentFilesStore((s) => s.recentFiles)
 
   async function handleCreateBook() {
-    // On browsers without the File System Access API (Safari, Firefox) saves are
-    // forced through the download path — we can't tether a handle. Prompt for
-    // the book title; localforage will persist their work in-browser.
-    if (!supportsFileSystemAccess()) {
+    // On platforms with no file tethering (Safari/Firefox web) saves are forced
+    // through the download path — prompt for a title and let localforage hold
+    // the work. In Tauri or FSA-capable browsers, open a save picker first.
+    if (!hasFileTetherCapability()) {
       const title = window.prompt('Name your book:', 'Untitled Book')
       if (title === null) return
       const trimmed = title.trim() || 'Untitled Book'
@@ -66,9 +68,6 @@ export function LandingPage() {
       return
     }
 
-    // FSA path: open the save picker as the FIRST action from this click so
-    // transient user activation is preserved. The filename the user picks
-    // becomes the book title. Only create the book if they confirm.
     try {
       await createBookWithFile('Untitled Book')
     } catch (err) {
@@ -90,6 +89,26 @@ export function LandingPage() {
 
   async function handleOpenRecent(file: RecentFile) {
     try {
+      // Tauri entry: read by path.
+      if (file.path && isTauri()) {
+        if (!(await tauriFileExists(file.path))) {
+          throw new Error('File no longer exists at the saved path')
+        }
+        const text = await readTauriTextFile(file.path)
+        const parsed = parseFileJSON(text)
+        if (!parsed) throw new Error('Could not parse file')
+        setStoredFilePath(file.path)
+        useRecentFilesStore.getState().addRecent({
+          path: file.path,
+          name: tauriBasename(file.path),
+          lastOpenedAt: Date.now(),
+        })
+        await useStoryletStore.getState().loadFile(parsed)
+        useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
+        return
+      }
+
+      if (!file.handle) throw new Error('Recent file is missing a handle')
       const handleWithPermission = file.handle as FileSystemHandleWithPermission
       if (typeof handleWithPermission.requestPermission !== 'function') {
         throw new Error('Recent file handle is invalid (dead reference)')

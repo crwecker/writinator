@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { subscribeHandle, getHandleState, supportsFileSystemAccess } from './fileSystem'
+import { subscribeHandle, getHandleState, hasFileTetherCapability } from './fileSystem'
 import { useStoryletStore } from '../stores/storyletStore'
 
 // A book is "locked" whenever it's loaded but not tethered to a granted file handle.
@@ -10,7 +10,7 @@ import { useStoryletStore } from '../stores/storyletStore'
 // localforage as the source of truth and let them write freely.
 function computeLocked(hasBook: boolean, handle: ReturnType<typeof getHandleState>): boolean {
   if (!hasBook) return false
-  if (!supportsFileSystemAccess()) return false
+  if (!hasFileTetherCapability()) return false
   if (!handle.hasHandle) return true
   // Treat 'unknown' as not-locked: queryPermission is async and may not have
   // resolved yet, or the browser may not support it. We have a handle, which

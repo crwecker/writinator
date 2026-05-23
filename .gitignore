@@ -25,3 +25,7 @@ dist-ssr
 *.sln
 *.sw?
 research/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/

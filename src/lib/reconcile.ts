@@ -1,5 +1,5 @@
 import type { WritinatorFile } from '../types'
-import { getStoredFileHandle, parseFileJSON } from './fileSystem'
+import { hasFileHandle, parseFileJSON, readStoredFile } from './fileSystem'
 import { createSnapshot } from '../stores/snapshotStore'
 import { useStoryletStore } from '../stores/storyletStore'
 import { showToast } from '../stores/genericToastStore'
@@ -22,14 +22,15 @@ export type ReconcileResult =
  */
 export async function reconcileWithFile(): Promise<ReconcileResult> {
   try {
-    const handle = getStoredFileHandle()
-    if (!handle) {
+    if (!hasFileHandle()) {
       return { kind: 'no-handle' }
     }
 
-    const fsFile = await handle.getFile()
-    const text = await fsFile.text()
-    const file = parseFileJSON(text)
+    const read = await readStoredFile()
+    if (!read) {
+      return { kind: 'no-handle' }
+    }
+    const file = parseFileJSON(read.text)
     if (!file) {
       console.warn('[reconcile] could not parse file — treating as no-handle')
       return { kind: 'no-handle' }
