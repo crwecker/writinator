@@ -3,7 +3,9 @@ import { X } from 'lucide-react'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { countWords } from '../../lib/words'
-import { getMilestoneReward, getMilestoneTier } from '../../lib/writeathon'
+import { dayStatusOf, getMilestoneReward, getMilestoneTier, getWriteathonToday } from '../../lib/writeathon'
+import { addDays, formatDayLabel } from '../../lib/days'
+import { todayKey } from '../../lib/metrics'
 import type { MilestoneTier } from '../../types'
 import { CoinAmount, GuildButton, QuestProgress } from './QuestUi'
 
@@ -40,7 +42,7 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
   const milestones = useWriteathonStore((s) => s.milestones)
   const book = useStoryletStore((s) => s.book)
   const [confirmReset, setConfirmReset] = useState(false)
-  // Captured once per mount; days-elapsed doesn't need to tick while open.
+  // Captured once per mount; the date doesn't need to tick while open.
   const [now] = useState(() => Date.now())
 
   const startingWordCount = useMemo(
@@ -91,20 +93,27 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
 
   if (config?.active) {
     const completedBlocks = milestones.filter((m) => m.completed).length
-    const daysElapsed = Math.max(0, Math.floor((now - Date.parse(config.startDate)) / 86_400_000))
+    const today = getWriteathonToday(config, milestones, startingWordCount, now)
+    const missed = milestones.filter((_, i) => dayStatusOf(milestones, i, today.index) === 'missed').length
     const coinsEarned = milestones.reduce((sum, m) => sum + (m.completed ? m.coinsAwarded : 0), 0)
+    const first = milestones[0]?.date
+    const last = milestones.at(-1)?.date
     const stats: [string, string][] = [
       ['Words', `${config.startingWordCount.toLocaleString()} → ${config.targetWordCount.toLocaleString()}`],
-      ['Per day', `${config.wordsPerBlock.toLocaleString()} words`],
-      ['Days done', `${completedBlocks} of ${config.totalBlocks}`],
-      ['Days since start', String(daysElapsed)],
+      ['Dates', first && last ? `${formatDayLabel(first)} – ${formatDayLabel(last)}` : '—'],
+      ['Days hit', `${completedBlocks} of ${config.totalBlocks}`],
+      ['Missed', String(missed)],
+      ['Today\'s target', today.phase === 'active' && !config.paused ? `${today.target.toLocaleString()} words` : '—'],
       ['Coins earned', coinsEarned.toLocaleString()],
     ]
     return shell(
       <>
         <h2 className="font-serif text-2xl font-semibold text-amber-100">
-          {config.completedAt ? 'Writeathon complete' : 'Writeathon in progress'}
+          {config.completedAt ? 'Writeathon complete' : today.phase === 'over' ? 'Writeathon ended' : 'Writeathon in progress'}
         </h2>
+        {config.paused && today.phase === 'active' && (
+          <p className="mt-1 text-sm text-stone-400">Paused: no days pay out while paused, but the dates keep going.</p>
+        )}
         <div className="mt-4">
           <QuestProgress value={completedBlocks} max={config.totalBlocks} />
         </div>
@@ -117,7 +126,7 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
           ))}
         </dl>
         <div className="mt-6 flex flex-wrap justify-end gap-2">
-          {!config.completedAt && (
+          {!config.completedAt && today.phase === 'active' && (
             <GuildButton
               variant="secondary"
               onClick={() => {
@@ -145,7 +154,7 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
             </>
           ) : (
             <GuildButton variant="danger" onClick={() => setConfirmReset(true)}>
-              {config.completedAt ? 'Clear and start over' : 'End writeathon'}
+              {config.completedAt || today.phase === 'over' ? 'Clear and start over' : 'End writeathon'}
             </GuildButton>
           )}
         </div>
@@ -181,7 +190,7 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-stone-400">Writing days</span>
+          <span className="mb-1 block text-xs font-medium text-stone-400">Days, starting today</span>
           <input
             type="number"
             min={1}
@@ -208,8 +217,9 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
       <p className="mt-4 rounded-lg border border-amber-800/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
         {valid ? (
           <>
-            That's <span className="font-semibold">{wordsPerDay.toLocaleString()} words a day</span> for {totalBlocks} day
-            {totalBlocks === 1 ? '' : 's'}.
+            That's about <span className="font-semibold">{wordsPerDay.toLocaleString()} words a day</span>,{' '}
+            {formatDayLabel(todayKey(now))} – {formatDayLabel(addDays(todayKey(now), totalBlocks - 1))}. Miss a day and
+            the rest spreads over the days left.
           </>
         ) : (
           'Aim at least 1,000 words past where you are now, over 1–365 days.'
@@ -236,7 +246,7 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
           </tbody>
           <tfoot>
             <tr className="border-t border-stone-700 bg-stone-900/70">
-              <td className="px-3 py-2 font-medium text-stone-200" colSpan={2}>If you finish every day</td>
+              <td className="px-3 py-2 font-medium text-stone-200" colSpan={2}>If you hit every day</td>
               <td className="px-3 py-2 text-right">
                 <CoinAmount amount={totalCoins.toLocaleString()} className="font-semibold" />
               </td>
@@ -250,7 +260,7 @@ export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
         <GuildButton
           disabled={!valid}
           onClick={() => {
-            useWriteathonStore.getState().startWriteathon(startingWordCount, targetWordCount, totalBlocks)
+            useWriteathonStore.getState().startWriteathon(startingWordCount, targetWordCount, totalBlocks, Date.now())
             onClose()
           }}
           className="px-5"

@@ -2,21 +2,36 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { localforageJSONStorage } from './localforageStorage'
 import type { BoardQuest, WriteathonConfig, WriteathonFileData, WriteathonMilestone } from '../types'
-import { calculateDailyTarget, createMilestones } from '../lib/writeathon'
+import {
+  calendarDailyTarget,
+  createCalendarDays,
+  getWriteathonToday,
+  migrateWriteathonData,
+  WRITEATHON_MODEL,
+  type CalendarWriteathonData,
+  type WriteathonDay,
+} from '../lib/writeathon'
+import { todayKey } from '../lib/metrics'
+import { parseDayKey } from '../lib/days'
 import { usePlayerStore } from './playerStore'
 import { useImageRevealStore } from './imageRevealStore'
 import { addToast } from '../components/quests/rewardToastStore'
 
 interface WriteathonState {
   config: WriteathonConfig | null
-  milestones: WriteathonMilestone[]
+  /** One entry per calendar date of the writeathon (see WriteathonDay). */
+  milestones: WriteathonDay[]
+  /** Data model marker: 2 = calendar days. */
+  model: typeof WRITEATHON_MODEL
+  /** Book word count at the last update — the start-of-day count for the next new date. */
+  lastSeenBookWords: number | null
   villagerQuests: BoardQuest[]
   activeBoardQuests: BoardQuest[]
   dailyQuestAccepted: boolean
   _hasHydrated: boolean
 
-  startWriteathon: (startingWordCount: number, targetWordCount: number, totalBlocks?: number) => void
-  updateProgress: (currentBookWordCount: number) => void
+  startWriteathon: (startingWordCount: number, targetWordCount: number, totalBlocks?: number, now?: number) => void
+  updateProgress: (currentBookWordCount: number, now?: number) => void
   acceptDailyQuest: () => void
   completeDailyQuest: (sessionId: string) => void
   addVillagerQuest: (quest: BoardQuest) => void
@@ -28,9 +43,13 @@ interface WriteathonState {
   pauseWriteathon: () => void
   resumeWriteathon: () => void
 
-  getCurrentBlock: () => number
-  getDailyTarget: () => number
-  getRemainingBlocks: () => number
+  /** 1-based day number of today (clamped to the plan). */
+  getCurrentBlock: (now?: number) => number
+  /** Words needed today to stay on pace (0 when paused, finished or over). */
+  getDailyTarget: (now?: number) => number
+  /** Dates left including today. */
+  getRemainingBlocks: (now?: number) => number
+  /** Dates that paid out. */
   getCompletedBlocks: () => number
 }
 
@@ -41,64 +60,87 @@ export const useWriteathonStore = create<WriteathonState>()(
     (set, get) => ({
       config: null,
       milestones: [],
+      model: WRITEATHON_MODEL,
+      lastSeenBookWords: null,
       villagerQuests: [],
       activeBoardQuests: [],
       dailyQuestAccepted: false,
       _hasHydrated: false,
 
-      startWriteathon: (startingWordCount: number, targetWordCount: number, totalBlocks = 24) => {
+      startWriteathon: (startingWordCount, targetWordCount, totalBlocks = 24, now = Date.now()) => {
         const wordsPerBlock = Math.ceil((targetWordCount - startingWordCount) / totalBlocks)
+        const startDay = todayKey(now)
         const config: WriteathonConfig = {
           id: crypto.randomUUID(),
-          startDate: new Date().toISOString(),
+          startDate: parseDayKey(startDay).toISOString(),
           startingWordCount,
           targetWordCount,
           totalBlocks,
           wordsPerBlock,
           active: true,
         }
-        const milestones = createMilestones(startingWordCount, wordsPerBlock, totalBlocks)
-        set({ config, milestones, villagerQuests: [], dailyQuestAccepted: false })
+        const milestones = createCalendarDays(startDay, startingWordCount, wordsPerBlock, totalBlocks)
+        set({
+          config,
+          milestones,
+          model: WRITEATHON_MODEL,
+          lastSeenBookWords: startingWordCount,
+          villagerQuests: [],
+          dailyQuestAccepted: false,
+        })
       },
 
-      updateProgress: (currentBookWordCount: number) => {
-        const { config, milestones } = get()
-        if (!config || !config.active) return
-        if (config.paused) return
+      updateProgress: (currentBookWordCount, now = Date.now()) => {
+        const { config, milestones, lastSeenBookWords } = get()
+        if (!config || !config.active || config.completedAt) {
+          set({ lastSeenBookWords: currentBookWordCount })
+          return
+        }
+        if (config.paused) {
+          set({ lastSeenBookWords: currentBookWordCount })
+          return
+        }
 
-        let anyNewlyCompleted = false
-        const playerStore = usePlayerStore.getState()
-
-        const updatedMilestones = milestones.map((milestone) => {
-          if (milestone.completed) return milestone
-          if (currentBookWordCount >= milestone.targetWordCount) {
-            anyNewlyCompleted = true
-            playerStore.addCoins(milestone.coinsAwarded)
-            const tierLabel = milestone.tier.charAt(0).toUpperCase() + milestone.tier.slice(1)
-            addToast(milestone.coinsAwarded, `Block ${milestone.blockNumber} — ${tierLabel}`)
-            return {
-              ...milestone,
-              completed: true,
-              completedAt: new Date().toISOString(),
+        const today = getWriteathonToday(config, milestones, currentBookWordCount, now)
+        let nextMilestones = milestones
+        if (today.phase === 'active') {
+          const index = today.index
+          let day = milestones[index]
+          if (day.dayStartWordCount === undefined) {
+            // First update of this date: the count before this edit is where today began.
+            const dayStart = Math.min(lastSeenBookWords ?? currentBookWordCount, currentBookWordCount)
+            day = {
+              ...day,
+              dayStartWordCount: dayStart,
+              dayTarget: calendarDailyTarget(config.targetWordCount, dayStart, today.remainingDays),
             }
           }
-          return milestone
-        })
-
-        const allComplete = updatedMilestones.every((m) => m.completed)
-
-        if (allComplete && anyNewlyCompleted) {
-          set({
-            milestones: updatedMilestones,
-            config: {
-              ...config,
-              active: true,
-              completedAt: new Date().toISOString(),
-            },
-          })
-        } else if (anyNewlyCompleted) {
-          set({ milestones: updatedMilestones })
+          const target = day.dayTarget ?? 0
+          const written = currentBookWordCount - (day.dayStartWordCount ?? currentBookWordCount)
+          const reachedGoal = currentBookWordCount >= config.targetWordCount
+          if (!day.completed && ((target > 0 && written >= target) || reachedGoal)) {
+            usePlayerStore.getState().addCoins(day.coinsAwarded)
+            const tierLabel = day.tier.charAt(0).toUpperCase() + day.tier.slice(1)
+            addToast(day.coinsAwarded, `Writeathon day ${day.blockNumber} — ${tierLabel}`)
+            day = {
+              ...day,
+              completed: true,
+              completedAt: new Date(now).toISOString(),
+              targetWordCount: (day.dayStartWordCount ?? 0) + target,
+            }
+          }
+          if (day !== milestones[index]) {
+            nextMilestones = [...milestones]
+            nextMilestones[index] = day
+          }
         }
+
+        const finished = currentBookWordCount >= config.targetWordCount && today.phase !== 'before'
+        set({
+          lastSeenBookWords: currentBookWordCount,
+          ...(nextMilestones !== milestones ? { milestones: nextMilestones } : {}),
+          ...(finished ? { config: { ...config, completedAt: new Date(now).toISOString() } } : {}),
+        })
       },
 
       acceptDailyQuest: () => {
@@ -180,31 +222,24 @@ export const useWriteathonStore = create<WriteathonState>()(
         }))
       },
 
-      getCurrentBlock: () => {
+      getCurrentBlock: (now = Date.now()) => {
         const { config, milestones } = get()
         if (!config) return 1
-        const completedCount = milestones.filter((m) => m.completed).length
-        return Math.min(completedCount + 1, config.totalBlocks)
+        const today = getWriteathonToday(config, milestones, get().lastSeenBookWords ?? 0, now)
+        return Math.max(1, Math.min(today.index + 1, config.totalBlocks))
       },
 
-      getDailyTarget: () => {
-        const { config, milestones } = get()
-        if (!config) return 0
-        if (config.paused) return 0
-        const completedCount = milestones.filter((m) => m.completed).length
-        const remainingBlocks = config.totalBlocks - completedCount
-        if (remainingBlocks === 0) return 0
-        // currentWordCount is the target of the last completed milestone, or startingWordCount
-        const lastCompleted = milestones.filter((m) => m.completed).at(-1)
-        const currentWordCount = lastCompleted?.targetWordCount ?? config.startingWordCount
-        return calculateDailyTarget(config.targetWordCount, currentWordCount, remainingBlocks)
+      getDailyTarget: (now = Date.now()) => {
+        const { config, milestones, lastSeenBookWords } = get()
+        if (!config || config.paused) return 0
+        const today = getWriteathonToday(config, milestones, lastSeenBookWords ?? config.startingWordCount, now)
+        return today.phase === 'active' ? today.target : 0
       },
 
-      getRemainingBlocks: () => {
+      getRemainingBlocks: (now = Date.now()) => {
         const { config, milestones } = get()
         if (!config) return 0
-        const completedCount = milestones.filter((m) => m.completed).length
-        return config.totalBlocks - completedCount
+        return getWriteathonToday(config, milestones, 0, now).remainingDays
       },
 
       getCompletedBlocks: () => {
@@ -215,11 +250,22 @@ export const useWriteathonStore = create<WriteathonState>()(
     {
       name: 'writinator-writeathon',
       storage: localforageStorage,
-      version: 1,
+      version: 2,
+      migrate: (persisted, version) => {
+        if (!persisted || typeof persisted !== 'object') return persisted as WriteathonState
+        const s = persisted as Partial<WriteathonState> & { milestones?: WriteathonMilestone[] }
+        if (version < 2) {
+          const migrated = migrateWriteathonData({ config: s.config ?? null, milestones: s.milestones ?? [] })
+          return { ...s, ...migrated } as WriteathonState
+        }
+        return s as WriteathonState
+      },
       partialize: (state) =>
         ({
           config: state.config,
           milestones: state.milestones,
+          model: state.model,
+          lastSeenBookWords: state.lastSeenBookWords,
           villagerQuests: state.villagerQuests,
           activeBoardQuests: state.activeBoardQuests,
           dailyQuestAccepted: state.dailyQuestAccepted,
@@ -256,17 +302,24 @@ useImageRevealStore.subscribe((state, prevState) => {
 // File serialization helpers — used by fileSystem.ts section registry
 // ---------------------------------------------------------------------------
 
-export function serializeWriteathon(): WriteathonFileData {
-  const { config, milestones, villagerQuests, activeBoardQuests, dailyQuestAccepted } =
+/** Book-file shape: the shared WriteathonFileData plus the calendar-model fields. */
+export type WriteathonFileSection = WriteathonFileData & Pick<CalendarWriteathonData, 'model' | 'lastSeenBookWords'>
+
+export function serializeWriteathon(): WriteathonFileSection {
+  const { config, milestones, model, lastSeenBookWords, villagerQuests, activeBoardQuests, dailyQuestAccepted } =
     useWriteathonStore.getState()
-  return { config, milestones, villagerQuests, activeBoardQuests, dailyQuestAccepted }
+  return { config, milestones, model, lastSeenBookWords, villagerQuests, activeBoardQuests, dailyQuestAccepted }
 }
 
 export function hydrateWriteathon(data: WriteathonFileData | undefined): void {
   if (data === undefined) return
+  // Files written before calendar days carry the checkpoint model.
+  const calendar = migrateWriteathonData(data as Partial<WriteathonFileSection> & WriteathonFileData)
   useWriteathonStore.setState({
-    config: data.config,
-    milestones: data.milestones,
+    config: calendar.config,
+    milestones: calendar.milestones,
+    model: calendar.model,
+    lastSeenBookWords: calendar.lastSeenBookWords,
     villagerQuests: data.villagerQuests,
     activeBoardQuests: data.activeBoardQuests,
     dailyQuestAccepted: data.dailyQuestAccepted,

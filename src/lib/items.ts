@@ -4,7 +4,7 @@ export const WEAPONS: WeaponItem[] = [
   {
     id: 'wooden-pencil',
     name: 'Wooden Pencil',
-    description: 'A humble writing tool. Gets the job done.',
+    description: 'A humble writing tool. Standard coin rewards.',
     category: 'weapon',
     rarity: 'common',
     price: 0,
@@ -14,7 +14,7 @@ export const WEAPONS: WeaponItem[] = [
   {
     id: 'enchanted-quill',
     name: 'Enchanted Quill',
-    description: 'Imbued with minor magic. Words flow a bit easier.',
+    description: 'Imbued with minor magic. Quests pay a little more.',
     category: 'weapon',
     rarity: 'uncommon',
     price: 200,
@@ -24,7 +24,7 @@ export const WEAPONS: WeaponItem[] = [
   {
     id: 'phoenix-feather-pen',
     name: 'Phoenix Feather Pen',
-    description: 'Burns with creative fire. Words come faster.',
+    description: 'Burns with creative fire. Quests pay a quarter more.',
     category: 'weapon',
     rarity: 'rare',
     price: 500,
@@ -34,7 +34,7 @@ export const WEAPONS: WeaponItem[] = [
   {
     id: 'dragons-pen',
     name: "Dragon's Pen",
-    description: 'Forged in dragonfire. Significant word power.',
+    description: 'Forged in dragonfire. Quests pay half again as much.',
     category: 'weapon',
     rarity: 'epic',
     price: 1500,
@@ -44,7 +44,7 @@ export const WEAPONS: WeaponItem[] = [
   {
     id: 'celestial-stylus',
     name: 'Celestial Stylus',
-    description: 'Crafted from starlight. Double word power.',
+    description: 'Crafted from starlight. Quests pay double.',
     category: 'weapon',
     rarity: 'legendary',
     price: 5000,
@@ -121,7 +121,7 @@ export const CONSUMABLES: ConsumableItem[] = [
   {
     id: 'word-burst',
     name: 'Word Burst',
-    description: 'Next 50 words count double.',
+    description: 'Your next 50 words earn double coins.',
     category: 'consumable',
     rarity: 'uncommon',
     price: 100,
@@ -140,7 +140,23 @@ export const CONSUMABLES: ConsumableItem[] = [
     effect: 'extend-time',
     effectValue: 300,
   },
+  {
+    id: 'streak-freeze',
+    name: 'Streak Freeze',
+    description: 'Keeps your writing streak alive through a missed day. Used automatically.',
+    category: 'consumable',
+    rarity: 'rare',
+    price: 150,
+    icon: '🧊',
+    effect: 'streak-freeze',
+    effectValue: 1,
+  },
 ]
+
+/** Consumables that work on their own (never "used" from a quest card). */
+export function isPassiveConsumable(item: ConsumableItem): boolean {
+  return item.effect === 'streak-freeze'
+}
 
 export const ALL_ITEMS: Item[] = [...WEAPONS, ...ARMORS, ...CONSUMABLES]
 
@@ -152,6 +168,7 @@ export function getItemsByCategory(category: ItemCategory): Item[] {
   return ALL_ITEMS.filter((item) => item.category === category)
 }
 
+/** Coin multiplier of a weapon. Gear raises coin rewards only, never word progress. */
 export function getWeaponMultiplier(weaponId: string): number {
   const weapon = WEAPONS.find((w) => w.id === weaponId)
   return weapon?.wordMultiplier ?? 1.0

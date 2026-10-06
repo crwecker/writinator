@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { Pin, PinOff, LineChart } from 'lucide-react'
 import { useMetricsStore } from '../../stores/metricsStore'
+import { useStreakStore } from '../../stores/streakStore'
+import { weekTotal } from '../../lib/days'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { getMetricDisplayValue } from '../../lib/metrics'
 import type { MetricKey } from '../../types'
@@ -16,6 +18,86 @@ const ALL_METRIC_KEYS: MetricKey[] = [
   'storyletWords',
   'bookWords',
 ]
+
+/** Weekly goal and daily reminder settings (per writer, not per book). */
+function HabitSettings() {
+  const weeklyGoal = useStreakStore((s) => s.weeklyGoal)
+  const weekWords = useStreakStore((s) => weekTotal(s.dailyWords))
+  const nudge = useStreakStore((s) => s.nudge)
+  const [draft, setDraft] = useState(weeklyGoal === null ? '' : String(weeklyGoal))
+
+  function commitGoal() {
+    const n = Number(draft)
+    useStreakStore.getState().setWeeklyGoal(draft.trim() === '' || !Number.isFinite(n) || n <= 0 ? null : n)
+  }
+
+  function toggleNudge(enabled: boolean) {
+    useStreakStore.getState().setNudge({ enabled })
+    // Ask from the click that turns it on; the in-app toast covers a "no".
+    if (enabled && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      void Notification.requestPermission().catch(() => undefined)
+    }
+  }
+
+  const pct = weeklyGoal ? Math.min(100, (weekWords / weeklyGoal) * 100) : 0
+  const input =
+    'bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-gray-200 tabular-nums outline-none focus:border-amber-600'
+
+  return (
+    <div className="px-3 py-1 space-y-2 text-sm">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500">Habits</div>
+      <label className="flex items-center justify-between gap-2">
+        <span className="text-gray-300">Weekly goal</span>
+        <input
+          type="number"
+          min={0}
+          step={500}
+          placeholder="off"
+          aria-label="Weekly word goal"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitGoal}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitGoal()
+          }}
+          className={`${input} w-20 text-right`}
+        />
+      </label>
+      {weeklyGoal !== null && (
+        <div>
+          <div className="h-1 rounded-full bg-gray-800 overflow-hidden">
+            <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="mt-1 text-xs text-gray-500 tabular-nums">
+            {weekWords.toLocaleString()} of {weeklyGoal.toLocaleString()} this week (Mon–Sun)
+          </div>
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <label className="flex items-center gap-2 text-gray-300">
+          <input
+            type="checkbox"
+            checked={nudge.enabled}
+            onChange={(e) => toggleNudge(e.target.checked)}
+            className="accent-amber-500"
+          />
+          Remind me at
+        </label>
+        <input
+          type="time"
+          aria-label="Reminder time"
+          value={nudge.time}
+          disabled={!nudge.enabled}
+          onChange={(e) => e.target.value && useStreakStore.getState().setNudge({ time: e.target.value })}
+          className={`${input} disabled:opacity-40`}
+        />
+      </div>
+      {nudge.enabled && (
+        <div className="text-xs text-gray-500">Once a day, only if you haven't written 100 words yet.</div>
+      )}
+    </div>
+  )
+}
 
 interface MetricsPopoverProps {
   open: boolean
@@ -143,6 +225,10 @@ export function MetricsPopover({ open, onClose, anchorRef, onShowGraph }: Metric
 
       <div className="my-2 border-t border-gray-800" />
 
+      <HabitSettings />
+
+      <div className="my-2 border-t border-gray-800" />
+
       <button
         title="Show metrics graph"
         className="w-full text-left px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 rounded flex items-center gap-2 transition-colors"
@@ -152,7 +238,7 @@ export function MetricsPopover({ open, onClose, anchorRef, onShowGraph }: Metric
         }}
       >
         <LineChart size={14} />
-        Show graph
+        Graph & writing calendar
       </button>
     </div>
   )

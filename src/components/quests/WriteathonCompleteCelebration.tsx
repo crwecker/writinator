@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useWriteathonStore } from '../../stores/writeathonStore'
+import { dayDiff } from '../../lib/days'
+import { todayKey } from '../../lib/metrics'
 
 const CONFETTI_COLORS = [
   'bg-amber-400',
@@ -40,22 +42,24 @@ export function WriteathonCompleteCelebration(): React.JSX.Element | null {
   const [visible, setVisible] = useState(false)
   const [particles] = useState<ConfettiParticle[]>(generateParticles)
 
-  useEffect(() => {
-    if (config?.completedAt && !visible) {
-      const allDone = milestones.every((m) => m.completed)
-      if (allDone) {
-        setVisible(true)
-      }
-    }
-  // only trigger on completedAt appearing — not on every render
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config?.completedAt])
+  // Show when completedAt appears (reaching the goal word count) — only for a
+  // finish that just happened, not one loaded from storage. Missed days pay
+  // nothing but don't stand in the way of finishing.
+  useEffect(
+    () =>
+      useWriteathonStore.subscribe((state, prev) => {
+        const at = state.config?.completedAt
+        if (at && at !== prev.config?.completedAt && Math.abs(Date.now() - Date.parse(at)) < 60_000) {
+          setVisible(true)
+        }
+      }),
+    [],
+  )
 
   if (!visible || !config?.completedAt) return null
 
-  const start = new Date(config.startDate)
-  const end = new Date(config.completedAt)
-  const daysTaken = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
+  const daysTaken = Math.max(1, dayDiff(todayKey(Date.parse(config.startDate)), todayKey(Date.parse(config.completedAt))) + 1)
+  const daysHit = milestones.filter((m) => m.completed).length
 
   const totalCoins = milestones.reduce((sum, m) => sum + (m.completed ? m.coinsAwarded : 0), 0)
   const wordsWritten = config.targetWordCount - config.startingWordCount
@@ -111,6 +115,7 @@ export function WriteathonCompleteCelebration(): React.JSX.Element | null {
             <p className="font-mono font-bold text-amber-200 text-xl tabular-nums">
               {daysTaken}
             </p>
+            <p className="text-amber-700 text-[10px] mt-0.5">{daysHit} on target</p>
           </div>
           <div className="bg-amber-950/40 border border-amber-900/50 rounded-lg px-3 py-4">
             <p className="text-amber-600 text-xs font-medium mb-1">Coins earned</p>

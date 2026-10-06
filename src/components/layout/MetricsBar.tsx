@@ -3,6 +3,8 @@ import { useMetricsStore } from '../../stores/metricsStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { getMetricDisplayValue } from '../../lib/metrics'
 import { MetricsPopover } from './MetricsPopover'
+import { useStreakStore } from '../../stores/streakStore'
+import { weekTotal } from '../../lib/days'
 import type { MetricKey } from '../../types'
 
 const MetricsGraphModal = lazy(() =>
@@ -37,6 +39,19 @@ function pillLabel(key: MetricKey, value: string, wordCount: number): string {
   }
 }
 
+/** "1,240 / 5,000 wk" — Monday–Sunday words toward the weekly goal, when one is set. */
+function WeeklyGoalPill() {
+  const goal = useStreakStore((s) => s.weeklyGoal)
+  const words = useStreakStore((s) => weekTotal(s.dailyWords))
+  if (goal === null) return null
+  const done = words >= goal
+  return (
+    <span className={done ? 'text-emerald-400' : undefined} title="Weekly goal (Monday–Sunday)">
+      {words.toLocaleString()} / {goal.toLocaleString()} wk goal{done ? ' ✓' : ''}
+    </span>
+  )
+}
+
 export function MetricsBar({ wordCount, bookWordCount }: MetricsBarProps) {
   const [open, setOpen] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
@@ -44,6 +59,7 @@ export function MetricsBar({ wordCount, bookWordCount }: MetricsBarProps) {
   const [, setTick] = useState(0)
 
   const pinnedMetrics = useMetricsStore((s) => s.pinnedMetrics)
+  const weeklyGoal = useStreakStore((s) => s.weeklyGoal)
   const dayBuckets = useMetricsStore((s) => s.dayBuckets)
   const session = useMetricsStore((s) => s.session)
   const book = useStoryletStore((s) => s.book)
@@ -113,6 +129,10 @@ export function MetricsBar({ wordCount, bookWordCount }: MetricsBarProps) {
             )
           })
         )}
+        {weeklyGoal !== null && pinnedMetrics.length > 0 && (
+          <span className="mx-1.5 text-gray-600">·</span>
+        )}
+        <WeeklyGoalPill />
       </button>
       <MetricsPopover
         open={open}

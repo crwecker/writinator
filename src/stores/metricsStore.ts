@@ -6,6 +6,34 @@ import { todayKey } from '../lib/metrics'
 
 const localforageStorage = localforageJSONStorage<MetricsState>()
 
+// ---------------------------------------------------------------------------
+// Listeners for per-writer trackers (streaks, records). dayBuckets belongs to
+// the open book and is swapped on file load, so writer-level stores get the
+// counted words directly instead of diffing buckets.
+// ---------------------------------------------------------------------------
+
+type CountedWordsListener = (delta: number, timestamp: number) => void
+type HistoryListener = (dayBuckets: Record<string, DailyMetricBucket>) => void
+
+const countedWordsListeners = new Set<CountedWordsListener>()
+const historyListeners = new Set<HistoryListener>()
+
+/** Called after every counted change recorded by `recordDelta` (delta may be negative). */
+export function subscribeCountedWords(listener: CountedWordsListener): () => void {
+  countedWordsListeners.add(listener)
+  return () => countedWordsListeners.delete(listener)
+}
+
+/** Called when a book's metric history is loaded (rehydration or opening a file). */
+export function subscribeMetricsHistory(listener: HistoryListener): () => void {
+  historyListeners.add(listener)
+  return () => historyListeners.delete(listener)
+}
+
+function emitHistory(dayBuckets: Record<string, DailyMetricBucket>): void {
+  for (const listener of historyListeners) listener(dayBuckets)
+}
+
 export const useMetricsStore = create<MetricsState>()(
   persist(
     (set, get) => ({
@@ -57,6 +85,7 @@ export const useMetricsStore = create<MetricsState>()(
           dayBuckets: { ...dayBuckets, [key]: updatedBucket },
           ...(updatedSession !== null ? { session: updatedSession } : {}),
         })
+        for (const listener of countedWordsListeners) listener(delta, timestamp)
       },
 
       recordWpmSample: (delta: number, timestamp: number) => {
@@ -138,6 +167,7 @@ export const useMetricsStore = create<MetricsState>()(
           console.error('[metricsStore] rehydration error:', error)
         }
         useMetricsStore.setState({ hasHydrated: true })
+        emitHistory(useMetricsStore.getState().dayBuckets)
       },
     }
   )
@@ -170,4 +200,5 @@ export function hydrateMetrics(data: MetricsFileData | undefined): void {
     session: data.session,
     pinnedMetrics: data.pinnedMetrics,
   })
+  emitHistory(data.dayBuckets)
 }

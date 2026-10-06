@@ -8,6 +8,7 @@ import {
   mergeBucketsWithBackfill,
 } from '../../lib/metrics'
 import type { BackfillPoint, MergedSeriesPoint } from '../../lib/metrics'
+import { WritingCalendar } from './WritingCalendar'
 
 interface MetricsGraphModalProps {
   open: boolean
@@ -237,6 +238,7 @@ function MetricsChart({ series, showGross, showNet, showBook }: ChartProps) {
 }
 
 export function MetricsGraphModal({ open, onClose }: MetricsGraphModalProps) {
+  const [view, setView] = useState<'graph' | 'calendar'>('graph')
   const [range, setRange] = useState<Range>('30d')
   const [showGross, setShowGross] = useState(true)
   const [showNet, setShowNet] = useState(true)
@@ -300,7 +302,24 @@ export function MetricsGraphModal({ open, onClose }: MetricsGraphModalProps) {
       <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-xl w-[880px] max-w-[95vw] max-h-[85vh] overflow-auto p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <span className="text-gray-200 text-lg font-medium">Writing metrics</span>
+          <div className="flex items-center gap-4">
+            <span className="text-gray-200 text-lg font-medium">Writing metrics</span>
+            <div className="flex items-center gap-1" role="tablist">
+              {(['graph', 'calendar'] as const).map((v) => (
+                <button
+                  key={v}
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => setView(v)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium capitalize transition-colors ${
+                    view === v ? 'bg-gray-800 text-gray-200' : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             onClick={onClose}
             className="text-gray-500 hover:text-gray-300 transition-colors"
@@ -310,6 +329,10 @@ export function MetricsGraphModal({ open, onClose }: MetricsGraphModalProps) {
           </button>
         </div>
 
+        {view === 'calendar' ? (
+          <WritingCalendar />
+        ) : (
+        <>
         {/* Controls row */}
         <div className="flex items-center gap-4 mb-5 flex-wrap">
           {/* Range picker */}
@@ -398,6 +421,8 @@ export function MetricsGraphModal({ open, onClose }: MetricsGraphModalProps) {
             </span>
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   )
