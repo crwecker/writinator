@@ -1,8 +1,22 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
-import type { Book, Storylet, DocumentStyles, GlobalSettings, NamedStyle, ReplaceScope, SearchOptions, WritinatorFile } from '../types'
+import { persist } from 'zustand/middleware'
+import type { Book, Storylet, DocumentStyles, GlobalSettings, ReplaceScope, SearchOptions, WritinatorFile } from '../types'
 import { compileQuery, replaceInContent } from '../lib/bookSearch'
+import { flattenDocumentStyles } from '../lib/migration'
+import { escapeRegExp } from '../lib/regex'
+import { createSnapshot, getAllSnapshots, loadSnapshotsFromFile, pruneSnapshots, snapshotBook } from './snapshotStore'
+import { getAllPublishedSnapshots, loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
+import { clearFileHandle, getHandleState, hasFileTetherCapability } from '../lib/fileSystem'
+import { showToast } from './genericToastStore'
+import { useImageRevealStore, hydrateImageReveal } from './imageRevealStore'
+import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
+import { useMetricsStore, hydrateMetrics, resetMetrics } from './metricsStore'
+import { useCharacterStore } from './characterStore'
+import { hydratePlayer } from './playerStore'
+import { hydrateNotes, useNotesStore } from './notesStore'
+import { countWords } from '../lib/words'
+import { localforageJSONStorage } from './localforageStorage'
+import { bookFingerprint } from '../lib/fingerprint'
 
 function createDefaultDocumentStyles(): DocumentStyles {
   return {
@@ -14,30 +28,6 @@ function createDefaultDocumentStyles(): DocumentStyles {
     code: {},
   }
 }
-
-/**
- * Flatten the old DocumentStyles shape (body/h1/.../namedStyles) into the flat Record<string, NamedStyle>.
- */
-function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
-  if (!raw || typeof raw !== 'object') return undefined
-  const obj = raw as Record<string, unknown>
-  // Already flat: no `namedStyles` key, or no nested object matching old shape
-  if (!('namedStyles' in obj)) return obj as DocumentStyles
-  const { namedStyles, ...rest } = obj as { namedStyles?: Record<string, NamedStyle> } & Record<string, NamedStyle>
-  return { ...(rest as Record<string, NamedStyle>), ...(namedStyles ?? {}) }
-}
-import { createSnapshot, getAllSnapshots, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
-import { getAllPublishedSnapshots, loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
-import { clearFileHandle, getHandleState, hasFileTetherCapability } from '../lib/fileSystem'
-import { showToast } from './genericToastStore'
-import { useImageRevealStore, hydrateImageReveal } from './imageRevealStore'
-import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
-import { useMetricsStore, hydrateMetrics } from './metricsStore'
-import { useCharacterStore } from './characterStore'
-import { hydratePlayer } from './playerStore'
-import { hydrateNotes, useNotesStore } from './notesStore'
-import { countWords } from '../lib/words'
-import { bookFingerprint } from '../lib/fingerprint'
 
 interface StoryletState {
   book: Book | null
@@ -80,8 +70,11 @@ interface StoryletState {
   setStoryletPublishedMeta: (id: string, meta: { lastPublishedAt: string; lastPublishedSnapshotId: string }) => void
 
   // Content
-  /** Debounced write of editor text. `storyletId` defaults to the active storylet. */
-  updateStoryletContent: (content: string, storyletId?: string) => void
+  /** Debounced write of editor text. `storyletId` defaults to the active
+   *  storylet. Pass `countAsWriting: false` for changes the writer didn't
+   *  type (undo/redo, restoring a snapshot) so they don't count as words
+   *  written in metrics or quests. */
+  updateStoryletContent: (content: string, storyletId?: string, options?: UpdateContentOptions) => void
   /** Immediately replace a storylet's text (no debounce) and make an open
    *  editor reload it. */
   setStoryletContent: (id: string, content: string) => void
@@ -111,6 +104,14 @@ interface StoryletState {
 interface PendingContent {
   storyletId: string
   content: string
+  /** Net word change in this window from edits that don't count as writing;
+   *  subtracted from the word delta at flush. */
+  uncountedWords: number
+}
+
+export interface UpdateContentOptions {
+  /** Default true. False for undo/redo and snapshot restores. */
+  countAsWriting?: boolean
 }
 
 function generateId(): string {
@@ -222,12 +223,13 @@ function collectSubtree(storylets: Storylet[], id: string): Storylet[] {
   return storylets.filter((storylet) => ids.has(storylet.id))
 }
 
-/** Union of two per-storylet histories by entry id, newest first. */
+/** Union of two per-storylet histories by entry id, newest first. `prune`
+ *  caps each merged list. */
 function mergeById<T extends { id: string }>(
   fromFile: Record<string, T[]>,
   local: Record<string, T[]>,
   timeOf: (entry: T) => string,
-  cap?: number,
+  prune: (entries: T[]) => T[] = (entries) => entries,
 ): Record<string, T[]> {
   const merged: Record<string, T[]> = { ...fromFile }
   for (const [storyletId, localEntries] of Object.entries(local)) {
@@ -238,7 +240,7 @@ function mergeById<T extends { id: string }>(
     const all = [...fileEntries, ...extra].sort(
       (a, b) => new Date(timeOf(b)).getTime() - new Date(timeOf(a)).getTime()
     )
-    merged[storyletId] = cap ? all.slice(0, cap) : all
+    merged[storyletId] = prune(all)
   }
   return merged
 }
@@ -247,28 +249,10 @@ function now(): string {
   return new Date().toISOString()
 }
 
-const localforageStorage = createJSONStorage<StoryletState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    if (value !== null) return value
-    // Fallback: if reading the new key and nothing is there, try the legacy key
-    if (name === 'writinator-storylet') {
-      const legacy = await localforage.getItem<string>('writinator-document')
-      if (legacy !== null) {
-        await localforage.setItem(name, legacy)
-        await localforage.removeItem('writinator-document')
-        return legacy
-      }
-    }
-    return null
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+const localforageStorage = localforageJSONStorage<StoryletState>({
+  // Fallback: the store was once persisted under the old key
+  'writinator-storylet': 'writinator-document',
+})
 
 export const useStoryletStore = create<StoryletState>()(
   persist(
@@ -325,7 +309,7 @@ export const useStoryletStore = create<StoryletState>()(
         }
         // Merge local history (including orphans just created) into the file's
         // so nothing is lost when local storage is replaced.
-        const snapshots = mergeById(file.snapshots, await getAllSnapshots(), (s) => s.timestamp, 100)
+        const snapshots = mergeById(file.snapshots, await getAllSnapshots(), (s) => s.timestamp, pruneSnapshots)
         const publishedSnapshots = mergeById(
           file.publishedSnapshots ?? {},
           await getAllPublishedSnapshots(),
@@ -348,7 +332,15 @@ export const useStoryletStore = create<StoryletState>()(
           file.characters ?? [],
           file.markers ?? {}
         )
-        // Hydrate cross-store sections (v7+). Missing sections = no-op, preserving localforage state.
+        // Hydrate cross-store sections (v7+). A section missing from an older
+        // file keeps what's in browser storage when it's the same book, and
+        // starts empty for a different book so the last book's data doesn't
+        // carry over.
+        if (existingBook?.id !== file.book.id) {
+          if (!file.notes) useNotesStore.getState().reset()
+          if (!file.metrics) resetMetrics()
+          if (!file.writeathon) useWriteathonStore.getState().resetWriteathon()
+        }
         hydratePlayer(file.player)
         hydrateImageReveal(file.quests)
         hydrateWriteathon(file.writeathon)
@@ -670,19 +662,26 @@ export const useStoryletStore = create<StoryletState>()(
         })
       },
 
-      updateStoryletContent: (content: string, storyletId?: string) => {
+      updateStoryletContent: (content: string, storyletId?: string, options?: UpdateContentOptions) => {
         if (bailIfLocked('edit content')) return
         const targetId = storyletId ?? get().activeStoryletId
         if (!targetId) return
         // Typing moved to another storylet: save the previous one's text now.
-        const pending = get()._pendingContent
-        if (pending && pending.storyletId !== targetId) get()._flushContentUpdate()
-        const { _contentUpdateTimer } = get()
+        const previousPending = get()._pendingContent
+        if (previousPending && previousPending.storyletId !== targetId) get()._flushContentUpdate()
+        const { _contentUpdateTimer, _pendingContent: pending, book } = get()
         if (_contentUpdateTimer) {
           clearTimeout(_contentUpdateTimer)
         }
+        let uncountedWords = pending?.uncountedWords ?? 0
+        if (options?.countAsWriting === false) {
+          const previous = pending
+            ? pending.content
+            : book?.storylets.find((s) => s.id === targetId)?.content ?? null
+          uncountedWords += countWords(content) - countWords(previous)
+        }
         const timer = setTimeout(() => get()._flushContentUpdate(), CONTENT_DEBOUNCE_MS)
-        set({ _contentUpdateTimer: timer, _pendingContent: { storyletId: targetId, content } })
+        set({ _contentUpdateTimer: timer, _pendingContent: { storyletId: targetId, content, uncountedWords } })
       },
 
       setStoryletContent: (id: string, content: string) => {
@@ -746,8 +745,7 @@ export const useStoryletStore = create<StoryletState>()(
           nextStyles = { ...rest, [newName]: renamed }
         }
         // Rewrite class="oldName" references in all storylets (any tag/attrs)
-        const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        const classRegex = new RegExp(`class="${escaped}"`, 'g')
+        const classRegex = new RegExp(`class="${escapeRegExp(oldName)}"`, 'g')
         const needle = `class="${oldName}"`
         const nextBook = book
           ? {
@@ -836,14 +834,14 @@ export const useStoryletStore = create<StoryletState>()(
         if (!pending || !book) return
         const storylet = book.storylets.find((s) => s.id === pending.storyletId)
         if (!storylet || storylet.content === pending.content) return
-        // Track word delta for quest progress and metrics
+        // Track word delta for quest progress and metrics, leaving out
+        // changes that weren't typed (undo, snapshot restore).
         const oldWords = countWords(storylet.content)
-        const newWords = countWords(pending.content)
-        const delta = newWords - oldWords
+        const delta = countWords(pending.content) - oldWords - pending.uncountedWords
         if (delta > 0) {
           useImageRevealStore.getState().addWords(delta)
         }
-        useMetricsStore.getState().recordDelta(oldWords, newWords, Date.now())
+        useMetricsStore.getState().recordDelta(oldWords, oldWords + delta, Date.now())
         const updatedBook: Book = {
           ...book,
           storylets: book.storylets.map((s) =>

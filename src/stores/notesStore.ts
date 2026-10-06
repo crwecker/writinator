@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageJSONStorage } from './localforageStorage'
 import type {
   NotesFileData,
   PositionNote,
@@ -44,18 +44,7 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-const localforageStorage = createJSONStorage<NotesState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    return value
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+const localforageStorage = localforageJSONStorage<NotesState>()
 
 export const useNotesStore = create<NotesState>()(
   persist(

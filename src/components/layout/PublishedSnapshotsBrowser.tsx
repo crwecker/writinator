@@ -6,7 +6,7 @@ import {
   createPublishedSnapshot,
   deletePublishedSnapshot,
 } from '../../stores/publishedSnapshotStore'
-import { getSnapshots } from '../../stores/snapshotStore'
+import { getSnapshots, SNAPSHOT_TRIGGER_LABELS } from '../../stores/snapshotStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import { formatTime } from '../../lib/formatTime'
@@ -15,16 +15,6 @@ import { computeDiff } from '../../lib/diff'
 import { DiffView } from './DiffView'
 import { renderStoryletAsMarkdown, renderStoryletAsHtml } from '../../lib/render'
 import { inlineDocumentStyles } from '../../lib/export'
-
-const snapshotTriggerLabel: Record<Snapshot['trigger'], string> = {
-  manual: 'save',
-  switch: 'switch',
-  auto: 'auto',
-  closeBook: 'close',
-  bulkReplace: 'replace',
-  orphan: 'orphan (before new file)',
-  fileOnReconnect: 'file on reconnect',
-}
 
 interface Props {
   onOpenPublishModal: () => void
@@ -531,7 +521,7 @@ export function PublishedSnapshotsBrowser({ onOpenPublishModal, onRestoreSnapsho
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-300">{formatTime(s.timestamp)}</span>
                   <span className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded font-mono">
-                    {snapshotTriggerLabel[s.trigger]}
+                    {SNAPSHOT_TRIGGER_LABELS[s.trigger]}
                   </span>
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">

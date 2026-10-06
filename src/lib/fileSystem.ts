@@ -1,8 +1,8 @@
 import type { Book, GlobalSettings, WritinatorFile } from '../types'
-import { migrateFile } from './migration'
+import { CURRENT_FILE_VERSION, migrateFile } from './migration'
 import { getAllSnapshots } from '../stores/snapshotStore'
-import { snapshotBook } from '../stores/snapshotStore'
 import { getAllPublishedSnapshots } from '../stores/publishedSnapshotStore'
+import { showToast } from '../stores/genericToastStore'
 import { useRecentFilesStore } from '../stores/recentFilesStore'
 import { useCharacterStore } from '../stores/characterStore'
 import { useStoryletStore } from '../stores/storyletStore'
@@ -145,6 +145,11 @@ export function hasFileTetherCapability(): boolean {
 // Save
 // ---------------------------------------------------------------------------
 
+/** Keep only the entries that belong to one of `storyletIds`. */
+function pickStorylets<T>(all: Record<string, T>, storyletIds: Set<string>): Record<string, T> {
+  return Object.fromEntries(Object.entries(all).filter(([id]) => storyletIds.has(id)))
+}
+
 /**
  * Builds the full WritinatorFile object from current store state.
  * Exported so tests and visual QA can call it without triggering a file picker.
@@ -155,11 +160,14 @@ export async function buildWritinatorFile(
   saveCounter: number,
   saveId?: string
 ): Promise<WritinatorFile> {
-  const snapshots = await getAllSnapshots()
-  const publishedSnapshots = await getAllPublishedSnapshots()
+  // Browser storage holds history for every book opened here; the file only
+  // carries this book's.
+  const storyletIds = new Set(book.storylets.map((s) => s.id))
+  const snapshots = pickStorylets(await getAllSnapshots(), storyletIds)
+  const publishedSnapshots = pickStorylets(await getAllPublishedSnapshots(), storyletIds)
   const { characters, markers } = useCharacterStore.getState()
   const file: WritinatorFile = {
-    version: 8,
+    version: CURRENT_FILE_VERSION,
     book,
     snapshots,
     publishedSnapshots,
@@ -176,7 +184,9 @@ export async function buildWritinatorFile(
   return file
 }
 
-export async function saveFile(
+/** Writes a new save of the book to the connected file (or, with nothing
+ *  connected, downloads it) and records it as the last save. */
+async function saveFile(
   book: Book,
   globalSettings: GlobalSettings
 ): Promise<void> {
@@ -185,11 +195,7 @@ export async function saveFile(
   const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1, saveId)
   const json = JSON.stringify(file, null, 2)
 
-  if (isTauri()) {
-    await saveWithTauri(json, book.title)
-  } else if (supportsFileSystemAccess()) {
-    await saveWithFileSystemAccess(json, book.title)
-  } else {
+  if (!(await writeToStoredFile(json))) {
     saveWithDownload(json, book.title)
   }
   useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now(), { saveId, book })
@@ -231,10 +237,16 @@ export async function quickSave(
 ): Promise<boolean> {
   if (!storedFileHandle && !storedFilePath) return false
 
+  const onDisk = await readStoredFile()
+  if (onDisk && isNewerFileVersion(onDisk.text)) {
+    // Saving would downgrade it and drop whatever the newer app stored.
+    showToast('Not saved: the file was last saved by a newer version of Writinator. Update the app to keep working on it.', 'error')
+    return true
+  }
+
   // Never overwrite a version of the file this app hasn't seen. Reconcile
   // instead: it reloads the file, or keeps local edits and files the disk
   // version in History, after which the next save goes through.
-  const onDisk = await readStoredFile()
   const diskFile = onDisk ? parseFileJSON(onDisk.text) : null
   if (diskFile && fileChangedSinceLastSync(diskFile)) {
     const { reconcileWithFile } = await import('./reconcile')
@@ -242,210 +254,75 @@ export async function quickSave(
     return true
   }
 
-  const currentCounter = useStoryletStore.getState().lastSavedCounter
-  const saveId = crypto.randomUUID()
-  const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1, saveId)
-  const json = JSON.stringify(file, null, 2)
-
-  if (storedFilePath) {
-    await writeTauriTextFile(storedFilePath, json)
-  } else if (storedFileHandle) {
-    const writable = await storedFileHandle.createWritable()
-    await writable.write(json)
-    await writable.close()
-  }
-  lastLocalWriteAt = Date.now()
-  useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now(), { saveId, book })
+  await saveFile(book, globalSettings)
   return true
 }
 
-/**
- * Opens the save picker. If the picked file already contains a valid
- * WritinatorFile, does NOT overwrite — instead orphan-snapshots the current
- * book and loads the file's content. Returns 'saved' if the file was written
- * or 'loaded' if the file's content was loaded instead of overwritten, or
- * 'cancelled' if the user cancelled. Null return for unsupported browsers.
- */
-export async function saveAsNewFile(
-  book: Book,
-  globalSettings: GlobalSettings
-): Promise<'saved' | 'loaded' | 'cancelled' | null> {
-  if (isTauri()) {
-    return await saveAsNewFileTauri(book, globalSettings)
-  }
-
-  if (!supportsFileSystemAccess()) {
-    storedFileHandle = null
-    notifyHandleChange()
-    await saveFile(book, globalSettings)
-    return 'saved'
-  }
-
-  let handle: FileSystemFileHandle
-  try {
-    handle = await window.showSaveFilePicker({
-      suggestedName: `${sanitizeFilename(book.title)}${FILE_EXTENSION}`,
-      types: [
-        {
-          description: 'Writinator Book',
-          accept: { [MIME_TYPE]: [FILE_EXTENSION] },
-        },
-      ],
-    })
-  } catch {
-    return 'cancelled'
-  }
-
-  // Check if the picked file already contains a valid WritinatorFile.
-  // If so, prefer loading over clobbering.
-  try {
-    const existing = await handle.getFile()
-    if (existing.size > 0) {
-      const text = await existing.text()
-      const parsed = parseFileJSON(text)
-      if (parsed) {
-        const currentBook = useStoryletStore.getState().book
-        if (currentBook) {
-          await snapshotBook(currentBook, 'orphan')
-        }
-        storedFileHandle = handle
-        notifyHandleChange()
-        useRecentFilesStore.getState().addRecent({
-          handle,
-          name: handle.name,
-          lastOpenedAt: Date.now(),
-        })
-        await useStoryletStore.getState().loadFile(parsed)
-        useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
-        return 'loaded'
-      }
-    }
-  } catch (err) {
-    console.warn('saveAsNewFile: could not inspect existing file, proceeding with save:', err)
-  }
-
-  // File is empty or not a Writinator file — safe to write.
-  storedFileHandle = handle
-  notifyHandleChange()
-  useRecentFilesStore.getState().addRecent({
-    handle,
-    name: handle.name,
-    lastOpenedAt: Date.now(),
-  })
-  await saveFile(book, globalSettings)
-  return 'saved'
-}
-
-/**
- * "Create new book" flow: opens the save picker FIRST (synchronously from the
- * click handler, so transient user activation is preserved), then either:
- *   - 'loaded':    the picked file already contains a valid book → load it
- *   - 'created':   the file is empty/new → create a book using the filename
- *                  (sans extension) as the book title and write it to disk
- *   - 'cancelled': user dismissed the picker → no state change
- *
- * Returns null on unsupported browsers (caller should fall back to a download
- * flow). On 'created', current book (if any) is orphan-snapshotted first.
- */
-export async function createBookWithFile(
-  suggestedTitle: string
-): Promise<'created' | 'loaded' | 'cancelled' | null> {
-  if (isTauri()) {
-    return await createBookWithFileTauri(suggestedTitle)
-  }
-
-  if (!supportsFileSystemAccess()) return null
-
-  let handle: FileSystemFileHandle
-  try {
-    handle = await window.showSaveFilePicker({
-      suggestedName: `${sanitizeFilename(suggestedTitle)}${FILE_EXTENSION}`,
-      types: [
-        {
-          description: 'Writinator Book',
-          accept: { [MIME_TYPE]: [FILE_EXTENSION] },
-        },
-      ],
-    })
-  } catch {
-    return 'cancelled'
-  }
-
-  // If the picked file already holds a valid Writinator book, prefer loading
-  // over clobbering — user almost certainly meant to "Open" that file.
-  try {
-    const existing = await handle.getFile()
-    if (existing.size > 0) {
-      const text = await existing.text()
-      const parsed = parseFileJSON(text)
-      if (parsed) {
-        const currentBook = useStoryletStore.getState().book
-        if (currentBook) {
-          await snapshotBook(currentBook, 'orphan')
-        }
-        storedFileHandle = handle
-        notifyHandleChange()
-        useRecentFilesStore.getState().addRecent({
-          handle,
-          name: handle.name,
-          lastOpenedAt: Date.now(),
-        })
-        await useStoryletStore.getState().loadFile(parsed)
-        useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
-        return 'loaded'
-      }
-    }
-  } catch (err) {
-    console.warn('createBookWithFile: could not inspect existing file, proceeding with create:', err)
-  }
-
-  // Derive the book title from the chosen filename (strip extension). Falls
-  // back to suggestedTitle if the user typed something nonsensical.
-  const filenameTitle = handle.name.replace(new RegExp(`${FILE_EXTENSION}$`), '').trim()
-  const title = filenameTitle || suggestedTitle
-
-  await useStoryletStore.getState().createBook(title)
-  storedFileHandle = handle
-  notifyHandleChange()
-  useRecentFilesStore.getState().addRecent({
-    handle,
-    name: handle.name,
-    lastOpenedAt: Date.now(),
-  })
-
-  const book = useStoryletStore.getState().book
-  const globalSettings = useStoryletStore.getState().globalSettings
-  if (book) {
-    await saveFile(book, globalSettings)
-  }
-  return 'created'
-}
-
 // ---------------------------------------------------------------------------
-// Open
+// Picking a file (shared by Save As, New Book and Open)
 // ---------------------------------------------------------------------------
 
-export async function openFile(): Promise<WritinatorFile | null> {
-  if (isTauri()) {
-    return openWithTauri()
-  }
-  if (supportsFileSystemAccess()) {
-    return openWithFileSystemAccess()
-  }
-  return openWithFileInput()
+/** A file the book can be connected to: a File System Access handle in the
+ *  browser, or a filesystem path in the desktop app. */
+type FileTarget =
+  | { handle: FileSystemFileHandle; path?: undefined }
+  | { path: string; handle?: undefined }
+
+const PICKER_TYPES = [
+  {
+    description: 'Writinator Book',
+    accept: { [MIME_TYPE]: [FILE_EXTENSION] },
+  },
+]
+
+function targetName(target: FileTarget): string {
+  return target.handle ? target.handle.name : tauriBasename(target.path)
 }
 
-async function openWithFileSystemAccess(): Promise<WritinatorFile | null> {
-  const [handle] = await window.showOpenFilePicker({
-    types: [
-      {
-        description: 'Writinator Book',
-        accept: { [MIME_TYPE]: [FILE_EXTENSION] },
-      },
-    ],
-    multiple: false,
-  })
+/** Connect the book to `target` and list it in Recent Files. */
+function tetherTo(target: FileTarget): void {
+  storedFilePath = target.path ?? null
+  storedFileHandle = target.handle ?? null
+  notifyHandleChange()
+  useRecentFilesStore.getState().addRecent(
+    target.handle
+      ? { handle: target.handle, name: targetName(target), lastOpenedAt: Date.now() }
+      : { path: target.path, name: targetName(target), lastOpenedAt: Date.now() }
+  )
+}
 
+async function readTarget(target: FileTarget): Promise<string> {
+  if (!target.handle) return readTauriTextFile(target.path)
+  const file = await target.handle.getFile()
+  return file.text()
+}
+
+/** Show the save picker. Null when the user cancels. */
+async function pickSaveTarget(suggestedTitle: string): Promise<FileTarget | null> {
+  const suggestedName = `${sanitizeFilename(suggestedTitle)}${FILE_EXTENSION}`
+  if (isTauri()) {
+    const path = await showTauriSaveDialog({ suggestedName })
+    return path ? { path } : null
+  }
+  try {
+    return { handle: await window.showSaveFilePicker({ suggestedName, types: PICKER_TYPES }) }
+  } catch {
+    return null
+  }
+}
+
+/** Show the open picker. Null when the user cancels. */
+async function pickOpenTarget(): Promise<FileTarget | null> {
+  if (isTauri()) {
+    const path = await showTauriOpenDialog()
+    return path ? { path } : null
+  }
+  let handle: FileSystemFileHandle
+  try {
+    ;[handle] = await window.showOpenFilePicker({ types: PICKER_TYPES, multiple: false })
+  } catch {
+    return null
+  }
   // Open picker grants read-only. Request readwrite immediately while user
   // activation is still live, so future saves don't trigger a second dialog.
   try {
@@ -459,23 +336,115 @@ async function openWithFileSystemAccess(): Promise<WritinatorFile | null> {
   } catch {
     // requestPermission not supported — fall back to being prompted on first write
   }
+  return { handle }
+}
 
-  // Orphan-snapshot the current book before replacing it
-  const currentBook = useStoryletStore.getState().book
-  if (currentBook) {
-    await snapshotBook(currentBook, 'orphan')
+/**
+ * For a file picked in a save dialog: if it already holds a book, load that
+ * instead of overwriting it ('loaded'); if it holds anything else, leave it
+ * alone ('refused'). 'empty' means the file is new or empty and safe to write.
+ */
+async function claimPickedFile(target: FileTarget): Promise<'loaded' | 'refused' | 'empty'> {
+  let text: string
+  try {
+    if (!target.handle && !(await tauriFileExists(target.path))) return 'empty'
+    text = await readTarget(target)
+  } catch (err) {
+    console.warn('could not inspect the picked file, treating it as new:', err)
+    return 'empty'
+  }
+  if (text.trim() === '') return 'empty'
+
+  const parsed = parseFile(text)
+  if ('error' in parsed) {
+    showToast(`Didn't overwrite “${targetName(target)}”. ${parsed.error}`, 'warning')
+    return 'refused'
+  }
+  await useStoryletStore.getState().loadFile(parsed.file)
+  tetherTo(target)
+  useStoryletStore.getState().setLastSaved(parsed.file.saveCounter, Date.now())
+  return 'loaded'
+}
+
+/**
+ * Opens the save picker and writes the book to the chosen file. If that file
+ * already contains a book, loads it instead of overwriting (the current book
+ * is kept in History as an orphan snapshot); if it contains anything else,
+ * leaves it untouched. On browsers without file access, downloads a copy.
+ */
+export async function saveAsNewFile(
+  book: Book,
+  globalSettings: GlobalSettings
+): Promise<'saved' | 'loaded' | 'refused' | 'cancelled'> {
+  if (!hasFileTetherCapability()) {
+    clearFileHandle()
+    await saveFile(book, globalSettings)
+    return 'saved'
   }
 
-  storedFileHandle = handle
-  notifyHandleChange()
-  useRecentFilesStore.getState().addRecent({
-    handle,
-    name: handle.name,
-    lastOpenedAt: Date.now(),
-  })
-  const file = await handle.getFile()
-  const text = await file.text()
-  return parseFileJSON(text)
+  const target = await pickSaveTarget(book.title)
+  if (!target) return 'cancelled'
+  const claimed = await claimPickedFile(target)
+  if (claimed !== 'empty') return claimed
+
+  tetherTo(target)
+  await saveFile(book, globalSettings)
+  return 'saved'
+}
+
+/**
+ * "Create new book" flow: opens the save picker FIRST (synchronously from the
+ * click handler, so transient user activation is preserved), then either:
+ *   - 'loaded':    the picked file already contains a valid book → load it
+ *   - 'refused':   the picked file holds something else → left untouched
+ *   - 'created':   the file is empty/new → create a book using the filename
+ *                  (sans extension) as the book title and write it to disk
+ *   - 'cancelled': user dismissed the picker → no state change
+ *
+ * Returns null on unsupported browsers (caller should fall back to a download
+ * flow). On 'created', current book (if any) is orphan-snapshotted first.
+ */
+export async function createBookWithFile(
+  suggestedTitle: string
+): Promise<'created' | 'loaded' | 'refused' | 'cancelled' | null> {
+  if (!hasFileTetherCapability()) return null
+
+  const target = await pickSaveTarget(suggestedTitle)
+  if (!target) return 'cancelled'
+  const claimed = await claimPickedFile(target)
+  if (claimed !== 'empty') return claimed
+
+  // Derive the book title from the chosen filename. Falls back to
+  // suggestedTitle if the user typed something nonsensical.
+  const title = stripWritinatorExt(targetName(target)).trim() || suggestedTitle
+  await useStoryletStore.getState().createBook(title)
+  tetherTo(target)
+  const { book, globalSettings } = useStoryletStore.getState()
+  if (book) await saveFile(book, globalSettings)
+  return 'created'
+}
+
+// ---------------------------------------------------------------------------
+// Open
+// ---------------------------------------------------------------------------
+
+/**
+ * Picks a file and parses it. The book is connected to the file only when it
+ * parses; otherwise the reason is shown and null returned. The caller loads
+ * the returned file into the store (which keeps the current book in History).
+ */
+export async function openFile(): Promise<WritinatorFile | null> {
+  if (!hasFileTetherCapability()) return openWithFileInput()
+
+  const target = await pickOpenTarget()
+  if (!target) return null
+  const parsed = parseFile(await readTarget(target))
+  if ('error' in parsed) {
+    showToast(`Couldn't open “${targetName(target)}”. ${parsed.error}`, 'error')
+    return null
+  }
+  tetherTo(target)
+  return parsed.file
 }
 
 function openWithFileInput(): Promise<WritinatorFile | null> {
@@ -489,13 +458,13 @@ function openWithFileInput(): Promise<WritinatorFile | null> {
         resolve(null)
         return
       }
-      // Orphan-snapshot the current book before replacing it
-      const currentBook = useStoryletStore.getState().book
-      if (currentBook) {
-        await snapshotBook(currentBook, 'orphan')
+      const parsed = parseFile(await file.text())
+      if ('error' in parsed) {
+        showToast(`Couldn't open “${file.name}”. ${parsed.error}`, 'error')
+        resolve(null)
+        return
       }
-      const text = await file.text()
-      resolve(parseFileJSON(text))
+      resolve(parsed.file)
     }
     input.click()
   })
@@ -600,32 +569,19 @@ export async function restoreStoredFileHandleFromRecents(): Promise<boolean> {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async function saveWithFileSystemAccess(
-  json: string,
-  title: string
-): Promise<void> {
-  if (!storedFileHandle) {
-    storedFileHandle = await window.showSaveFilePicker({
-      suggestedName: `${sanitizeFilename(title)}${FILE_EXTENSION}`,
-      types: [
-        {
-          description: 'Writinator Book',
-          accept: { [MIME_TYPE]: [FILE_EXTENSION] },
-        },
-      ],
-    })
-    notifyHandleChange()
-    useRecentFilesStore.getState().addRecent({
-      handle: storedFileHandle,
-      name: storedFileHandle.name,
-      lastOpenedAt: Date.now(),
-    })
+/** Writes `json` to the connected file. False when nothing is connected. */
+async function writeToStoredFile(json: string): Promise<boolean> {
+  if (storedFilePath) {
+    await writeTauriTextFile(storedFilePath, json)
+  } else if (storedFileHandle) {
+    const writable = await storedFileHandle.createWritable()
+    await writable.write(json)
+    await writable.close()
+  } else {
+    return false
   }
-
-  const writable = await storedFileHandle!.createWritable()
-  await writable.write(json)
-  await writable.close()
   lastLocalWriteAt = Date.now()
+  return true
 }
 
 function saveWithDownload(json: string, title: string): void {
@@ -640,163 +596,42 @@ function saveWithDownload(json: string, title: string): void {
   URL.revokeObjectURL(url)
 }
 
-export function parseFileJSON(text: string): WritinatorFile | null {
+/** Parse file text as a book, or say (in words fit for the user) why not. */
+export function parseFile(text: string): { file: WritinatorFile } | { error: string } {
+  let data: unknown
   try {
-    const data = JSON.parse(text)
-    return migrateFile(data)
+    data = JSON.parse(text)
   } catch {
-    return null
+    return { error: 'It isn’t a Writinator book file.' }
+  }
+  try {
+    return { file: migrateFile(data) }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'It isn’t a Writinator book file.' }
+  }
+}
+
+export function parseFileJSON(text: string): WritinatorFile | null {
+  const parsed = parseFile(text)
+  return 'file' in parsed ? parsed.file : null
+}
+
+/** Whether `text` is a book file written by a newer version of the app. */
+function isNewerFileVersion(text: string): boolean {
+  try {
+    const data: unknown = JSON.parse(text)
+    return (
+      typeof data === 'object' && data !== null &&
+      typeof (data as { version?: unknown }).version === 'number' &&
+      (data as { version: number }).version > CURRENT_FILE_VERSION
+    )
+  } catch {
+    return false
   }
 }
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_\- ]/g, '').trim() || 'untitled'
-}
-
-// ---------------------------------------------------------------------------
-// Tauri implementations (parallel to FSA helpers above)
-// ---------------------------------------------------------------------------
-
-async function saveWithTauri(json: string, title: string): Promise<void> {
-  if (!storedFilePath) {
-    const picked = await showTauriSaveDialog({
-      suggestedName: `${sanitizeFilename(title)}${FILE_EXTENSION}`,
-    })
-    if (!picked) return
-    storedFilePath = picked
-    storedFileHandle = null
-    notifyHandleChange()
-    useRecentFilesStore.getState().addRecent({
-      path: picked,
-      name: tauriBasename(picked),
-      lastOpenedAt: Date.now(),
-    })
-  }
-  await writeTauriTextFile(storedFilePath!, json)
-  lastLocalWriteAt = Date.now()
-}
-
-async function saveAsNewFileTauri(
-  book: Book,
-  globalSettings: GlobalSettings
-): Promise<'saved' | 'loaded' | 'cancelled'> {
-  const picked = await showTauriSaveDialog({
-    suggestedName: `${sanitizeFilename(book.title)}${FILE_EXTENSION}`,
-  })
-  if (!picked) return 'cancelled'
-
-  // If the picked file already holds a valid Writinator book, prefer loading
-  // over clobbering — matches the FSA flow.
-  if (await tauriFileExists(picked)) {
-    try {
-      const existing = await readTauriTextFile(picked)
-      if (existing.length > 0) {
-        const parsed = parseFileJSON(existing)
-        if (parsed) {
-          const currentBook = useStoryletStore.getState().book
-          if (currentBook) await snapshotBook(currentBook, 'orphan')
-          storedFilePath = picked
-          storedFileHandle = null
-          notifyHandleChange()
-          useRecentFilesStore.getState().addRecent({
-            path: picked,
-            name: tauriBasename(picked),
-            lastOpenedAt: Date.now(),
-          })
-          await useStoryletStore.getState().loadFile(parsed)
-          useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
-          return 'loaded'
-        }
-      }
-    } catch (err) {
-      console.warn('saveAsNewFileTauri: could not inspect existing file:', err)
-    }
-  }
-
-  storedFilePath = picked
-  storedFileHandle = null
-  notifyHandleChange()
-  useRecentFilesStore.getState().addRecent({
-    path: picked,
-    name: tauriBasename(picked),
-    lastOpenedAt: Date.now(),
-  })
-  await saveFile(book, globalSettings)
-  return 'saved'
-}
-
-async function createBookWithFileTauri(
-  suggestedTitle: string
-): Promise<'created' | 'loaded' | 'cancelled'> {
-  const picked = await showTauriSaveDialog({
-    suggestedName: `${sanitizeFilename(suggestedTitle)}${FILE_EXTENSION}`,
-  })
-  if (!picked) return 'cancelled'
-
-  if (await tauriFileExists(picked)) {
-    try {
-      const existing = await readTauriTextFile(picked)
-      if (existing.length > 0) {
-        const parsed = parseFileJSON(existing)
-        if (parsed) {
-          const currentBook = useStoryletStore.getState().book
-          if (currentBook) await snapshotBook(currentBook, 'orphan')
-          storedFilePath = picked
-          storedFileHandle = null
-          notifyHandleChange()
-          useRecentFilesStore.getState().addRecent({
-            path: picked,
-            name: tauriBasename(picked),
-            lastOpenedAt: Date.now(),
-          })
-          await useStoryletStore.getState().loadFile(parsed)
-          useStoryletStore.getState().setLastSaved(parsed.saveCounter, Date.now())
-          return 'loaded'
-        }
-      }
-    } catch (err) {
-      console.warn('createBookWithFileTauri: could not inspect existing file:', err)
-    }
-  }
-
-  const filenameTitle = stripWritinatorExt(tauriBasename(picked)).trim()
-  const title = filenameTitle || suggestedTitle
-
-  await useStoryletStore.getState().createBook(title)
-  storedFilePath = picked
-  storedFileHandle = null
-  notifyHandleChange()
-  useRecentFilesStore.getState().addRecent({
-    path: picked,
-    name: tauriBasename(picked),
-    lastOpenedAt: Date.now(),
-  })
-  const newBook = useStoryletStore.getState().book
-  const settings = useStoryletStore.getState().globalSettings
-  if (newBook) await saveFile(newBook, settings)
-  return 'created'
-}
-
-async function openWithTauri(): Promise<WritinatorFile | null> {
-  const picked = await showTauriOpenDialog()
-  if (!picked) return null
-
-  const currentBook = useStoryletStore.getState().book
-  if (currentBook) await snapshotBook(currentBook, 'orphan')
-
-  const text = await readTauriTextFile(picked)
-  const parsed = parseFileJSON(text)
-  if (!parsed) return null
-
-  storedFilePath = picked
-  storedFileHandle = null
-  notifyHandleChange()
-  useRecentFilesStore.getState().addRecent({
-    path: picked,
-    name: tauriBasename(picked),
-    lastOpenedAt: Date.now(),
-  })
-  return parsed
 }
 
 if (import.meta.env.DEV) {

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { X } from 'lucide-react'
 import { useMetricsStore } from '../../stores/metricsStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import {
+  chartYRange,
   loadSnapshotBackfill,
   mergeBucketsWithBackfill,
 } from '../../lib/metrics'
@@ -60,18 +62,17 @@ function MetricsChart({ series, showGross, showNet, showBook }: ChartProps) {
     if (showBook && p.bookWords !== null) allValues.push(p.bookWords)
   }
 
-  const maxVal = allValues.length > 0 ? Math.max(...allValues) : 0
-  const yMax = maxVal <= 0 ? 100 : Math.ceil(maxVal * 1.1)
+  const { yMin, yMax } = chartYRange(allValues)
 
   const xOf = (i: number) =>
     PADDING_LEFT + (series.length <= 1 ? INNER_W / 2 : (i / (series.length - 1)) * INNER_W)
 
-  const yOf = (v: number) => PADDING_TOP + INNER_H - (v / yMax) * INNER_H
+  const yOf = (v: number) => PADDING_TOP + INNER_H - ((v - yMin) / (yMax - yMin)) * INNER_H
 
   // Gridlines (4 horizontal)
   const gridlines = [0, 1, 2, 3].map((i) => {
     const fraction = i / 3
-    const value = Math.round(yMax * (1 - fraction))
+    const value = Math.round(yMax - (yMax - yMin) * fraction)
     const yPos = PADDING_TOP + fraction * INNER_H
     return { yPos, label: value.toLocaleString() }
   })
@@ -249,7 +250,8 @@ export function MetricsGraphModal({ open, onClose }: MetricsGraphModalProps) {
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    loadSnapshotBackfill().then((pts) => {
+    const storyletIds = useStoryletStore.getState().book?.storylets.map((s) => s.id) ?? []
+    loadSnapshotBackfill(storyletIds).then((pts) => {
       if (!cancelled) setBackfill(pts)
     })
     return () => {

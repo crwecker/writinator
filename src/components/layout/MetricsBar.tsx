@@ -1,10 +1,13 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { lazy, Suspense, useState, useRef, useEffect, useMemo } from 'react'
 import { useMetricsStore } from '../../stores/metricsStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { getMetricDisplayValue } from '../../lib/metrics'
 import { MetricsPopover } from './MetricsPopover'
-import { MetricsGraphModal } from './MetricsGraphModal'
 import type { MetricKey } from '../../types'
+
+const MetricsGraphModal = lazy(() =>
+  import('./MetricsGraphModal').then((m) => ({ default: m.MetricsGraphModal }))
+)
 
 interface MetricsBarProps {
   wordCount: number
@@ -117,7 +120,11 @@ export function MetricsBar({ wordCount, bookWordCount }: MetricsBarProps) {
         anchorRef={triggerRef}
         onShowGraph={() => { setOpen(false); setGraphOpen(true) }}
       />
-      <MetricsGraphModal open={graphOpen} onClose={() => setGraphOpen(false)} />
+      {graphOpen && (
+        <Suspense fallback={null}>
+          <MetricsGraphModal open={graphOpen} onClose={() => setGraphOpen(false)} />
+        </Suspense>
+      )}
     </div>
   )
 }

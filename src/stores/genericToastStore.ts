@@ -1,7 +1,7 @@
 // Module-level generic toast store — no React dependency.
 // Mirror of src/components/quests/rewardToastStore.ts
 
-export type ToastKind = 'info' | 'success' | 'warning'
+export type ToastKind = 'info' | 'success' | 'warning' | 'error'
 
 export interface GenericToast {
   id: string

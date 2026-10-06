@@ -1,11 +1,11 @@
 import type { EditorView } from '@codemirror/view'
 import type { Book } from '../types'
 import { useStoryletStore } from '../stores/storyletStore'
+import { escapeRegExp } from './regex'
 
 /** Regex for one specific `<!-- kind:id -->` marker comment. */
 export function markerCommentRegex(kind: 'stat' | 'note', id: string): RegExp {
-  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`<!--\\s*${kind}:${escaped}\\s*-->`)
+  return new RegExp(`<!--\\s*${kind}:${escapeRegExp(id)}\\s*-->`)
 }
 
 export interface RemoveMarkerOptions {

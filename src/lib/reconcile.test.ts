@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { reconcileWithFile } from './reconcile'
 import { clearFileHandle, quickSave, setStoredFileHandle } from './fileSystem'
 import { useStoryletStore } from '../stores/storyletStore'
+import { useCharacterStore } from '../stores/characterStore'
 import { getSnapshots } from '../stores/snapshotStore'
 import { createPublishedSnapshot, getPublishedSnapshots } from '../stores/publishedSnapshotStore'
 import type { WritinatorFile } from '../types'
-import { makeBook, makeFile, makeStorylet, seedStore, storyletContent } from '../test/fixtures'
+import { delta, makeBook, makeCharacter, makeFile, makeStorylet, seedStore, storyletContent } from '../test/fixtures'
 
 /** A fake File System Access handle backed by a string. */
 function fakeDisk(initial: WritinatorFile) {
@@ -142,5 +143,50 @@ describe('published snapshot history', () => {
 
     const published = await getPublishedSnapshots('a')
     expect(published.map((p) => p.content)).toContain('Published chapter text')
+  })
+})
+
+describe('diverged: things that exist only on disk', () => {
+  it('are merged into the local book so the next save keeps them', async () => {
+    const mine = makeFile(bookWith('saved text'), { saveCounter: 3, saveId: 'save-mine' })
+    const disk = fakeDisk(mine)
+    await openFile(mine)
+    useCharacterStore.setState({
+      characters: [makeCharacter('hero', [], {})],
+      markers: { m1: [delta('hero', { kind: 'adjust', statId: 'hp', delta: 1 }, '0000-local-d-0-0')] },
+    })
+    store().updateStoryletContent('my unsaved edits')
+    store()._flushContentUpdate()
+
+    const diskBook = makeBook([
+      makeStorylet('a', 'their edit of a'),
+      makeStorylet('b', 'a chapter added on the other device'),
+      makeStorylet('c', 'child of b', { parentId: 'b' }),
+    ])
+    disk.replace(makeFile(diskBook, {
+      saveCounter: 4,
+      saveId: 'save-theirs',
+      characters: [makeCharacter('hero', [], {}), makeCharacter('villain', [], {})],
+      markers: {
+        m1: [delta('hero', { kind: 'adjust', statId: 'hp', delta: 99 }, '0000-disk-d-0-0')],
+        m2: [delta('villain', { kind: 'adjust', statId: 'hp', delta: 2 }, '0000-disk-d2-0-0')],
+      },
+    }))
+    const result = await reconcileWithFile()
+
+    expect(result.kind).toBe('diverged')
+    const storylets = store().book!.storylets
+    expect(storylets.map((s) => s.id)).toEqual(['a', 'b', 'c'])
+    expect(storyletContent('a')).toBe('my unsaved edits')
+    expect(storylets[1].name).toBe('b (from disk)')
+    expect(storylets[1].content).toBe('a chapter added on the other device')
+    expect(storylets[2].parentId).toBe('b')
+    const chars = useCharacterStore.getState()
+    expect(chars.characters.map((c) => c.id)).toEqual(['hero', 'villain'])
+    expect(chars.markers.m1[0].id).toBe('0000-local-d-0-0')
+    expect(chars.markers.m2[0].id).toBe('0000-disk-d2-0-0')
+
+    await quickSave(store().book!, store().globalSettings)
+    expect(disk.read().book.storylets.map((s) => s.id)).toEqual(['a', 'b', 'c'])
   })
 })

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import type { ReplacePreview, ReplacePreviewMatch } from '../../types'
+import { MAX_MATCHES_PER_STORYLET } from '../../lib/bookSearch'
 
 interface Props {
   open: boolean
@@ -117,9 +118,14 @@ function PreviewSection({ preview }: PreviewSectionProps) {
         </span>
       </div>
       <div className="flex flex-col gap-1.5">
-        {preview.matches.map((m, idx) => (
+        {preview.matches.slice(0, MAX_MATCHES_PER_STORYLET).map((m, idx) => (
           <DiffRow key={`${m.start}-${idx}`} match={m} />
         ))}
+        {preview.matches.length > MAX_MATCHES_PER_STORYLET && (
+          <div className="text-xs text-gray-500 px-1">
+            …and {preview.matches.length - MAX_MATCHES_PER_STORYLET} more (all will be replaced)
+          </div>
+        )}
       </div>
     </div>
   )

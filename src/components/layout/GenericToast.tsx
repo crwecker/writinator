@@ -11,7 +11,9 @@ function ToastItem({ toast }: { toast: GenericToastType }) {
       ? 'border-green-400'
       : toast.kind === 'warning'
         ? 'border-amber-400'
-        : 'border-blue-400'
+        : toast.kind === 'error'
+          ? 'border-red-400'
+          : 'border-blue-400'
 
   return (
     <div

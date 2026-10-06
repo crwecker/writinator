@@ -155,3 +155,29 @@ describe('EPUB export', () => {
     expect(xhtml).not.toContain('&lt;')
   })
 })
+
+describe('RTF export of non-Latin text', () => {
+  it('writes characters above U+7FFF as signed 16-bit values and emoji as surrogate pairs', () => {
+    const rtf = buildRtf(makeBook([makeStorylet('ch1', '漢 😀', { name: 'Ch' })]))
+    // 漢 is U+6F22 (28450); 😀 is U+1F600 → surrogates D83D DE00.
+    expect(rtf).toContain('\\u28450?')
+    expect(rtf).toContain('\\u-10179?\\u-8704?')
+    const decoded = rtf.replace(/\\u(-?\d+)\?/g, (_m, n: string) => String.fromCharCode(Number(n)))
+    expect(decoded).toContain('漢 😀')
+    // U+FF01 (fullwidth !) is above U+7FFF.
+    expect(buildRtf(makeBook([makeStorylet('ch1', '！', { name: 'Ch' })]))).toContain('\\u-255?')
+  })
+})
+
+describe('DOCX export of block quotes', () => {
+  it('keeps lists and nested quotes inside a quote', async () => {
+    const quoted = ['> Intro line', '>', '> - first item', '> - second item', '>', '> > nested quote'].join('\n')
+    const buffer = await Packer.toBuffer(await buildDocx(makeBook([makeStorylet('ch1', quoted, { name: 'Ch' })])))
+    const zip = await JSZip.loadAsync(buffer)
+    const xml = await zip.file('word/document.xml')!.async('string')
+    expect(xml).toContain('Intro line')
+    expect(xml).toContain('first item')
+    expect(xml).toContain('second item')
+    expect(xml).toContain('nested quote')
+  })
+})

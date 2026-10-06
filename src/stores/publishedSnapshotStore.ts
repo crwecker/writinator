@@ -1,16 +1,10 @@
 import * as localforage from 'localforage'
+import { createKeyedQueue } from '../lib/keyedQueue'
 import type { PublishedSnapshot } from '../types'
 
 const STORAGE_PREFIX = 'writinator-published-'
 
-const writeQueues = new Map<string, Promise<unknown>>()
-
-function enqueue<T>(storyletId: string, fn: () => Promise<T>): Promise<T> {
-  const prev = writeQueues.get(storyletId) ?? Promise.resolve()
-  const next = prev.then(fn, fn)
-  writeQueues.set(storyletId, next)
-  return next
-}
+const enqueue = createKeyedQueue()
 
 async function loadPublished(storyletId: string): Promise<PublishedSnapshot[]> {
   return (await localforage.getItem<PublishedSnapshot[]>(STORAGE_PREFIX + storyletId)) ?? []

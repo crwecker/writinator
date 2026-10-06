@@ -83,18 +83,6 @@ export function computeWPM(
 }
 
 /**
- * Returns the gross and net totals for the current session.
- * Returns {gross: 0, net: 0} when no session is active.
- */
-export function currentSessionTotals(state: MetricsState): {
-  gross: number
-  net: number
-} {
-  if (!state.session) return { gross: 0, net: 0 }
-  return { gross: state.session.gross, net: state.session.net }
-}
-
-/**
  * Returns a human-readable label and formatted value string for a given MetricKey.
  * wpmSamples is read via metricsStore.getState() when needed — pass null to skip.
  */
@@ -161,28 +149,22 @@ export interface BackfillPoint {
   bookWords: number  // estimated total book word count that day
 }
 
+const SNAPSHOT_PREFIX = 'writinator-snapshots-'
+
 /**
- * Scans localforage for all writinator-snapshots-* keys, collapses per-storylet
- * snapshots into per-day book-wide word count estimates.
- * For each day, takes the most recent snapshot per storylet then sums across storylets.
+ * Estimates the book's word count per day from the snapshot history of its
+ * storylets (`storyletIds`). Each day uses the latest snapshot of every
+ * storylet taken that day, and the last known count for storylets that
+ * weren't snapshotted that day.
  */
-export async function loadSnapshotBackfill(): Promise<BackfillPoint[]> {
-  let keys: string[]
-  try {
-    keys = await localforage.keys()
-  } catch {
-    return []
-  }
-
-  const snapshotKeys = keys.filter((k) => k.startsWith('writinator-snapshots-'))
-
+export async function loadSnapshotBackfill(storyletIds: Iterable<string>): Promise<BackfillPoint[]> {
   // Map: dateKey -> Map<storyletId, { wordCount, ts }>
   const dateMap = new Map<string, Map<string, { wordCount: number; ts: number }>>()
 
-  for (const key of snapshotKeys) {
+  for (const storyletId of storyletIds) {
     let snapshots: Snapshot[] | null
     try {
-      snapshots = await localforage.getItem<Snapshot[]>(key)
+      snapshots = await localforage.getItem<Snapshot[]>(SNAPSHOT_PREFIX + storyletId)
     } catch {
       continue
     }
@@ -194,8 +176,6 @@ export async function loadSnapshotBackfill(): Promise<BackfillPoint[]> {
       if (isNaN(ts)) continue
 
       const dateKey = todayKey(ts)
-      const storyletId = snap.storyletId ?? key.replace('writinator-snapshots-', '')
-
       let storyletMap = dateMap.get(dateKey)
       if (!storyletMap) {
         storyletMap = new Map()
@@ -210,17 +190,17 @@ export async function loadSnapshotBackfill(): Promise<BackfillPoint[]> {
     }
   }
 
-  // For each date, sum the latest-per-storylet wordCounts
+  // Walk the days in order, carrying each storylet's count forward.
+  const lastKnown = new Map<string, number>()
   const points: BackfillPoint[] = []
-  for (const [date, storyletMap] of dateMap.entries()) {
-    let bookWords = 0
-    for (const entry of storyletMap.values()) {
-      bookWords += entry.wordCount
+  for (const date of [...dateMap.keys()].sort()) {
+    for (const [storyletId, entry] of dateMap.get(date)!) {
+      lastKnown.set(storyletId, entry.wordCount)
     }
+    let bookWords = 0
+    for (const count of lastKnown.values()) bookWords += count
     points.push({ date, bookWords })
   }
-
-  points.sort((a, b) => a.date.localeCompare(b.date))
   return points
 }
 
@@ -280,4 +260,14 @@ export function mergeBucketsWithBackfill(
       isBackfilled: !hasBucket && !isToday && bfWords !== null,
     }
   })
+}
+
+/** Y-axis range for the metrics chart covering every plotted value, with
+ *  10% headroom. Includes zero; goes below it for days with a net loss. */
+export function chartYRange(values: number[]): { yMin: number; yMax: number } {
+  const maxVal = values.length > 0 ? Math.max(...values) : 0
+  const minVal = values.length > 0 ? Math.min(...values) : 0
+  const yMin = minVal < 0 ? Math.floor(minVal * 1.1) : 0
+  const yMax = maxVal <= 0 ? (yMin < 0 ? 0 : 100) : Math.ceil(maxVal * 1.1)
+  return { yMin, yMax }
 }

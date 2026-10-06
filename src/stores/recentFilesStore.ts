@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageStructuredStorage } from './localforageStorage'
 import type { RecentFile } from '../types'
 
 interface RecentFilesState {
@@ -12,18 +12,8 @@ interface RecentFilesState {
 
 // Structured-clone storage: preserves FileSystemFileHandle across reloads.
 // JSON stringification strips handles to {} because they have no enumerable
-// properties. IndexedDB (via localforage) supports structured cloning natively.
-const localforageStorage: PersistStorage<RecentFilesState> = {
-  getItem: async (name) => {
-    return (await localforage.getItem<StorageValue<RecentFilesState>>(name)) ?? null
-  },
-  setItem: async (name, value) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name) => {
-    await localforage.removeItem(name)
-  },
-}
+// properties.
+const localforageStorage = localforageStructuredStorage<RecentFilesState>()
 
 export const useRecentFilesStore = create<RecentFilesState>()(
   persist(

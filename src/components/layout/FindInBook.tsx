@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { compileQuery, computeReplacePreview, searchBook } from '../../lib/bookSearch'
-import { snapshotBook } from '../../stores/snapshotStore'
+import { replaceAllWithSnapshot } from '../../lib/replaceAll'
 import type {
   ReplacePreview,
   ReplaceScope,
@@ -120,12 +120,10 @@ export function FindInBook({ open, onClose, editorView }: Props) {
 
   async function handleConfirmReplace() {
     if (submitting) return
-    const currentBook = useStoryletStore.getState().book
-    if (!currentBook) return
+    if (!useStoryletStore.getState().book) return
     setSubmitting(true)
     try {
-      await snapshotBook(currentBook, 'bulkReplace')
-      const result = useStoryletStore.getState().replaceAllInBook(
+      const result = await replaceAllWithSnapshot(
         options,
         replacement,
         scope,

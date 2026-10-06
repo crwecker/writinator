@@ -10,9 +10,6 @@ interface Props {
 
 export function PublishModal({ open, onClose }: Props) {
   const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
-  const activeStorylet = useStoryletStore((s) =>
-    s.book?.storylets.find((sl) => sl.id === s.activeStoryletId) ?? null
-  )
   const setStoryletPublishedMeta = useStoryletStore((s) => s.setStoryletPublishedMeta)
 
   const [name, setName] = useState('')
@@ -23,15 +20,17 @@ export function PublishModal({ open, onClose }: Props) {
   const overlayRef = useRef<HTMLDivElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
 
-  // Prefill name when modal opens
+  // Prefill name when the modal opens or the storylet changes — not on every
+  // update to the storylet (a background save would wipe what was typed).
   useEffect(() => {
-    if (open && activeStorylet) {
-      setName(activeStorylet.name)
-      setVersion('')
-      setLabel('')
-      setSubmitting(false)
-    }
-  }, [open, activeStorylet])
+    if (!open || !activeStoryletId) return
+    const storylet = useStoryletStore.getState().book?.storylets.find((sl) => sl.id === activeStoryletId)
+    if (!storylet) return
+    setName(storylet.name)
+    setVersion('')
+    setLabel('')
+    setSubmitting(false)
+  }, [open, activeStoryletId])
 
   // Focus name input on open
   useEffect(() => {

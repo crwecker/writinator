@@ -1,3 +1,4 @@
+import { useEffect, useSyncExternalStore } from 'react'
 import {
   getHandleState,
   restoreStoredFileHandleFromRecents,
@@ -9,6 +10,7 @@ import { useStoryletStore } from '../../stores/storyletStore'
 import { useRecentFilesStore } from '../../stores/recentFilesStore'
 import { showToast } from '../../stores/genericToastStore'
 import { tauriPathStatus } from '../../lib/tauri'
+import { getTabConflict, startTabPresence, subscribeTabConflict } from '../../lib/tabPresence'
 
 // requestPermission is a Chrome-only extension to the File System Access API
 // not yet in the TypeScript lib types.
@@ -19,6 +21,18 @@ interface FileSystemHandleWithPermission extends FileSystemFileHandle {
 export function FileConnectionBanner() {
   const locked = useIsFileLocked()
   const recentFiles = useRecentFilesStore((s) => s.recentFiles)
+  const openInAnotherTab = useSyncExternalStore(subscribeTabConflict, getTabConflict)
+
+  useEffect(() => startTabPresence(), [])
+
+  if (openInAnotherTab) {
+    return (
+      <div className="w-full bg-red-900/40 border-b border-red-500/60 text-red-100 text-sm px-4 py-2 shrink-0" role="alert">
+        <span className="font-semibold text-red-300">Open in another tab —</span>{' '}
+        this book is open in another browser tab. Edit it in one tab only; otherwise one tab’s changes will overwrite the other’s.
+      </div>
+    )
+  }
 
   // Banner state matches editor lock state 1:1 so they can never disagree.
   if (!locked) return null

@@ -4,7 +4,7 @@ import {
   openFile,
   setStoredFileHandle,
   setStoredFilePath,
-  parseFileJSON,
+  parseFile,
   createBookWithFile,
   hasFileTetherCapability,
 } from '../../lib/fileSystem'
@@ -102,8 +102,13 @@ export function LandingPage() {
           throw new Error('File no longer exists at the saved path')
         }
         const text = await readTauriTextFile(file.path)
-        const parsed = parseFileJSON(text)
-        if (!parsed) throw new Error('Could not parse file')
+        const result = parseFile(text)
+        if ('error' in result) {
+          // The file exists; keep the recent entry and say why it won't open.
+          showToast(`Couldn't open “${file.name}”. ${result.error}`, 'error')
+          return
+        }
+        const parsed = result.file
         setStoredFilePath(file.path)
         useRecentFilesStore.getState().addRecent({
           path: file.path,
@@ -127,8 +132,12 @@ export function LandingPage() {
       }
       const fileData = await file.handle.getFile()
       const text = await fileData.text()
-      const parsed = parseFileJSON(text)
-      if (!parsed) throw new Error('Could not parse file')
+      const result = parseFile(text)
+      if ('error' in result) {
+        showToast(`Couldn't open “${file.name}”. ${result.error}`, 'error')
+        return
+      }
+      const parsed = result.file
       setStoredFileHandle(file.handle)
       useRecentFilesStore.getState().addRecent({
         handle: file.handle,

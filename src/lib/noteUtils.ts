@@ -28,23 +28,3 @@ export function extractNotes(content: string): ExtractedNote[] {
 
   return results
 }
-
-/** Insert a note anchor at `pos` returning the new content. */
-export function insertNoteMarker(content: string, pos: number, id: string): string {
-  const clamped = Math.max(0, Math.min(pos, content.length))
-  const marker = `<!-- note:${id} -->`
-  return content.slice(0, clamped) + marker + content.slice(clamped)
-}
-
-/**
- * Remove the first note anchor whose identifier matches `id`.
- */
-export function removeNoteMarker(content: string, id: string): string {
-  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const re = new RegExp(`<!--\\s*note:${escaped}\\s*-->`)
-  const match = content.match(re)
-  if (match && typeof match.index === 'number') {
-    return content.slice(0, match.index) + content.slice(match.index + match[0].length)
-  }
-  return content
-}

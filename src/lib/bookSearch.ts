@@ -9,8 +9,10 @@ import type {
   StoryletSearchResult,
 } from '../types'
 import { getStoryletTreeOrder } from './characterState'
+import { escapeRegExp } from './regex'
 
-/** Maximum number of matches collected per storylet to guard against pathological regexes. */
+/** Maximum number of matches listed per storylet in search results, to keep
+ *  pathological regexes from flooding the list. Replace All is not capped. */
 export const MAX_MATCHES_PER_STORYLET = 500
 
 /** Approximate context window around each match when building snippets. */
@@ -35,7 +37,7 @@ export function compileQuery(options: SearchOptions): CompileQueryResult {
   if (query.length === 0) {
     return { error: 'Enter a search query' }
   }
-  let pattern = regex ? query : escapeRegex(query)
+  let pattern = regex ? query : escapeRegExp(query)
   if (wholeWord) {
     pattern = `\\b(?:${pattern})\\b`
   }
@@ -46,11 +48,6 @@ export function compileQuery(options: SearchOptions): CompileQueryResult {
     const message = err instanceof Error ? err.message : 'Invalid regular expression'
     return { error: message }
   }
-}
-
-/** Escape a literal string so it can be embedded safely in a RegExp source. */
-function escapeRegex(literal: string): string {
-  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /** Ranges of `<!-- … -->` comments (stat, note and statblock markers). Their
@@ -67,11 +64,11 @@ function hiddenRanges(content: string): Array<[number, number]> {
 
 /**
  * Every match of `regex` in `content` that doesn't overlap a hidden marker,
- * capped at MAX_MATCHES_PER_STORYLET. Search, preview and replace all use
- * this, so their match counts always agree. Guards against zero-width
- * matches by advancing `lastIndex` manually.
+ * up to `limit`. Search, preview and replace all use this, so they agree on
+ * what counts as a match. Guards against zero-width matches by advancing
+ * `lastIndex` manually.
  */
-export function findMatches(content: string, regex: RegExp): RegExpExecArray[] {
+export function findMatches(content: string, regex: RegExp, limit = Infinity): RegExpExecArray[] {
   // Clone the regex so callers can reuse it across storylets without stale
   // `lastIndex` state and to ensure the global flag is set.
   const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
@@ -89,7 +86,7 @@ export function findMatches(content: string, regex: RegExp): RegExpExecArray[] {
     const touchesMarker = h < hidden.length && hidden[h][0] < Math.max(end, start + 1)
     if (touchesMarker) continue
     matches.push(m)
-    if (matches.length >= MAX_MATCHES_PER_STORYLET) break
+    if (matches.length >= limit) break
   }
   return matches
 }
@@ -99,7 +96,7 @@ function collectMatchesInContent(
   content: string,
   regex: RegExp,
 ): SearchMatch[] {
-  return findMatches(content, regex).map((m) => {
+  return findMatches(content, regex, MAX_MATCHES_PER_STORYLET).map((m) => {
     const start = m.index
     const end = start + m[0].length
     return { storyletId, start, end, ...buildSnippet(content, start, end) }
@@ -273,7 +270,7 @@ function buildPreviewMatch(
 /**
  * Compute per-storylet before/after previews for a Find+Replace operation.
  * Honors the same scope semantics as `replaceAllInBook`. Storylets with no
- * matches are omitted. Capped per storylet by MAX_MATCHES_PER_STORYLET.
+ * matches are omitted. Not capped, so its counts match what Replace All does.
  */
 export function computeReplacePreview(
   book: Book,

@@ -1,21 +1,10 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageJSONStorage } from './localforageStorage'
 import type { DailyMetricBucket, MetricKey, MetricsFileData, MetricsState } from '../types'
 import { todayKey } from '../lib/metrics'
 
-const localforageStorage = createJSONStorage<MetricsState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    return value
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+const localforageStorage = localforageJSONStorage<MetricsState>()
 
 export const useMetricsStore = create<MetricsState>()(
   persist(
@@ -166,6 +155,11 @@ if (import.meta.env.DEV) {
 export function serializeMetrics(): MetricsFileData {
   const { dayBuckets, session, pinnedMetrics } = useMetricsStore.getState()
   return { dayBuckets, session, pinnedMetrics }
+}
+
+/** Clear the per-book writing history (keeps the pinned-metric preference). */
+export function resetMetrics(): void {
+  useMetricsStore.setState({ dayBuckets: {}, session: null })
 }
 
 export function hydrateMetrics(data: MetricsFileData | undefined): void {

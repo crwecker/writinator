@@ -4,16 +4,17 @@ import type {
   Character,
   CharacterState,
   DocumentStyles,
-  NamedStyle,
   Storylet,
   EquippedItem,
   StatDelta,
-  StatDefinition,
   StatValue,
 } from '../types'
 import type { Root, Content, Parent, PhrasingContent } from 'mdast'
 import JSZip from 'jszip'
 import { parseMarkdown } from './ast'
+import { namedStyleToCss } from './styleCss'
+
+export { namedStyleToCss }
 import { useCharacterStore } from '../stores/characterStore'
 import { useStoryletStore } from '../stores/storyletStore'
 import { computeStateAt } from './characterState'
@@ -21,10 +22,12 @@ import {
   STAT_MARKER_REGEX,
   STATBLOCK_MARKER_REGEX,
   parseStatblockOptions,
+  resolveStatblockDefinitions,
   statblockFields,
 } from './markerUtils'
 import { NOTE_MARKER_REGEX } from './noteUtils'
 import { expandRefs, formatStatValueInline } from './statRefs'
+import { EXPORT_VALUE_FORMAT, formatStatValue } from './statFormat'
 import { renderStoryletAsMarkdown, renderStoryletAsHtml } from './render'
 
 // ─── Helpers ────────────────────────────────────────────
@@ -219,20 +222,6 @@ export function ensureBlockSeparation(content: string): string {
   return out.join('\n')
 }
 
-/** Convert a NamedStyle to a CSS declaration block (no braces). */
-export function namedStyleToCss(style: NamedStyle): string {
-  const props: string[] = []
-  if (style.fontFamily) props.push(`font-family: ${style.fontFamily}`)
-  if (style.fontSize) props.push(`font-size: ${style.fontSize}px`)
-  if (style.lineHeight) props.push(`line-height: ${style.lineHeight}`)
-  if (style.color) props.push(`color: ${style.color}`)
-  if (style.letterSpacing) props.push(`letter-spacing: ${style.letterSpacing}`)
-  if (style.fontWeight) props.push(`font-weight: ${style.fontWeight}`)
-  if (style.fontStyle) props.push(`font-style: ${style.fontStyle}`)
-  if (style.textDecoration) props.push(`text-decoration: ${style.textDecoration}`)
-  if (style.backgroundColor) props.push(`background-color: ${style.backgroundColor}`)
-  return props.join('; ')
-}
 
 // CSS class selector for a style name. Class names with spaces become
 // multi-class selectors (`.Foo.Bar`); other CSS-unsafe chars are escaped.
@@ -273,58 +262,9 @@ export function buildDocumentStylesCss(styles: DocumentStyles | undefined): stri
 
 export type StatblockExportFormat = 'markdown' | 'html' | 'docx' | 'epub' | 'plain'
 
+/** A stat value as it reads in an exported statblock (see `EXPORT_VALUE_FORMAT`). */
 export function formatStatValueForExport(v: StatValue): string {
-  switch (v.kind) {
-    case 'number':
-      return String(v.value)
-    case 'numberWithMax':
-      return `${v.value}/${v.max}`
-    case 'text':
-      return v.value || '—'
-    case 'list':
-      return v.items.length === 0 ? '(none)' : v.items.join(', ')
-    case 'attributeSet':
-      return Object.entries(v.values)
-        .map(([k, n]) => `${k} ${n}`)
-        .join(' • ')
-    case 'rank':
-      return v.tier
-    case 'inventory':
-    case 'spellList':
-    case 'skillList':
-      return v.items.length === 0
-        ? '(none)'
-        : v.items.map((it) => it.name).join(', ')
-  }
-}
-
-const DEFAULT_STATBLOCK_FIELD_KEYS = ['hp', 'mp', 'level', 'xp', 'attributes']
-
-function resolveStatblockDefinitions(
-  character: Character,
-  fields: string[] | undefined
-): StatDefinition[] {
-  const wanted = fields && fields.length > 0 ? fields : DEFAULT_STATBLOCK_FIELD_KEYS
-  const byId = new Map(character.stats.map((s) => [s.id, s]))
-  const byName = new Map(character.stats.map((s) => [s.name.toLowerCase(), s]))
-  const resolved: StatDefinition[] = []
-  const seen = new Set<string>()
-  for (const key of wanted) {
-    const def = byId.get(key) ?? byName.get(key.toLowerCase())
-    if (def && !seen.has(def.id)) {
-      resolved.push(def)
-      seen.add(def.id)
-    }
-  }
-  if (resolved.length === 0) {
-    for (const def of character.stats) {
-      if (!seen.has(def.id)) {
-        resolved.push(def)
-        seen.add(def.id)
-      }
-    }
-  }
-  return resolved
+  return formatStatValue(v, EXPORT_VALUE_FORMAT)
 }
 
 /**
@@ -371,8 +311,7 @@ export function renderStatblockText(
 
   // HTML / DOCX / EPUB — render as a styled <div>. DOCX/EPUB may strip styles
   // but the plain text will still be readable.
-  const esc = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const esc = escapeHtml
   const rowsHtml = lines
     .map(
       (l) =>
@@ -421,10 +360,21 @@ export function getCharacterMarkerContext(
   }
 }
 
+// Same-length stand-in for a statblock marker while refs are expanded and
+// stat/note markers stripped (see processCharacterMarkers). Private-use code
+// points never appear in prose and contain no `{`, `<` or `-`.
+const STATBLOCK_PLACEHOLDER_OPEN = '\uE000'
+const STATBLOCK_PLACEHOLDER_FILL = '\uE001'
+const STATBLOCK_PLACEHOLDER_CLOSE = '\uE002'
+const STATBLOCK_PLACEHOLDER_REGEX = /\uE000\uE001*\uE002/g
+
 /**
  * Remove stat-delta markers (`<!-- stat:uuid -->`) and replace statblock
  * markers (`<!-- statblock:characterId[:fields=...] -->`) with format-specific
  * rendered text. Operates on raw document content before any markdown parsing.
+ *
+ * Every `computeStateAt` lookup uses an offset into the ORIGINAL content,
+ * which is what the stored marker offsets are measured against.
  */
 export function processCharacterMarkers(
   content: string,
@@ -433,14 +383,52 @@ export function processCharacterMarkers(
   options?: { preserveStatMarkers?: boolean; preserveNoteMarkers?: boolean }
 ): string {
   if (!content) return content
-  let out = content
 
-  // 0) Resolve inline `{HP}` / `{SnippetName}` references against effective
-  // character state at the token's offset, plus any author-defined snippets.
-  // Run BEFORE stripping stat markers so the offsets we hand to
-  // `computeStateAt` still match the original document positions of the
-  // stat-delta comments. Unrecognized tokens (e.g. `{align:center}`) stay raw
-  // for the downstream alignment pass.
+  const renderStatblock = (charId: string, rawOptions: string | undefined, offset: number): string => {
+    const character = ctx.characters.find((c) => c.id === charId)
+    if (!character) {
+      if (format === 'markdown' || format === 'plain') {
+        return `> *[missing character: ${charId}]*`
+      }
+      return `<div class="writinator-statblock-missing">[missing character: ${charId}]</div>`
+    }
+    const fields = statblockFields(parseStatblockOptions(rawOptions))
+    const computed = computeStateAt(character, ctx.book, ctx.markers, {
+      storyletId: ctx.storyletId,
+      offset,
+    })
+    const rendered = renderStatblockText(
+      character,
+      computed.state,
+      computed.effective,
+      fields,
+      format
+    )
+    // Bracket with blank lines so it becomes its own block in markdown/html.
+    return `\n\n${rendered}\n\n`
+  }
+
+  // 0) Render statblocks at their original offsets, leaving a same-length
+  // placeholder so the ref offsets in step 1 stay original too.
+  const statblocks: string[] = []
+  let out = content.replace(
+    new RegExp(STATBLOCK_MARKER_REGEX.source, 'g'),
+    (match: string, charId: string, rawOptions: string | undefined, offset: number) => {
+      statblocks.push(renderStatblock(charId, rawOptions, offset))
+      return (
+        STATBLOCK_PLACEHOLDER_OPEN +
+        STATBLOCK_PLACEHOLDER_FILL.repeat(Math.max(0, match.length - 2)) +
+        STATBLOCK_PLACEHOLDER_CLOSE
+      )
+    }
+  )
+
+  // 1) Resolve inline `{HP}` / `{SnippetName}` references against effective
+  // character state at the token's offset (refs inside a snippet resolve at
+  // the snippet token), plus any author-defined snippets. Run BEFORE
+  // stripping stat markers so the offsets still match the original document.
+  // Unrecognized tokens (e.g. `{align:center}`) stay raw for the downstream
+  // alignment pass.
   if (ctx.characters.length > 0 || ctx.snippets) {
     out = expandRefs(out, {
       characters: ctx.characters,
@@ -457,50 +445,26 @@ export function processCharacterMarkers(
     })
   }
 
-  // 1) Strip stat-delta markers (unless MD preserve flag is set).
+  // 2) Strip stat-delta markers (unless MD preserve flag is set).
   if (!options?.preserveStatMarkers) {
     out = out.replace(new RegExp(STAT_MARKER_REGEX.source, 'g'), '')
   }
 
-  // 1b) Strip note anchors (unless MD preserve flag is set). Notes never
+  // 2b) Strip note anchors (unless MD preserve flag is set). Notes never
   // appear in rendered output — they're metadata-only pointers for the panel.
   if (!options?.preserveNoteMarkers) {
     out = out.replace(new RegExp(NOTE_MARKER_REGEX.source, 'g'), '')
   }
 
-  // 2) Replace statblock markers with rendered blocks.
+  // 3) Swap the placeholders for the rendered blocks. A statblock marker that
+  // only appeared through a snippet expansion has no original offset; it
+  // renders at its position in the processed text.
+  let index = 0
+  out = out.replace(STATBLOCK_PLACEHOLDER_REGEX, () => statblocks[index++] ?? '')
   out = out.replace(
     new RegExp(STATBLOCK_MARKER_REGEX.source, 'g'),
-    (_match, charId: string, rawOptions: string | undefined, matchOffset: number) => {
-      // matchOffset from replace is the 3rd param when using a regex with groups,
-      // but the signature is (match, ...groups, offset, string). To be safe,
-      // rely on index lookup via the original content. Use indexOf fallback.
-      const actualOffset = typeof matchOffset === 'number' ? matchOffset : out.indexOf(_match)
-      const character = ctx.characters.find((c) => c.id === charId)
-      if (!character) {
-        if (format === 'markdown' || format === 'plain') {
-          return `> *[missing character: ${charId}]*`
-        }
-        return `<div class="writinator-statblock-missing">[missing character: ${charId}]</div>`
-      }
-      const fields = statblockFields(parseStatblockOptions(rawOptions))
-      const computed = computeStateAt(character, ctx.book, ctx.markers, {
-        storyletId: ctx.storyletId,
-        offset: actualOffset,
-      })
-      const rendered = renderStatblockText(
-        character,
-        computed.state,
-        computed.effective,
-        fields,
-        format
-      )
-      // Bracket with blank lines so it becomes its own block in markdown/html.
-      if (format === 'markdown' || format === 'plain') {
-        return `\n\n${rendered}\n\n`
-      }
-      return `\n\n${rendered}\n\n`
-    }
+    (_match: string, charId: string, rawOptions: string | undefined, offset: number) =>
+      renderStatblock(charId, rawOptions, offset)
   )
 
   return out
@@ -850,7 +814,13 @@ function rtfEscape(text: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/\{/g, '\\{')
     .replace(/\}/g, '\\}')
-    .replace(/[\u0080-\uFFFF]/g, (ch) => `\\u${ch.charCodeAt(0)}?`)
+    // \uN takes a signed 16-bit value; characters outside the BMP are
+    // written as their two UTF-16 surrogates (the regex has no `u` flag, so
+    // it visits each surrogate on its own).
+    .replace(/[\u0080-\uFFFF]/g, (ch) => {
+      const code = ch.charCodeAt(0)
+      return `\\u${code > 0x7fff ? code - 0x10000 : code}?`
+    })
 }
 
 function astToRtf(tree: Root): string {
@@ -985,30 +955,27 @@ export async function buildDocx(book: Book): Promise<import('docx').Document> {
     right: AlignmentType.RIGHT,
   } as const
 
-  function blockToDocx(node: Content): InstanceType<typeof Paragraph>[] {
+  /** `indentLeft` (twips) is the left indent from enclosing block quotes. */
+  function blockToDocx(node: Content, indentLeft = 0): InstanceType<typeof Paragraph>[] {
     const alignment = node.data?.align ? docxAlign[node.data.align] : undefined
+    const indent = indentLeft > 0 ? { left: indentLeft } : undefined
     switch (node.type) {
       case 'heading':
         return [new Paragraph({
           children: phrasingToRuns(node.children),
           heading: headingLevels[Math.min(node.depth - 1, 5)],
           alignment,
+          indent,
         })]
       case 'paragraph':
-        return [new Paragraph({ children: phrasingToRuns(node.children), spacing: { after: 200 }, alignment })]
+        return [new Paragraph({ children: phrasingToRuns(node.children), spacing: { after: 200 }, alignment, indent })]
       case 'blockquote':
-        return node.children.flatMap((child) => {
-          const paras = blockToDocx(child)
-          return paras.map((p) => new Paragraph({
-            ...p,
-            indent: { left: 720 },
-            children: phrasingToRuns(child.type === 'paragraph' ? child.children : []),
-          }))
-        })
+        return node.children.flatMap((child) => blockToDocx(child, indentLeft + 720))
       case 'code':
         return [new Paragraph({
           children: [new TextRun({ text: node.value, font: 'Courier New', size: 20 })],
           spacing: { after: 200 },
+          indent,
         })]
       case 'list':
         return node.children.flatMap((item) => {
@@ -1020,13 +987,14 @@ export async function buildDocx(book: Book): Promise<import('docx').Document> {
                   ? { reference: 'ordered-list', level: 0 }
                   : { reference: 'bullet-list', level: 0 },
                 spacing: { after: 100 },
+                indent,
               })]
             }
-            return blockToDocx(child)
+            return blockToDocx(child, indentLeft)
           })
         })
       case 'thematicBreak':
-        return [new Paragraph({ children: [new TextRun({ text: '───────────' })] })]
+        return [new Paragraph({ children: [new TextRun({ text: '───────────' })], indent })]
       default:
         return []
     }

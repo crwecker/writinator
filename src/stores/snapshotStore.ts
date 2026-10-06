@@ -1,19 +1,45 @@
 import * as localforage from 'localforage'
+import { createKeyedQueue } from '../lib/keyedQueue'
 import type { Book, Snapshot } from '../types'
 import { countWords } from '../lib/words'
 
-const MAX_SNAPSHOTS_PER_STORYLET = 100
 const STORAGE_PREFIX = 'writinator-snapshots-'
 
-// Serialize writes per storylet to prevent concurrent reads from clobbering each other
-const writeQueues = new Map<string, Promise<unknown>>()
-
-function enqueue<T>(storyletId: string, fn: () => Promise<T>): Promise<T> {
-  const prev = writeQueues.get(storyletId) ?? Promise.resolve()
-  const next = prev.then(fn, fn)
-  writeQueues.set(storyletId, next)
-  return next
+/** History-list label for each snapshot trigger. */
+export const SNAPSHOT_TRIGGER_LABELS: Record<Snapshot['trigger'], string> = {
+  manual: 'save',
+  switch: 'switch',
+  auto: 'auto',
+  closeBook: 'close',
+  bulkReplace: 'replace',
+  orphan: 'orphan (before new file)',
+  fileOnReconnect: 'file on reconnect',
 }
+
+/** Snapshots taken in the normal course of writing, as opposed to ones that
+ *  preserve text about to be replaced (another file, a bulk replace, a
+ *  diverged disk version) or that the user asked for. */
+const ROUTINE_TRIGGERS: ReadonlySet<Snapshot['trigger']> = new Set(['auto', 'switch'])
+const MAX_ROUTINE_PER_STORYLET = 100
+const MAX_RECOVERY_PER_STORYLET = 100
+
+/**
+ * Cap a storylet's history (newest first). Routine and recovery snapshots
+ * have separate caps, so a burst of routine snapshots can never push out the
+ * copy taken before a file was opened or text was bulk-replaced.
+ */
+export function pruneSnapshots(snapshots: Snapshot[]): Snapshot[] {
+  let routine = 0
+  let recovery = 0
+  return snapshots.filter((s) =>
+    ROUTINE_TRIGGERS.has(s.trigger)
+      ? ++routine <= MAX_ROUTINE_PER_STORYLET
+      : ++recovery <= MAX_RECOVERY_PER_STORYLET
+  )
+}
+
+// Serialize writes per storylet to prevent concurrent reads from clobbering each other
+const enqueue = createKeyedQueue()
 
 async function loadSnapshots(storyletId: string): Promise<Snapshot[]> {
   return (await localforage.getItem<Snapshot[]>(STORAGE_PREFIX + storyletId)) ?? []
@@ -47,7 +73,7 @@ export function createSnapshot(
       trigger,
     }
 
-    const updated = [snapshot, ...snapshots].slice(0, MAX_SNAPSHOTS_PER_STORYLET)
+    const updated = pruneSnapshots([snapshot, ...snapshots])
     await saveSnapshots(storyletId, updated)
     return snapshot
   })

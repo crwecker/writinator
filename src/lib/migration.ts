@@ -19,7 +19,7 @@ import type {
 /**
  * Flatten old DocumentStyles shape (body/h1/.../namedStyles) into flat Record<string, NamedStyle>.
  */
-function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
+export function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const obj = raw as Record<string, unknown>
   if (!('namedStyles' in obj)) return obj as DocumentStyles
@@ -267,21 +267,30 @@ function extractExternalSections(data: Record<string, unknown>): Pick<Writinator
   }
 }
 
+/** The file format version this app writes. */
+export const CURRENT_FILE_VERSION = 8
+
 /**
- * Migrate any file data (old/v2/v3/v4/v5/v6/v7/v8+) into a v8 WritinatorFile.
+ * Migrate any file data (old/v2/v3/v4/v5/v6/v7/v8) into a v8 WritinatorFile.
+ * Throws (with a message fit to show the user) for unrecognised or newer files.
  */
 export function migrateFile(data: unknown): WritinatorFile {
   if (!isRecord(data)) {
-    throw new Error('Invalid file: expected a JSON object')
+    throw new Error('It isn’t a Writinator book file.')
   }
 
-  // v8 — already current (or future: permissive on version > 8)
-  if (isV8File(data) || (typeof data.version === 'number' && data.version > 8)) {
-    if (typeof data.version === 'number' && data.version > 8) {
-      console.warn(`[migrateFile] file version ${data.version} is newer than expected (8); attempting to load`)
-    }
+  // Newer than this app understands: refuse rather than load it and drop the
+  // fields we don't know about on the next save.
+  if (typeof data.version === 'number' && data.version > CURRENT_FILE_VERSION) {
+    throw new Error(
+      `This file was saved by a newer version of Writinator (file format v${data.version}; this app reads up to v${CURRENT_FILE_VERSION}). Update Writinator to open it.`
+    )
+  }
+
+  // v8 — already current
+  if (isV8File(data)) {
     return {
-      version: 8,
+      version: CURRENT_FILE_VERSION,
       book: data.book as Book,
       snapshots: (data.snapshots ?? {}) as Record<string, Snapshot[]>,
       publishedSnapshots: (data.publishedSnapshots ?? {}) as Record<string, PublishedSnapshot[]>,
@@ -385,5 +394,5 @@ export function migrateFile(data: unknown): WritinatorFile {
     return migrateToV8(migrateToV7(migrateToV6(migrateToV5(v4))))
   }
 
-  throw new Error('Invalid file: unrecognized format')
+  throw new Error('It isn’t a Writinator book file (unrecognised format).')
 }
