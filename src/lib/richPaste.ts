@@ -7,6 +7,19 @@ import type { DocumentStyles, TextStyle } from '../types'
 
 let service: TurndownService | null = null
 
+// Styled spans are emitted by turndown as `%%STYLE_START:n%%…%%STYLE_END%%`
+// placeholders (raw HTML would be escaped) and turned back into <span>s by
+// restoreStylePlaceholders. `n` indexes this table, so CSS values containing
+// `%` (hsl/rgb percentages) can't collide with the placeholder syntax. Reset
+// per htmlToMarkdown call.
+let pendingStyles: string[] = []
+const MONO_CSS = "font-family: 'JetBrains Mono', monospace"
+
+function stylePlaceholder(css: string, content: string): string {
+  pendingStyles.push(css)
+  return `%%STYLE_START:${pendingStyles.length - 1}%%${content}%%STYLE_END%%`
+}
+
 function getService(): TurndownService {
   if (service) return service
 
@@ -68,7 +81,7 @@ function getService(): TurndownService {
     },
     replacement: (content) => {
       if (!content.trim()) return content
-      return `%%MONO_START%%${content.trim()}%%MONO_END%%`
+      return stylePlaceholder(MONO_CSS, content.trim())
     },
   })
 
@@ -144,7 +157,7 @@ function getService(): TurndownService {
       }
 
       if (props.length === 0) return content.trim()
-      return `%%STYLE_START:${props.join('; ')}%%${content.trim()}%%STYLE_END%%`
+      return stylePlaceholder(props.join('; '), content.trim())
     },
   })
 
@@ -416,6 +429,56 @@ function collapseTightParagraphs(doc: Document, bodyDefaults: BodyDefaults): voi
 }
 
 /**
+ * Turn style placeholders back into <span style> tags. Placeholders are paired
+ * with a stack so nested styles nest correctly. The editor (and the toolbar's
+ * span helpers) only pair span tags within a single line, so spans never cross
+ * a newline: at each line break every open span is closed and reopened on the
+ * next line. Unmatched placeholders are dropped rather than leaked as text.
+ */
+function restoreStylePlaceholders(md: string, styles: readonly string[]): string {
+  const tokenRe = /%%STYLE_START:(\d+)%%|%%STYLE_END%%|\n/g
+  const stack: string[] = [] // CSS of styles open at the current point
+  let open = 0 // how many of `stack` have an emitted <span> on this line
+  const lines: string[] = []
+  let line = ''
+  let last = 0
+  const writeText = (text: string) => {
+    if (!text) return
+    // Open spans lazily so a line break right after a START doesn't leave an
+    // empty <span></span> behind.
+    while (open < stack.length) line += `<span style="${stack[open++]}">`
+    line += text
+  }
+  const endLine = () => {
+    // Keep a hard-break's trailing spaces outside the spans.
+    let k = line.length
+    while (k > 0 && (line[k - 1] === ' ' || line[k - 1] === '\t')) k--
+    lines.push(line.slice(0, k) + '</span>'.repeat(open) + line.slice(k))
+    line = ''
+    open = 0
+  }
+  let m: RegExpExecArray | null
+  while ((m = tokenRe.exec(md)) !== null) {
+    writeText(md.slice(last, m.index))
+    last = m.index + m[0].length
+    if (m[0] === '\n') {
+      endLine()
+    } else if (m[1] !== undefined) {
+      stack.push(styles[Number(m[1])] ?? '')
+    } else if (stack.length > 0) {
+      if (open === stack.length) {
+        line += '</span>'
+        open--
+      }
+      stack.pop()
+    }
+  }
+  writeText(md.slice(last))
+  endLine()
+  return lines.join('\n')
+}
+
+/**
  * Convert rich HTML to Markdown, preserving bold, italic, fonts, and sizes.
  * Returns the markdown and the detected body font family (lowercase).
  */
@@ -443,13 +506,9 @@ export function htmlToMarkdown(html: string): { markdown: string; bodyFont: stri
   const cleaned = doc.body?.innerHTML || ''
 
   const td = getService()
-  let md = td.turndown(cleaned)
-
-  // Restore style spans from placeholders
-  md = md.replace(/%%MONO_START%%(.*?)%%MONO_END%%/g,
-    (_, content) => `<span style="font-family: 'JetBrains Mono', monospace">${content}</span>`)
-  md = md.replace(/%%STYLE_START:([^%]+)%%(.*?)%%STYLE_END%%/g,
-    (_, style, content) => `<span style="${style}">${content}</span>`)
+  pendingStyles = []
+  let md = restoreStylePlaceholders(td.turndown(cleaned), pendingStyles)
+  pendingStyles = []
 
   // Clean up excessive blank lines
   md = md.replace(/\n{3,}/g, '\n\n')

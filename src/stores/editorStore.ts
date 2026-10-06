@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageJSONStorage } from './localforageStorage'
 import type { EditorPreferences, RightPanelTab } from '../types'
 
 interface EditorState extends EditorPreferences {
@@ -26,18 +26,7 @@ interface EditorState extends EditorPreferences {
 
 const RECENT_COLORS_MAX = 8
 
-const localforageStorage = createJSONStorage<EditorState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    return value
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+const localforageStorage = localforageJSONStorage<EditorState>()
 
 export const useEditorStore = create<EditorState>()(
   persist(

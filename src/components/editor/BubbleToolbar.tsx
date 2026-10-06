@@ -5,23 +5,16 @@ import { useCharacterStore } from '../../stores/characterStore'
 import { useEditorStore } from '../../stores/editorStore'
 import type { NamedStyle } from '../../types'
 import { DEFAULT_STYLE_NAMES } from '../../types'
+import { namedStyleToCss } from '../../lib/styleCss'
+import { insertStatMarkerAtSelection } from './statMarkerInsert'
+import { addViewUpdateListener } from './viewUpdateListener'
+import { escapeRegExp } from '../../lib/regex'
 
 interface BubbleToolbarProps {
   editorView: EditorView | null
   onInsertMarker?: (markerId: string) => void
   onInsertNote?: () => void
   onEditStyles?: () => void
-}
-
-function insertStatMarkerAtSelection(
-  view: EditorView,
-  onInsert: (markerId: string) => void
-) {
-  const { to } = view.state.selection.main
-  const markerId = crypto.randomUUID()
-  const insert = `<!-- stat:${markerId} -->`
-  view.dispatch({ changes: { from: to, to: to, insert } })
-  onInsert(markerId)
 }
 
 /**
@@ -281,8 +274,8 @@ function wrapSelection(view: EditorView, before: string, after: string) {
     }
   } else {
     // Multi-line: check if ALL non-empty lines are wrapped
-    const escBefore = before.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const escAfter = after.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const escBefore = escapeRegExp(before)
+    const escAfter = escapeRegExp(after)
     const wrapRe = new RegExp(`^${escBefore}(.*)${escAfter}$`)
     const allWrapped = lines.every((line) => !line.trim() || wrapRe.test(line))
     if (allWrapped) {
@@ -798,20 +791,6 @@ function clearFormattingInSelection(view: EditorView) {
   view.focus()
 }
 
-function styleToCSS(style: NamedStyle): string {
-  const parts: string[] = []
-  if (style.fontFamily) parts.push(`font-family: ${style.fontFamily}`)
-  if (style.fontSize) parts.push(`font-size: ${style.fontSize}px`)
-  if (style.lineHeight) parts.push(`line-height: ${style.lineHeight}`)
-  if (style.color) parts.push(`color: ${style.color}`)
-  if (style.letterSpacing) parts.push(`letter-spacing: ${style.letterSpacing}`)
-  if ('fontWeight' in style && style.fontWeight) parts.push(`font-weight: ${style.fontWeight}`)
-  if ('fontStyle' in style && style.fontStyle) parts.push(`font-style: ${style.fontStyle}`)
-  if ('textDecoration' in style && style.textDecoration) parts.push(`text-decoration: ${style.textDecoration}`)
-  if ('backgroundColor' in style && style.backgroundColor) parts.push(`background-color: ${style.backgroundColor}`)
-  return parts.join('; ')
-}
-
 function wrapLineWithSpanClass(line: string, className: string): string | null {
   // Line is wholly wrapped in a class span — toggle off (same class) or swap class.
   const wholeClassMatch = line.match(/^<span\s+class="([^"]*)">(.*)<\/span>$/)
@@ -891,29 +870,34 @@ export default function BubbleToolbar({ editorView, onInsertMarker, onInsertNote
     })
   }, [editorView])
 
+  // Reposition on anything that can move the selection or its on-screen
+  // coordinates: selection/doc/geometry updates (covers mouse, keyboard and
+  // VIM visual mode alike), scrolling (the toolbar is position: fixed), and
+  // window resizes. Coalesced into one measurement per animation frame.
   useEffect(() => {
     if (!editorView) return
-
-    const handler = () => {
-      // Use requestAnimationFrame to ensure coords are available after selection update
-      requestAnimationFrame(updatePosition)
+    let frame = 0
+    const schedule = () => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        updatePosition()
+      })
     }
-
-    // Listen for selection changes via DOM events
-    editorView.contentDOM.addEventListener('mouseup', handler)
-    editorView.contentDOM.addEventListener('keyup', handler)
-
+    const detach = addViewUpdateListener(editorView, (update) => {
+      if (update.selectionSet || update.docChanged || update.geometryChanged || update.viewportChanged) {
+        schedule()
+      }
+    })
+    editorView.scrollDOM.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    schedule()
     return () => {
-      editorView.contentDOM.removeEventListener('mouseup', handler)
-      editorView.contentDOM.removeEventListener('keyup', handler)
+      detach()
+      editorView.scrollDOM.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+      if (frame) cancelAnimationFrame(frame)
     }
-  }, [editorView, updatePosition])
-
-  // Also poll on a fast interval to catch vim visual mode selections
-  useEffect(() => {
-    if (!editorView) return
-    const interval = setInterval(updatePosition, 200)
-    return () => clearInterval(interval)
   }, [editorView, updatePosition])
 
   if (!position || !editorView) return null
@@ -1080,7 +1064,7 @@ export default function BubbleToolbar({ editorView, onInsertMarker, onInsertNote
                 } else {
                   const found = defaultStyles.find((d) => d.key === val)
                   if (found?.style) {
-                    const css = styleToCSS(found.style)
+                    const css = namedStyleToCss(found.style)
                     if (css) wrapWithSpanStyle(editorView, css)
                   }
                 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { EditorView, keymap, placeholder, drawSelection, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view'
-import { EditorState, Compartment, StateEffect, RangeSet, type Extension } from '@codemirror/state'
+import { EditorView, keymap, placeholder, drawSelection, ViewPlugin, type ViewUpdate } from '@codemirror/view'
+import { EditorState, Compartment, type Extension } from '@codemirror/state'
 import { defaultKeymap, historyKeymap } from '@codemirror/commands'
 import {
   autocompletion,
@@ -36,11 +36,10 @@ import {
 } from './noteMarkerExtension'
 import type { DocumentStyles } from '../../types'
 import type { VimMode } from './VimStatusLine'
-import {
-  renderModeField,
-  setRenderModeEffect,
-  shouldHideMarkdown,
-} from './renderMode'
+import { renderModeField, setRenderModeEffect } from './renderMode'
+import { markdownDecorationPlugin, docStylesChangedEffect } from './markdownDecorations'
+import { countWords } from '../../lib/words'
+import { isWritingUpdate, wordCountDelta } from './wordCount'
 import {
   editorHistory,
   isProgrammaticLoad,
@@ -64,10 +63,13 @@ const FONT_FAMILY_MAP: Record<string, string> = {
   mono: "'JetBrains Mono', monospace",
 }
 
-function countWords(text: string): number {
-  const trimmed = text.trim()
-  if (!trimmed) return 0
-  return trimmed.split(/\s+/).length
+// Map the vim adapter's mode names ('insert', 'replace', 'visual', 'normal')
+// to the status-line labels.
+function vimModeLabel(mode: string): VimMode {
+  if (mode === 'insert') return 'INSERT'
+  if (mode === 'replace') return 'REPLACE'
+  if (mode === 'visual') return 'VISUAL'
+  return 'NORMAL'
 }
 
 function makeFontTheme(fontFamily: string): Extension {
@@ -98,393 +100,6 @@ function makeDocStylesTheme(styles: DocumentStyles | undefined): Extension {
   }
   return Object.keys(rules).length ? EditorView.theme(rules) : []
 }
-
-// Effect dispatched when documentStyles changes so the decoration plugin re-runs
-const docStylesChangedEffect = StateEffect.define<null>()
-
-// Markdown decoration plugin
-function markdownDecorations(view: EditorView): { decorations: DecorationSet; atomicRanges: DecorationSet } {
-  const decorations: { from: number; to: number; deco: Decoration }[] = []
-  const atomicEntries: { from: number; to: number; deco: Decoration }[] = []
-
-  const pushReplace = (from: number, to: number) => {
-    const deco = Decoration.replace({})
-    decorations.push({ from, to, deco })
-    atomicEntries.push({ from, to, deco })
-  }
-  const doc = view.state.doc
-  const mode = view.state.field(renderModeField)
-  const cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number
-
-  // Cache document styles for heading overrides
-  const docStyles = useStoryletStore.getState().globalSettings.documentStyles
-
-  // Pre-pass: map each 1-indexed line to its group role so inner lines can
-  // inherit the group's alignment and fence lines can be hidden/dimmed.
-  type GroupRole =
-    | { kind: 'open'; align: string | null }
-    | { kind: 'close'; align: string | null }
-    | { kind: 'inner'; align: string | null }
-    | null
-  const groupRoles: GroupRole[] = new Array(doc.lines + 1).fill(null)
-  {
-    const openRe = /^\{group(?::(center|right|left))?\}\s*$/
-    const closeRe = /^\{\/group\}\s*$/
-    let inGroup = false
-    let groupAlign: string | null = null
-    for (let i = 1; i <= doc.lines; i++) {
-      const t = doc.line(i).text
-      if (!inGroup) {
-        const m = t.match(openRe)
-        if (m) {
-          inGroup = true
-          groupAlign = m[1] ?? null
-          groupRoles[i] = { kind: 'open', align: groupAlign }
-        }
-        continue
-      }
-      if (closeRe.test(t)) {
-        groupRoles[i] = { kind: 'close', align: groupAlign }
-        inGroup = false
-        groupAlign = null
-        continue
-      }
-      groupRoles[i] = { kind: 'inner', align: groupAlign }
-    }
-  }
-
-  for (let i = 1; i <= doc.lines; i++) {
-    const line = doc.line(i)
-    const text = line.text
-    const isCursorLine = i === cursorLine
-    const groupRole = groupRoles[i]
-
-    // Group fence lines: collapse entire row when rendered, dim as chrome otherwise.
-    if (groupRole && (groupRole.kind === 'open' || groupRole.kind === 'close')) {
-      const fenceClass = shouldHideMarkdown(mode, isCursorLine)
-        ? 'cm-group-fence-hidden'
-        : 'cm-group-fence'
-      decorations.push({
-        from: line.from,
-        to: line.from,
-        deco: Decoration.line({ class: fenceClass }),
-      })
-    }
-
-    // Inner group lines: tight spacing + accent via class, plus alignment inheritance.
-    if (groupRole && groupRole.kind === 'inner') {
-      decorations.push({
-        from: line.from,
-        to: line.from,
-        deco: Decoration.line({ class: 'cm-group-inner' }),
-      })
-      if (groupRole.align && groupRole.align !== 'left') {
-        decorations.push({
-          from: line.from,
-          to: line.from,
-          deco: Decoration.line({ attributes: { style: `text-align: ${groupRole.align};` } }),
-        })
-      }
-    }
-
-    // Headings
-    const headingMatch = text.match(/^(#{1,3})\s/)
-    if (headingMatch) {
-      const level = headingMatch[1].length
-      const defaultSizes = ['1.8em', '1.4em', '1.15em']
-      const defaultWeights = ['700', '600', '600']
-      const styleKey = `h${level}` as 'h1' | 'h2' | 'h3'
-      const hs = docStyles?.[styleKey]
-
-      const fontSize = hs?.fontSize ? `${hs.fontSize}px` : defaultSizes[level - 1]
-      const fontWeight = hs?.fontWeight ?? defaultWeights[level - 1]
-      const extras: string[] = []
-      if (hs?.fontFamily) extras.push(`font-family: ${hs.fontFamily}`)
-      if (hs?.color) extras.push(`color: ${hs.color}`)
-      if (hs?.lineHeight) extras.push(`line-height: ${hs.lineHeight}`)
-
-      const style = `font-size: ${fontSize}; font-weight: ${fontWeight}; line-height: 1.3;${extras.length ? ' ' + extras.join('; ') + ';' : ''}`
-
-      decorations.push({
-        from: line.from,
-        to: line.from,
-        deco: Decoration.line({ attributes: { style } }),
-      })
-
-      // In rendered mode on non-cursor lines, hide the "# " prefix
-      if (shouldHideMarkdown(mode, isCursorLine)) {
-        const prefixLen = headingMatch[0].length // e.g. "## " = 3
-        pushReplace(line.from, line.from + prefixLen)
-      }
-    }
-
-    // Bold+Italic: ***text*** (must come before bold to avoid partial matches)
-    const boldItalicRegex = /\*\*\*(.+?)\*\*\*/g
-    let match
-    while ((match = boldItalicRegex.exec(text)) !== null) {
-      const matchStart = line.from + match.index
-      const matchEnd = matchStart + match[0].length
-      if (shouldHideMarkdown(mode, isCursorLine)) {
-        pushReplace(matchStart, matchStart + 3)
-        decorations.push({
-          from: matchStart + 3,
-          to: matchEnd - 3,
-          deco: Decoration.mark({ attributes: { style: 'font-weight: 700; font-style: italic;' } }),
-        })
-        pushReplace(matchEnd - 3, matchEnd)
-      } else {
-        decorations.push({
-          from: matchStart,
-          to: matchEnd,
-          deco: Decoration.mark({ attributes: { style: 'font-weight: 700; font-style: italic;' } }),
-        })
-      }
-    }
-
-    // Bold: **text** (exactly 2 asterisks, not 3+)
-    const boldRegex = /(?<!\*)\*\*(?!\*)(.+?)(?<!\*)\*\*(?!\*)/g
-    while ((match = boldRegex.exec(text)) !== null) {
-      const matchStart = line.from + match.index
-      const matchEnd = matchStart + match[0].length
-      if (shouldHideMarkdown(mode, isCursorLine)) {
-        // Replace opening **
-        pushReplace(matchStart, matchStart + 2)
-        // Mark inner content as bold
-        decorations.push({
-          from: matchStart + 2,
-          to: matchEnd - 2,
-          deco: Decoration.mark({ attributes: { style: 'font-weight: 700;' } }),
-        })
-        // Replace closing **
-        pushReplace(matchEnd - 2, matchEnd)
-      } else {
-        // Source mode: mark the whole match
-        decorations.push({
-          from: matchStart,
-          to: matchEnd,
-          deco: Decoration.mark({ attributes: { style: 'font-weight: 700;' } }),
-        })
-      }
-    }
-
-    // Italic: *text* (not **)
-    const italicRegex = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g
-    while ((match = italicRegex.exec(text)) !== null) {
-      const matchStart = line.from + match.index
-      const matchEnd = matchStart + match[0].length
-      if (shouldHideMarkdown(mode, isCursorLine)) {
-        pushReplace(matchStart, matchStart + 1)
-        decorations.push({
-          from: matchStart + 1,
-          to: matchEnd - 1,
-          deco: Decoration.mark({ attributes: { style: 'font-style: italic;' } }),
-        })
-        pushReplace(matchEnd - 1, matchEnd)
-      } else {
-        decorations.push({
-          from: matchStart,
-          to: matchEnd,
-          deco: Decoration.mark({ attributes: { style: 'font-style: italic;' } }),
-        })
-      }
-    }
-
-    // Strikethrough: ~~text~~
-    const strikeRegex = /~~(.+?)~~/g
-    while ((match = strikeRegex.exec(text)) !== null) {
-      const matchStart = line.from + match.index
-      const matchEnd = matchStart + match[0].length
-      if (shouldHideMarkdown(mode, isCursorLine)) {
-        pushReplace(matchStart, matchStart + 2)
-        decorations.push({
-          from: matchStart + 2,
-          to: matchEnd - 2,
-          deco: Decoration.mark({ attributes: { style: 'text-decoration: line-through;' } }),
-        })
-        pushReplace(matchEnd - 2, matchEnd)
-      } else {
-        decorations.push({
-          from: matchStart,
-          to: matchEnd,
-          deco: Decoration.mark({ attributes: { style: 'text-decoration: line-through;' } }),
-        })
-      }
-    }
-
-    // Inline code: `text`
-    const codeRegex = /`([^`]+)`/g
-    while ((match = codeRegex.exec(text)) !== null) {
-      const matchStart = line.from + match.index
-      const matchEnd = matchStart + match[0].length
-      if (shouldHideMarkdown(mode, isCursorLine)) {
-        pushReplace(matchStart, matchStart + 1)
-        decorations.push({
-          from: matchStart + 1,
-          to: matchEnd - 1,
-          deco: Decoration.mark({ class: 'cm-md-code' }),
-        })
-        pushReplace(matchEnd - 1, matchEnd)
-      } else {
-        decorations.push({
-          from: matchStart,
-          to: matchEnd,
-          deco: Decoration.mark({ class: 'cm-md-code' }),
-        })
-      }
-    }
-
-    // Alignment: {align:center} or {align:right} prefix
-    const alignMatch = text.match(/^\{align:(center|right|left)\}\s?/)
-    if (alignMatch) {
-      const alignment = alignMatch[1]
-      if (alignment !== 'left') {
-        decorations.push({
-          from: line.from,
-          to: line.from,
-          deco: Decoration.line({ attributes: { style: `text-align: ${alignment};` } }),
-        })
-      }
-      if (shouldHideMarkdown(mode, isCursorLine)) {
-        pushReplace(line.from, line.from + alignMatch[0].length)
-      }
-    }
-
-    // Span tags (style/class) with proper nesting support.
-    // Tokenize all <span ...> / </span> tags, pair them via a stack so that
-    // nested spans get their own decorations and the innermost style wins.
-    const spanTagRegex = /<span\s+(style|class)="([^"]*)">|<\/span>/g
-    type SpanOpen = { start: number; openEnd: number; kind: 'style' | 'class'; value: string }
-    const spanStack: SpanOpen[] = []
-    const spanPairs: Array<{ open: SpanOpen; closeStart: number; closeEnd: number }> = []
-    while ((match = spanTagRegex.exec(text)) !== null) {
-      const tokenStart = match.index
-      const tokenEnd = tokenStart + match[0].length
-      if (match[1]) {
-        spanStack.push({
-          start: tokenStart,
-          openEnd: tokenEnd,
-          kind: match[1] as 'style' | 'class',
-          value: match[2],
-        })
-      } else {
-        const open = spanStack.pop()
-        if (open) {
-          spanPairs.push({ open, closeStart: tokenStart, closeEnd: tokenEnd })
-        }
-      }
-    }
-
-    // Process inner-most pairs last so their decorations sort after outer ones.
-    // spanPairs from the stack-based scan already lists inner pairs before outer pairs.
-    for (const { open, closeStart, closeEnd } of spanPairs) {
-      const matchStart = line.from + open.start
-      const openTagEnd = line.from + open.openEnd
-      const closeTagStart = line.from + closeStart
-      const matchEnd = line.from + closeEnd
-
-      let cssString: string | null = null
-      if (open.kind === 'style') {
-        cssString = open.value
-      } else {
-        const namedStyle = docStyles?.[open.value]
-        if (namedStyle) {
-          const cssProps: string[] = []
-          if (namedStyle.fontFamily) cssProps.push(`font-family: ${namedStyle.fontFamily}`)
-          if (namedStyle.fontSize) cssProps.push(`font-size: ${namedStyle.fontSize}px`)
-          if (namedStyle.lineHeight) cssProps.push(`line-height: ${namedStyle.lineHeight}`)
-          if (namedStyle.color) cssProps.push(`color: ${namedStyle.color}`)
-          if (namedStyle.letterSpacing) cssProps.push(`letter-spacing: ${namedStyle.letterSpacing}`)
-          if (namedStyle.fontWeight) cssProps.push(`font-weight: ${namedStyle.fontWeight}`)
-          if (namedStyle.fontStyle) cssProps.push(`font-style: ${namedStyle.fontStyle}`)
-          if (namedStyle.textDecoration) cssProps.push(`text-decoration: ${namedStyle.textDecoration}`)
-          if (namedStyle.backgroundColor) cssProps.push(`background-color: ${namedStyle.backgroundColor}`)
-          cssString = cssProps.join('; ') + ';'
-        }
-      }
-      if (cssString === null) continue
-
-      // line-height on an inline span doesn't change the block line box for
-      // soft-wrapped rows — promote it to a line-level decoration so wrapped
-      // rows actually tighten/expand.
-      const lineHeightMatch = cssString.match(/line-height:\s*([^;]+)/)
-      if (lineHeightMatch) {
-        decorations.push({
-          from: line.from,
-          to: line.from,
-          deco: Decoration.line({
-            attributes: { style: `line-height: ${lineHeightMatch[1].trim()};` },
-          }),
-        })
-      }
-
-      if (shouldHideMarkdown(mode, isCursorLine)) {
-        pushReplace(matchStart, openTagEnd)
-        decorations.push({
-          from: openTagEnd,
-          to: closeTagStart,
-          deco: Decoration.mark({ attributes: { style: cssString } }),
-        })
-        pushReplace(closeTagStart, matchEnd)
-      } else {
-        decorations.push({
-          from: matchStart,
-          to: matchEnd,
-          deco: Decoration.mark({ attributes: { style: cssString } }),
-        })
-      }
-    }
-  }
-
-  const cmp = (a: { from: number; to: number }, b: { from: number; to: number }) => a.from - b.from || a.to - b.to
-  decorations.sort(cmp)
-  atomicEntries.sort(cmp)
-  return {
-    decorations: Decoration.set(decorations.map((d) => d.deco.range(d.from, d.to))),
-    atomicRanges: Decoration.set(atomicEntries.map((d) => d.deco.range(d.from, d.to)), true),
-  }
-}
-
-const markdownDecorationPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet
-    atomicRanges: DecorationSet
-    constructor(view: EditorView) {
-      const result = markdownDecorations(view)
-      this.decorations = result.decorations
-      this.atomicRanges = result.atomicRanges
-    }
-    update(update: ViewUpdate) {
-      const renderModeChanged = update.transactions.some((tr) =>
-        tr.effects.some((e) => e.is(setRenderModeEffect))
-      )
-      const stylesChanged = update.transactions.some((tr) =>
-        tr.effects.some((e) => e.is(docStylesChangedEffect))
-      )
-      if (update.docChanged || update.viewportChanged || renderModeChanged || stylesChanged) {
-        const result = markdownDecorations(update.view)
-        this.decorations = result.decorations
-        this.atomicRanges = result.atomicRanges
-      } else if (update.view.state.field(renderModeField) === 'rendered' && update.selectionSet) {
-        const oldLine = update.startState.doc.lineAt(update.startState.selection.main.head).number
-        const newLine = update.state.doc.lineAt(update.state.selection.main.head).number
-        if (oldLine !== newLine) {
-          const result = markdownDecorations(update.view)
-          this.decorations = result.decorations
-          this.atomicRanges = result.atomicRanges
-        }
-      }
-    }
-  },
-  {
-    decorations: (v) => v.decorations,
-    // Respected natively by CM6 motion commands and INSERT-mode arrow keys.
-    // NORMAL-mode VIM motions bypass this facet; atomicCursorSnap below catches them.
-    provide: (plugin) =>
-      EditorView.atomicRanges.of(
-        (view) => view.plugin(plugin)?.atomicRanges ?? RangeSet.empty
-      ),
-  }
-)
 
 // Snap the cursor out of any hidden (atomic) range that a motion lands it inside,
 // and eagerly across when a forward motion lands on a range's entry boundary (or a
@@ -566,7 +181,7 @@ function kjExitInsertMode(): Extension {
         if (cursor === kPos + 1) {
           event.preventDefault()
           // Delete the 'k' that was typed
-          view.dispatch({ changes: { from: cursor - 1, to: cursor } })
+          view.dispatch({ changes: { from: cursor - 1, to: cursor }, userEvent: 'delete.backward' })
           // Use VIM API to exit insert mode instead of synthetic Escape event
           Vim.handleKey(cmVim, '<Esc>', 'mapping')
           lastKey = ''
@@ -726,38 +341,15 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const docStylesCompartmentRef = useRef<Compartment | null>(null)
   const lockCompartmentRef = useRef<Compartment | null>(null)
   const vimCompartmentRef = useRef<Compartment | null>(null)
-  // Cached word count for sub-second WPM delta computation. Updated on every doc change.
-  const prevWordCountRef = useRef<number>(0)
+  // Word count of the editor's document, kept current incrementally on every
+  // doc change (only changed lines are re-counted). Drives WPM deltas.
+  const wordCountRef = useRef<number>(0)
 
   // Stable callback refs
   const callbacksRef = useRef({ onWordCountChange, onVimModeChange, onEditorView })
   useEffect(() => {
     callbacksRef.current = { onWordCountChange, onVimModeChange, onEditorView }
   })
-
-  // VIM mode polling
-  useEffect(() => {
-    let lastMode: VimMode = 'NORMAL'
-    const interval = setInterval(() => {
-      const view = viewRef.current
-      if (!view) return
-      const cmVim = getVimCM(view)
-      if (!cmVim) return
-      const cmState = (cmVim as unknown as Record<string, unknown>).state as Record<string, unknown> | undefined
-      const vimMode = cmState?.vim as Record<string, unknown> | undefined
-      if (!vimMode) return
-
-      let currentMode: VimMode = 'NORMAL'
-      if (vimMode.mode === 'insert') currentMode = 'INSERT'
-      else if (vimMode.mode === 'visual') currentMode = 'VISUAL'
-
-      if (currentMode !== lastMode) {
-        lastMode = currentMode
-        callbacksRef.current.onVimModeChange?.(currentMode)
-      }
-    }, 100)
-    return () => clearInterval(interval)
-  }, [])
 
   // Create editor on mount — compartments are instance-scoped via refs
   useEffect(() => {
@@ -868,6 +460,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
                   view.dispatch({
                     changes: { from, to, insert: md },
                     selection: { anchor: from + md.length },
+                    userEvent: 'input.paste',
                   })
                   if (styles) {
                     const existing = useStoryletStore.getState().globalSettings.documentStyles ?? {}
@@ -890,6 +483,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
                   view.dispatch({
                     changes: { from, to, insert: wrapped },
                     selection: { anchor: from + wrapped.length },
+                    userEvent: 'input.paste',
                   })
                 }
                 return true
@@ -900,6 +494,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             view.dispatch({
               changes: { from, to, insert: md },
               selection: { anchor: from + md.length },
+              userEvent: 'input.paste',
             })
             if (styles) {
               const existing = useStoryletStore.getState().globalSettings.documentStyles ?? {}
@@ -913,14 +508,17 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
           // count it toward WPM.
           if (update.docChanged && !update.transactions.some(isProgrammaticLoad)) {
             const text = update.state.doc.toString()
-            const newCount = countWords(text)
+            const delta = wordCountDelta(update.changes, update.startState.doc, update.state.doc)
+            const newCount = wordCountRef.current + delta
+            wordCountRef.current = newCount
+            // Undo/redo, snapshot restores and marker insertion change the text
+            // but aren't writing: save them, but keep them out of WPM, metrics
+            // and quest progress.
+            const countAsWriting = isWritingUpdate(update.transactions)
             // WPM ring-buffer sampling — hot path, must be cheap.
-            // Only runs when docChanged; only allocates when delta > 0.
-            const delta = newCount - prevWordCountRef.current
-            if (delta > 0) {
+            if (countAsWriting && delta > 0) {
               useMetricsStore.getState().recordWpmSample(delta, Date.now())
             }
-            prevWordCountRef.current = newCount
             // Defer React state updates out of CM6's synchronous update cycle
             // to prevent React re-renders from interfering with CM6 DOM updates
             // Tag the text with the storylet it was typed in, captured now —
@@ -928,7 +526,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             const storyletId = loadedDocumentRef.current?.id
             queueMicrotask(() => {
               callbacksRef.current.onWordCountChange?.(newCount)
-              updateContent(text, storyletId)
+              updateContent(text, storyletId, { countAsWriting })
             })
           }
           if (update.selectionSet || update.docChanged) {
@@ -958,10 +556,10 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
       }
     }
     if (activeStorylet?.content) {
-      // Seed prevWordCountRef so the first edit doesn't spike a huge delta
-      prevWordCountRef.current = countWords(activeStorylet.content)
+      // Seed the word count so the first edit doesn't spike a huge delta
+      wordCountRef.current = countWords(activeStorylet.content)
       loadContentIntoView(view, activeStorylet.content)
-      callbacksRef.current.onWordCountChange?.(countWords(activeStorylet.content))
+      callbacksRef.current.onWordCountChange?.(wordCountRef.current)
     }
 
     return () => {
@@ -986,7 +584,26 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     view.dispatch({ effects: comp.reconfigure(vimMode ? vim() : []) })
     // When vim turns off, reset the displayed mode so a stale INSERT/VISUAL
     // label doesn't reappear if it's later re-enabled.
-    if (!vimMode) callbacksRef.current.onVimModeChange?.('NORMAL')
+    if (!vimMode) {
+      callbacksRef.current.onVimModeChange?.('NORMAL')
+      return
+    }
+    // The vim adapter is recreated each time vim is enabled, so subscribe to
+    // its mode-change signal here. Its initial 'normal' signal has already
+    // fired, so report the current mode once up front.
+    const cmVim = getVimCM(view)
+    if (!cmVim) return
+    const vimState = cmVim.state.vim
+    callbacksRef.current.onVimModeChange?.(
+      vimState?.insertMode
+        ? cmVim.state.overwrite ? 'REPLACE' : 'INSERT'
+        : vimState?.visualMode ? 'VISUAL' : 'NORMAL'
+    )
+    const onModeChange = (e: { mode: string }) => {
+      callbacksRef.current.onVimModeChange?.(vimModeLabel(e.mode))
+    }
+    cmVim.on('vim-mode-change', onModeChange)
+    return () => cmVim.off('vim-mode-change', onModeChange)
   }, [vimMode])
 
   // Load storylet content when active storylet changes
@@ -1006,8 +623,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const content = activeStorylet.content ?? ''
     loadContentIntoView(view, content)
     // Reset the WPM baseline so switching to a longer storylet isn't counted as typing.
-    prevWordCountRef.current = countWords(content)
-    callbacksRef.current.onWordCountChange?.(countWords(content))
+    wordCountRef.current = countWords(content)
+    callbacksRef.current.onWordCountChange?.(wordCountRef.current)
   }, [])
 
   useEffect(() => {
@@ -1108,13 +725,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         snippets: state.globalSettings.snippets,
       })
     })
-    const _origUnsubscribe = unsubscribe
-    const unsubscribeAll = () => {
-      _origUnsubscribe()
-      unsubStorylet()
-    }
-    // Dev-only: expose the character store on window so Puppeteer QA can seed
-    // markers without shipping a public API.
+    // Dev-only: expose the stores on window for poking at state from the
+    // browser console.
     if (import.meta.env.DEV) {
       ;(window as unknown as { __characterStore?: typeof useCharacterStore }).__characterStore =
         useCharacterStore
@@ -1122,49 +734,11 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         useStoryletStore
       ;(window as unknown as { __notesStore?: typeof useNotesStore }).__notesStore =
         useNotesStore
-      // Expose an in-memory markdown renderer so QA can inspect export output
-      // without triggering a file download.
-      import('../../lib/export').then((mod) => {
-        ;(window as unknown as {
-          __renderBookAsMarkdown?: typeof mod.renderBookAsMarkdown
-        }).__renderBookAsMarkdown = mod.renderBookAsMarkdown
-        ;(window as unknown as {
-          __exportSmokeTest?: () => {
-            ok: boolean
-            markerCount: number
-            statblockCount: number
-            noteCount: number
-            length: number
-            preview: string
-          }
-        }).__exportSmokeTest = () => {
-          const book = useStoryletStore.getState().book
-          if (!book) {
-            return {
-              ok: false,
-              markerCount: 0,
-              statblockCount: 0,
-              noteCount: 0,
-              length: 0,
-              preview: '(no book)',
-            }
-          }
-          const out = mod.renderBookAsMarkdown(book)
-          const markerCount = (out.match(/<!--\s*stat:/g) ?? []).length
-          const statblockCount = (out.match(/<!--\s*statblock:/g) ?? []).length
-          const noteCount = (out.match(/<!--\s*note:/g) ?? []).length
-          return {
-            ok: markerCount === 0 && noteCount === 0,
-            markerCount,
-            statblockCount,
-            noteCount,
-            length: out.length,
-            preview: out.slice(0, 400),
-          }
-        }
-      })
     }
-    return unsubscribeAll
+    return () => {
+      unsubscribe()
+      unsubStorylet()
+    }
   }, [])
 
   // Sync notes store → CM6 snapshot so note-marker squares refresh on store

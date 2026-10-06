@@ -1,5 +1,4 @@
 import { StateEffect, StateField } from '@codemirror/state'
-import type { EditorView } from '@codemirror/view'
 import { useEditorStore } from '../../stores/editorStore'
 
 // Four presentation modes for the editor:
@@ -33,18 +32,6 @@ export function shouldHideMarkdown(mode: RenderMode, isCursorLine: boolean): boo
   return true // preview + clean
 }
 
-// Should a marker extension (stat / statblock / note) render its widget?
-// True only in modes that want the widget's visual representation.
-export function showMarkerWidget(mode: RenderMode): boolean {
-  return mode === 'rendered' || mode === 'preview'
-}
-
-// Should a marker extension leave its raw syntax visible (no replace at all)?
-// True only in source mode.
-export function showRawMarker(mode: RenderMode): boolean {
-  return mode === 'source'
-}
-
 // Convenience for extensions deciding what to do with a marker range:
 // - 'raw':    emit no decoration; the raw marker text stays in place.
 // - 'widget': replace the range with the widget.
@@ -53,10 +40,4 @@ export function markerPresentation(mode: RenderMode): 'raw' | 'widget' | 'empty'
   if (mode === 'source') return 'raw'
   if (mode === 'clean') return 'empty'
   return 'widget'
-}
-
-// Read the current mode from a view. Small convenience so extensions don't
-// have to import renderModeField directly just to query it.
-export function getRenderMode(view: EditorView): RenderMode {
-  return view.state.field(renderModeField)
 }
