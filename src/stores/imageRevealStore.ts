@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageJSONStorage } from './localforageStorage'
 import type { ActiveEffect, ImageRevealFileData, ImageRevealSession } from '../types'
 import { getWeaponMultiplier, getArmorTimeBonus, getItemById } from '../lib/items'
 import { calculateDifficulty, calculateQuestReward } from '../lib/questRewards'
@@ -27,6 +27,13 @@ interface ImageRevealState {
   isPaused: boolean
   pauseStartedAt: number | null
   activeEffects: ActiveEffect[]
+  /**
+   * Transient (not persisted): sessions that just succeeded or failed, oldest
+   * first, waiting for the panel to show their celebration / result overlay.
+   * Lives here rather than in the panel so results that land while the panel
+   * is hidden (distraction-free mode) are still shown when it returns.
+   */
+  resultQueue: ImageRevealSession[]
 
   // Returns the new session ID, or empty string if the session could not be started (e.g., capacity limit reached).
   startSession: (
@@ -47,20 +54,10 @@ interface ImageRevealState {
   abandonSession: (sessionId: string) => void
   abandonAllSessions: () => void
   useConsumable: (itemId: string) => boolean
+  dismissResult: () => void
 }
 
-const localforageStorage = createJSONStorage<ImageRevealState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    return value
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+const localforageStorage = localforageJSONStorage<ImageRevealState>()
 
 /** Returns true if there are no timed sessions remaining among activeSessions */
 function noTimedSessionsRemain(sessions: ImageRevealSession[]): boolean {
@@ -75,6 +72,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
       isPaused: false,
       pauseStartedAt: null,
       activeEffects: [],
+      resultQueue: [],
 
       startSession: (
         imageUrl: string,
@@ -124,7 +122,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
 
       addWords: (count: number) => {
         if (count <= 0) return
-        const { activeSessions, completedSessions, isPaused, activeEffects } = get()
+        const { activeSessions, completedSessions, isPaused, activeEffects, resultQueue } = get()
 
         const playerState = usePlayerStore.getState()
         const weaponMultiplier = getWeaponMultiplier(playerState.equippedWeapon)
@@ -227,6 +225,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
           activeSessions: newActiveSessions,
           completedSessions: [...completedSessions, ...newlyCompleted],
           activeEffects: newEffects,
+          ...(newlyCompleted.length > 0 ? { resultQueue: [...resultQueue, ...newlyCompleted] } : {}),
         }
 
         // If all timed sessions are gone, clear timer state
@@ -319,6 +318,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
         const updates: Partial<ImageRevealState> = {
           activeSessions: newActiveSessions,
           completedSessions: [failedSession, ...completedSessions],
+          resultQueue: [...get().resultQueue, failedSession],
         }
 
         if (noTimedSessionsRemain(newActiveSessions)) {
@@ -425,6 +425,10 @@ export const useImageRevealStore = create<ImageRevealState>()(
 
         return true
       },
+
+      dismissResult: () => {
+        set((state) => ({ resultQueue: state.resultQueue.slice(1) }))
+      },
     }),
     {
       name: 'writinator-image-reveal',
@@ -459,6 +463,26 @@ export const useImageRevealStore = create<ImageRevealState>()(
     }
   )
 )
+
+// ---------------------------------------------------------------------------
+// Timed-quest ticker. Runs at store level (not in a component) so quests keep
+// expiring on schedule while the panel is hidden in distraction-free mode.
+// ---------------------------------------------------------------------------
+
+let tickInterval: ReturnType<typeof setInterval> | null = null
+
+function syncTickInterval(state: ImageRevealState): void {
+  const hasTimed = state.activeSessions.some((s) => s.timeMinutes !== undefined)
+  if (hasTimed && tickInterval === null) {
+    tickInterval = setInterval(() => useImageRevealStore.getState().tickTimer(), 1000)
+  } else if (!hasTimed && tickInterval !== null) {
+    clearInterval(tickInterval)
+    tickInterval = null
+  }
+}
+
+useImageRevealStore.subscribe(syncTickInterval)
+syncTickInterval(useImageRevealStore.getState())
 
 // ---------------------------------------------------------------------------
 // File serialization helpers — used by fileSystem.ts section registry

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageJSONStorage } from './localforageStorage'
 
 export type ActionName =
   | 'toggleTypewriter'
@@ -72,27 +72,87 @@ export function comboToString(combo: KeyCombo): string {
   return parts.join('+')
 }
 
-export function matchesEvent(combo: KeyCombo, e: KeyboardEvent): boolean {
+// Unshifted character for punctuation/digit/letter keys, by physical key. Used
+// as a fallback when Shift or (mac) Option has rewritten e.key — e.g.
+// Ctrl+Shift+. reports '>' and Cmd+Opt+V reports '√' on a US layout.
+const CODE_TO_KEY: Record<string, string> = {
+  Period: '.',
+  Comma: ',',
+  Slash: '/',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backslash: '\\',
+  Minus: '-',
+  Equal: '=',
+  Backquote: '`',
+}
+
+function keyFromCode(code: string): string | null {
+  if (code in CODE_TO_KEY) return CODE_TO_KEY[code]
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase()
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5)
+  return null
+}
+
+/**
+ * A binding's `ctrl` means the platform's primary modifier: Cmd on mac, Ctrl
+ * elsewhere. The other one must not be held, so mac Ctrl-combos (VIM's Ctrl-O,
+ * Ctrl-B, …) never trigger app shortcuts.
+ */
+function primaryModifier(e: KeyboardEvent, mac: boolean): { primary: boolean; other: boolean } {
+  return mac
+    ? { primary: e.metaKey, other: e.ctrlKey }
+    : { primary: e.ctrlKey, other: e.metaKey }
+}
+
+export function matchesEvent(combo: KeyCombo, e: KeyboardEvent, mac = isMac): boolean {
   const wantsCtrl = combo.ctrl ?? false
   const wantsShift = combo.shift ?? false
   const wantsAlt = combo.alt ?? false
-  const hasCtrl = e.ctrlKey || e.metaKey
-  if (hasCtrl !== wantsCtrl) return false
+  const { primary, other } = primaryModifier(e, mac)
+  if (other) return false
+  if (primary !== wantsCtrl) return false
   if (e.shiftKey !== wantsShift) return false
   if (e.altKey !== wantsAlt) return false
-  return e.key.toLowerCase() === combo.key.toLowerCase()
+  const want = combo.key.toLowerCase()
+  // e.key first so non-QWERTY layouts keep working; physical key as fallback.
+  if (e.key.toLowerCase() === want) return true
+  return keyFromCode(e.code) === want
 }
 
-export function comboFromEvent(e: KeyboardEvent): KeyCombo | null {
+export function comboFromEvent(e: KeyboardEvent, mac = isMac): KeyCombo | null {
   const key = e.key
   // Ignore bare modifier keys
   if (['Control', 'Meta', 'Shift', 'Alt'].includes(key)) return null
+  const { primary, other } = primaryModifier(e, mac)
+  // The non-primary control key can't be represented in a binding.
+  if (other) return null
+  // Record the unshifted / un-Option'd key so the binding matches later.
+  const normalized = (e.shiftKey || e.altKey) && key.length === 1
+    ? keyFromCode(e.code) ?? key.toLowerCase()
+    : key.toLowerCase()
   return {
-    key: key.toLowerCase(),
-    ...(e.ctrlKey || e.metaKey ? { ctrl: true } : {}),
+    key: normalized,
+    ...(primary ? { ctrl: true } : {}),
     ...(e.shiftKey ? { shift: true } : {}),
     ...(e.altKey ? { alt: true } : {}),
   }
+}
+
+/**
+ * Global shortcuts must not steal keys the editor already handled
+ * (defaultPrevented), and while VIM mode is on, plain Ctrl-combos typed in the
+ * editor belong to VIM (Ctrl-O jump back, Ctrl-B page up, …).
+ */
+export function shouldSkipGlobalShortcut(
+  e: KeyboardEvent,
+  ctx: { vimMode: boolean; inEditor: boolean },
+): boolean {
+  if (e.defaultPrevented) return true
+  if (ctx.vimMode && ctx.inEditor && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) return true
+  return false
 }
 
 interface KeybindingState {
@@ -101,18 +161,7 @@ interface KeybindingState {
   resetAll: () => void
 }
 
-const localforageStorage = createJSONStorage<KeybindingState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    return value
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+const localforageStorage = localforageJSONStorage<KeybindingState>()
 
 export const useKeybindingStore = create<KeybindingState>()(
   persist(

@@ -26,35 +26,35 @@ export function QuestReminder({ onStartQuest }: QuestReminderProps) {
     return countWords(storylet?.content ?? null)
   })()
 
-  // Keep a stable ref to the previous word count
+  // Keep stable refs to the previous word count / storylet
   const prevWordCountRef = useRef(currentWordCount)
+  const prevStoryletIdRef = useRef(activeStoryletId)
+  const hasActiveSessions = activeSessions.length > 0
 
-  // Schedule the reminder whenever writing is first detected and no active quests
+  // Schedule the reminder the first time writing is detected with no active
+  // quests. Keyed on the word count only, so unrelated re-renders don't touch
+  // the pending timer.
   useEffect(() => {
-    if (dismissed) return
-    if (hasWrittenRef.current) return
-    if (timerRef.current) return
-    if (activeSessions.length > 0) return
-
     const delta = currentWordCount - prevWordCountRef.current
+    const switchedStorylet = prevStoryletIdRef.current !== activeStoryletId
     prevWordCountRef.current = currentWordCount
+    prevStoryletIdRef.current = activeStoryletId
 
-    if (delta <= 0) return
+    if (dismissed || hasWrittenRef.current || hasActiveSessions) return
+    if (switchedStorylet || delta <= 0) return
 
     // Writing detected — mark and start countdown
     hasWrittenRef.current = true
-
     timerRef.current = setTimeout(() => {
+      timerRef.current = null
       setVisible(true)
     }, 5000)
+  }, [currentWordCount, activeStoryletId, dismissed, hasActiveSessions])
 
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-        timerRef.current = null
-      }
-    }
-  })
+  // Clear a pending countdown on unmount only.
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+  }, [])
 
   const handleDismiss = () => {
     setVisible(false)

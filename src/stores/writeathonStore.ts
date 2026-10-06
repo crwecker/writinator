@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageJSONStorage } from './localforageStorage'
 import type { BoardQuest, WriteathonConfig, WriteathonFileData, WriteathonMilestone } from '../types'
 import { calculateDailyTarget, createMilestones } from '../lib/writeathon'
 import { usePlayerStore } from './playerStore'
@@ -23,6 +23,7 @@ interface WriteathonState {
   removeVillagerQuest: (questId: string) => void
   acceptBoardQuest: (quest: BoardQuest, sessionId: string) => void
   completeBoardQuest: (questId: string) => void
+  endBoardQuest: (questId: string) => void
   resetWriteathon: () => void
   pauseWriteathon: () => void
   resumeWriteathon: () => void
@@ -33,18 +34,7 @@ interface WriteathonState {
   getCompletedBlocks: () => number
 }
 
-const localforageStorage = createJSONStorage<WriteathonState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    return value
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+const localforageStorage = localforageJSONStorage<WriteathonState>()
 
 export const useWriteathonStore = create<WriteathonState>()(
   persist(
@@ -167,6 +157,13 @@ export const useWriteathonStore = create<WriteathonState>()(
         }
       },
 
+      // Failed or abandoned: drop the quest from the board without paying out.
+      endBoardQuest: (questId: string) => {
+        set((state) => ({
+          activeBoardQuests: state.activeBoardQuests.filter((q) => q.id !== questId),
+        }))
+      },
+
       resetWriteathon: () => {
         set({ config: null, milestones: [], villagerQuests: [], activeBoardQuests: [], dailyQuestAccepted: false })
       },
@@ -239,17 +236,19 @@ export const useWriteathonStore = create<WriteathonState>()(
   )
 )
 
-// Auto-complete board quests when their linked image reveal session completes
+// Settle board quests when their linked image reveal session ends. Only a
+// successful reveal pays the board reward; failed/abandoned quests just end.
 useImageRevealStore.subscribe((state, prevState) => {
   const prevActiveIds = new Set(prevState.activeSessions.map((s) => s.id))
-  const currCompletedIds = new Set(state.completedSessions.map((s) => s.id))
-  const justCompleted = [...currCompletedIds].filter((id) => prevActiveIds.has(id))
-  if (justCompleted.length === 0) return
+  const justEnded = state.completedSessions.filter((s) => prevActiveIds.has(s.id))
+  if (justEnded.length === 0) return
 
-  const { activeBoardQuests, completeBoardQuest } = useWriteathonStore.getState()
-  for (const sessionId of justCompleted) {
-    const quest = activeBoardQuests.find((q) => q.imageRevealSessionId === sessionId)
-    if (quest) completeBoardQuest(quest.id)
+  const { activeBoardQuests, completeBoardQuest, endBoardQuest } = useWriteathonStore.getState()
+  for (const session of justEnded) {
+    const quest = activeBoardQuests.find((q) => q.imageRevealSessionId === session.id)
+    if (!quest) continue
+    if (session.result === 'success') completeBoardQuest(quest.id)
+    else endBoardQuest(quest.id)
   }
 })
 

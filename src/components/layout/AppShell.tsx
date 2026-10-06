@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { Coins, Search, StickyNote } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
@@ -6,27 +6,20 @@ import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
 import VimStatusLine from '../editor/VimStatusLine'
 import type { VimMode } from '../editor/VimStatusLine'
-import { ExportDialog } from './ExportDialog'
 import { HamburgerMenu, type MenuAction } from './HamburgerMenu'
 import { flushAndPersistNow, useStoryletStore } from '../../stores/storyletStore'
+import { useCharacterStore } from '../../stores/characterStore'
+import { insertStatMarkerAtSelection } from '../editor/statMarkerInsert'
 import { useEditorStore } from '../../stores/editorStore'
-import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt, hasFileTetherCapability } from '../../lib/fileSystem'
+import { getStoredFileHandle, getLastLocalWriteAt } from '../../lib/fileSystem'
 import { isTauri, onTauriCloseRequested } from '../../lib/tauri'
 import { reconcileWithFile } from '../../lib/reconcile'
-import { showToast } from '../../stores/genericToastStore'
 import { createSnapshot } from '../../stores/snapshotStore'
-import { useKeybindingStore, matchesEvent } from '../../stores/keybindingStore'
+import { useKeybindingStore, matchesEvent, shouldSkipGlobalShortcut, comboToString, type KeyCombo } from '../../stores/keybindingStore'
 import { FindInBook } from './FindInBook'
-import { PublishedSnapshotsBrowser } from './PublishedSnapshotsBrowser'
-import { PublishModal } from './PublishModal'
-import { StyleEditor } from '../editor/StyleEditor'
-import { AdventurersGuild, type GuildTab } from '../quests/AdventurersGuild'
+import type { GuildTab } from '../quests/AdventurersGuild'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
-import { CharacterSheetModal } from '../characters/CharacterSheetModal'
-import { CharacterPanel } from '../characters/CharacterPanel'
-import { DeltaEditorModal } from '../characters/DeltaEditorModal'
-import { NotesPanel } from '../notes/NotesPanel'
 import { RightPanelShell, type RightPanel } from './RightPanelShell'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
@@ -39,17 +32,65 @@ import { FileConnectionBanner } from './FileConnectionBanner'
 import { useIsFileLocked } from '../../lib/fileLock'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
+import { useWordCountStore } from '../../stores/wordCountStore'
+import { insertNoteAtCursor, saveToDisk, applyRetroactiveGrant } from './shellActions'
 import { countWords, extractWords } from '../../lib/words'
 import { useMetricsStore } from '../../stores/metricsStore'
-import { useNotesStore } from '../../stores/notesStore'
 import { JourneyBar } from './JourneyBar'
 import { DailyTarget } from './DailyTarget'
 import { MilestoneFlash } from './MilestoneFlash'
 import { WriteathonCompleteCelebration } from '../quests/WriteathonCompleteCelebration'
 import { MetricsBar } from './MetricsBar'
 
+// Heavy panels/modals that are only shown on demand — split out of the main chunk.
+const ExportDialog = lazy(() => import('./ExportDialog').then((m) => ({ default: m.ExportDialog })))
+const PublishedSnapshotsBrowser = lazy(() =>
+  import('./PublishedSnapshotsBrowser').then((m) => ({ default: m.PublishedSnapshotsBrowser })))
+const PublishModal = lazy(() => import('./PublishModal').then((m) => ({ default: m.PublishModal })))
+const StyleEditor = lazy(() => import('../editor/StyleEditor').then((m) => ({ default: m.StyleEditor })))
+const AdventurersGuild = lazy(() =>
+  import('../quests/AdventurersGuild').then((m) => ({ default: m.AdventurersGuild })))
+const CharacterSheetModal = lazy(() =>
+  import('../characters/CharacterSheetModal').then((m) => ({ default: m.CharacterSheetModal })))
+const CharacterPanel = lazy(() =>
+  import('../characters/CharacterPanel').then((m) => ({ default: m.CharacterPanel })))
+const DeltaEditorModal = lazy(() =>
+  import('../characters/DeltaEditorModal').then((m) => ({ default: m.DeltaEditorModal })))
+const NotesPanel = lazy(() => import('../notes/NotesPanel').then((m) => ({ default: m.NotesPanel })))
+
+// Tooltip suffix for a binding, rendered for this platform (⌘ on mac).
+function hint(combo: KeyCombo | undefined): string {
+  return combo ? ` (${comboToString(combo)})` : ''
+}
+
+// Reads the live word count itself so typing doesn't re-render AppShell.
+function LiveMetricsBar({ bookWordCount }: { bookWordCount: number }) {
+  const wordCount = useWordCountStore((s) => s.wordCount)
+  return <MetricsBar wordCount={wordCount} bookWordCount={bookWordCount} />
+}
+
+// Coin count with a one-shot pulse whenever the balance changes. Remounting via
+// `key` replays the CSS animation; nothing pulses on first render.
+function CoinBalance() {
+  const coins = usePlayerStore((s) => s.coins)
+  const [prevCoins, setPrevCoins] = useState(coins)
+  const [pulseCount, setPulseCount] = useState(0)
+  if (coins !== prevCoins) {
+    setPrevCoins(coins)
+    setPulseCount((n) => n + 1)
+  }
+  const pulse = pulseCount > 0 ? 'animate-coin-pulse' : ''
+  return (
+    <>
+      <Coins key={`icon-${pulseCount}`} size={12} className={pulse} />
+      <span key={`count-${pulseCount}`} className={`tabular-nums ${pulse}`}>
+        {coins.toLocaleString()}
+      </span>
+    </>
+  )
+}
+
 export function AppShell() {
-  const [wordCount, setWordCount] = useState(0)
   const [vimCurrentMode, setVimCurrentMode] = useState<VimMode>('NORMAL')
   const [editorView, setEditorView] = useState<EditorView | null>(null)
   const editorViewRef = useRef<EditorView | null>(null)
@@ -69,13 +110,9 @@ export function AppShell() {
     markerId: string | null
     mode: 'create' | 'edit'
   }>({ open: false, markerId: null, mode: 'create' })
-  const [coinPulsing, setCoinPulsing] = useState(false)
-  const activeSessions = useImageRevealStore((s) => s.activeSessions)
+  const activeSessionCount = useImageRevealStore((s) => s.activeSessions.length)
   const writeathonConfig = useWriteathonStore((s) => s.config)
   const activeBoardQuests = useWriteathonStore((s) => s.activeBoardQuests)
-  const coins = usePlayerStore((s) => s.coins)
-  const retroactiveGrantApplied = usePlayerStore((s) => s.retroactiveGrantApplied)
-  const prevCoinsRef = useRef(coins)
 
   const book = useStoryletStore((s) => s.book)
   const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
@@ -94,6 +131,7 @@ export function AppShell() {
   const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
   const vimEnabled = useEditorStore((s) => s.vimMode)
   const toggleVimMode = useEditorStore((s) => s.toggleVimMode)
+  const keymap = useKeybindingStore((s) => s.keymap)
 
   const activeStorylet = book?.storylets?.find((storylet) => storylet.id === activeStoryletId)
 
@@ -128,15 +166,17 @@ export function AppShell() {
     setEditingStoryletTitle(false)
   }, [storyletTitleValue, activeStoryletId, activeStorylet?.name, renameStorylet])
 
-  const handleWordCountChange = useCallback((c: number) => setWordCount(c), [])
+  const handleWordCountChange = useCallback((c: number) => useWordCountStore.getState().setWordCount(c), [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
   const handleEditorView = useCallback((v: EditorView | null) => {
     setEditorView(v)
     editorViewRef.current = v
   }, [])
 
+  // A reused marker (one already holding changes) opens for editing.
   const handleInsertMarker = useCallback((markerId: string) => {
-    setDeltaEditorState({ open: true, markerId, mode: 'create' })
+    const mode = useCharacterStore.getState().markers[markerId] ? 'edit' : 'create'
+    setDeltaEditorState({ open: true, markerId, mode })
   }, [])
 
   const closeDeltaEditor = useCallback(() => {
@@ -200,23 +240,15 @@ export function AppShell() {
     const view = editorViewRef.current
     if (!view) return
     if (locked) return
-    const { to } = view.state.selection.main
-    const markerId = crypto.randomUUID()
-    view.dispatch({
-      changes: { from: to, to, insert: `<!-- stat:${markerId} -->` },
-    })
-    setDeltaEditorState({ open: true, markerId, mode: 'create' })
-  }, [locked])
+    insertStatMarkerAtSelection(view, handleInsertMarker)
+  }, [locked, handleInsertMarker])
 
   const handleInsertNote = useCallback(() => {
     const view = editorViewRef.current
     if (!view) return
-    const { to } = view.state.selection.main
-    const noteId = crypto.randomUUID()
-    view.dispatch({
-      changes: { from: to, to, insert: `<!-- note:${noteId} -->` },
-    })
-    useNotesStore.getState().addPositionNote(noteId, { body: '' })
+    // Null when the file is locked: nothing was inserted, so don't open a note.
+    const noteId = insertNoteAtCursor(view)
+    if (!noteId) return
     // Open the Notes panel and focus the new row for inline editing.
     setNotesPanelOpen(true)
     useEditorStore.getState().setRightPanelActiveTab('notes')
@@ -252,36 +284,16 @@ export function AppShell() {
   }, [])
 
   const handleSaveToDisk = useCallback(() => {
-    const state = useStoryletStore.getState()
-    state._flushContentUpdate()
-    const { book: currentBook, activeStoryletId: docId, globalSettings } = useStoryletStore.getState()
-    if (!currentBook) return
-    const storylet = docId ? currentBook.storylets.find((d) => d.id === docId) : null
-    const snapshotPromise = storylet?.content
-      ? createSnapshot(docId!, storylet.content, 'manual')
-      : Promise.resolve(null)
-
-    // No file tethering available (Safari/Firefox web): there's no file to
-    // write back to, and falling through to a download triggers Safari's
-    // download-permission prompt on every Cmd+S. The book already auto-persists
-    // to localforage, so just confirm the snapshot and tell the user.
-    if (!hasFileTetherCapability()) {
-      void snapshotPromise.then(() => {
-        showToast('Saved in browser. Use Export to download a copy.', 'success')
-      })
-      return
-    }
-
-    snapshotPromise.then(() =>
-      quickSave(currentBook, globalSettings).then((saved) => {
-        if (!saved) saveAsNewFile(currentBook, globalSettings)
-      })
-    )
+    // saveToDisk reports its own failures (toast + console).
+    void saveToDisk()
   }, [])
 
   // Global keyboard shortcuts (driven by keybinding store)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      const view = editorViewRef.current
+      const inEditor = !!view && e.target instanceof Node && view.dom.contains(e.target)
+      if (shouldSkipGlobalShortcut(e, { vimMode: useEditorStore.getState().vimMode, inEditor })) return
       const km = useKeybindingStore.getState().keymap
 
       if (km.toggleTypewriter && matchesEvent(km.toggleTypewriter, e)) {
@@ -452,28 +464,9 @@ export function AppShell() {
     }
   }, [])
 
-  // Coin pulse animation when balance changes
-  useEffect(() => {
-    if (coins !== prevCoinsRef.current) {
-      prevCoinsRef.current = coins
-      setCoinPulsing(true)
-      const timer = setTimeout(() => setCoinPulsing(false), 400)
-      return () => clearTimeout(timer)
-    }
-  }, [coins])
-
-  // Retroactive coin grant for existing completed sessions
-  useEffect(() => {
-    if (retroactiveGrantApplied) return
-    const { completedSessions } = useImageRevealStore.getState()
-    const { addCoins, setRetroactiveGrantApplied } = usePlayerStore.getState()
-    const successCount = completedSessions.filter((s) => s.result === 'success').length
-    if (successCount > 0) {
-      addCoins(successCount * 100)
-    }
-    setRetroactiveGrantApplied()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Retroactive coin grant for existing completed sessions (waits for the
+  // player + image-reveal stores to hydrate from storage).
+  useEffect(() => applyRetroactiveGrant(), [])
 
   // Populate the publish-sync cache whenever the book reference changes (covers both initial
   // hydration and any subsequent content edits, since updateStoryletContent replaces the book
@@ -556,7 +549,7 @@ export function AppShell() {
             <button
               onClick={toggleSidebar}
               className={`text-gray-400 text-xs transition-transform shrink-0 ${sidebarOpen ? 'rotate-90' : ''}`}
-              title="Toggle sidebar (Ctrl+B)"
+              title={`Toggle sidebar${hint(keymap.toggleFileTree)}`}
             >
               &#9657;
             </button>
@@ -613,7 +606,7 @@ export function AppShell() {
             <button
               onClick={() => setFindOpen((prev) => !prev)}
               className="text-gray-500 hover:text-gray-300 transition-colors px-1.5 py-0.5"
-              title="Find in book (Ctrl+Shift+F)"
+              title={`Find in book${hint(keymap.findInBook)}`}
             >
               <Search size={13} />
             </button>
@@ -621,7 +614,7 @@ export function AppShell() {
               data-testid="character-panel-button"
               onClick={toggleCharacterPanel}
               className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
-              title="Character stats panel (Ctrl+Shift+C)"
+              title={`Character stats panel${hint(keymap.toggleCharacterPanel)}`}
             >
               Stats
             </button>
@@ -629,14 +622,14 @@ export function AppShell() {
               data-testid="notes-panel-button"
               onClick={toggleNotesPanel}
               className="text-gray-500 hover:text-gray-300 transition-colors px-1.5 py-0.5"
-              title="Notes panel (Ctrl+Shift+J)"
+              title={`Notes panel${hint(keymap.toggleNotesPanel)}`}
             >
               <StickyNote size={13} />
             </button>
             <button
               onClick={togglePublishedSnapshots}
               className="text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 text-xs"
-              title="History — published versions & snapshots (Ctrl+Shift+H)"
+              title={`History — published versions & snapshots${hint(keymap.snapshotHistory)}`}
             >
               History
             </button>
@@ -672,17 +665,25 @@ export function AppShell() {
             onClose={() => setFindOpen(false)}
             editorView={editorView}
           />
-          <PublishModal
-            open={publishModalOpen}
-            onClose={() => setPublishModalOpen(false)}
-          />
-          <ExportDialog
-            open={exportDialogOpen}
-            onClose={() => setExportDialogOpen(false)}
-          />
-          <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} editorView={editorView} />
+          <Suspense fallback={null}>
+            {publishModalOpen && (
+              <PublishModal
+                open={publishModalOpen}
+                onClose={() => setPublishModalOpen(false)}
+              />
+            )}
+            {exportDialogOpen && (
+              <ExportDialog
+                open={exportDialogOpen}
+                onClose={() => setExportDialogOpen(false)}
+              />
+            )}
+            {styleEditorOpen && (
+              <StyleEditor open={styleEditorOpen} onClose={() => setStyleEditorOpen(false)} editorView={editorView} />
+            )}
+          </Suspense>
 
-          {activeSessions.length === 0 && (
+          {activeSessionCount === 0 && (
             <QuestReminder
               onStartQuest={() => {
                 setGuildTab('board')
@@ -691,23 +692,31 @@ export function AppShell() {
             />
           )}
 
-          <AdventurersGuild
-            open={guildOpen}
-            activeTab={guildTab}
-            onTabChange={setGuildTab}
-            onClose={() => setGuildOpen(false)}
-          />
-          <CharacterSheetModal
-            open={characterSheetOpen}
-            onClose={() => setCharacterSheetOpen(false)}
-          />
-          <DeltaEditorModal
-            open={deltaEditorState.open}
-            onClose={closeDeltaEditor}
-            markerId={deltaEditorState.markerId}
-            mode={deltaEditorState.mode}
-            editorView={editorView}
-          />
+          <Suspense fallback={null}>
+            {guildOpen && (
+              <AdventurersGuild
+                open={guildOpen}
+                activeTab={guildTab}
+                onTabChange={setGuildTab}
+                onClose={() => setGuildOpen(false)}
+              />
+            )}
+            {characterSheetOpen && (
+              <CharacterSheetModal
+                open={characterSheetOpen}
+                onClose={() => setCharacterSheetOpen(false)}
+              />
+            )}
+            {deltaEditorState.open && (
+              <DeltaEditorModal
+                open={deltaEditorState.open}
+                onClose={closeDeltaEditor}
+                markerId={deltaEditorState.markerId}
+                mode={deltaEditorState.mode}
+                editorView={editorView}
+              />
+            )}
+          </Suspense>
         </div>
 
         {!distractionFree && (
@@ -719,6 +728,7 @@ export function AppShell() {
                 open: characterPanelOpen,
                 onClose: () => setCharacterPanelOpen(false),
                 content: (
+                  <Suspense fallback={null}>
                   <CharacterPanel
                     open={characterPanelOpen}
                     onClose={() => setCharacterPanelOpen(false)}
@@ -729,6 +739,7 @@ export function AppShell() {
                     }}
                     embedded
                   />
+                  </Suspense>
                 ),
               },
               {
@@ -737,6 +748,7 @@ export function AppShell() {
                 open: notesPanelOpen,
                 onClose: () => setNotesPanelOpen(false),
                 content: (
+                  <Suspense fallback={null}>
                   <NotesPanel
                     open={notesPanelOpen}
                     onClose={() => setNotesPanelOpen(false)}
@@ -745,6 +757,7 @@ export function AppShell() {
                     onFocusHandled={clearFocusedNote}
                     embedded
                   />
+                  </Suspense>
                 ),
               },
               {
@@ -753,12 +766,14 @@ export function AppShell() {
                 open: publishedSnapshotsOpen,
                 onClose: () => setPublishedSnapshotsOpen(false),
                 content: (
+                  <Suspense fallback={null}>
                   <PublishedSnapshotsBrowser
                     onOpenPublishModal={() => setPublishModalOpen(true)}
                     onRestoreSnapshot={handleRestoreSnapshot}
                     onClose={() => setPublishedSnapshotsOpen(false)}
                     embedded
                   />
+                  </Suspense>
                 ),
               },
             ] as RightPanel[]}
@@ -773,7 +788,7 @@ export function AppShell() {
 
       {/* Bottom bar — minimal in distraction-free mode */}
       <div className={`flex items-center justify-between border-t border-gray-700 bg-bg-dark px-4 py-1 text-xs shrink-0 ${distractionFree ? 'opacity-20 hover:opacity-60 transition-opacity' : ''}`}>
-        <MetricsBar wordCount={wordCount} bookWordCount={bookWordCount} />
+        <LiveMetricsBar bookWordCount={bookWordCount} />
         <DailyTarget bookWordCount={bookWordCount} />
         <div className="flex items-center gap-3">
           <button
@@ -784,19 +799,13 @@ export function AppShell() {
             className={`flex items-center gap-1 tabular-nums transition-colors ${
               writeathonConfig?.active ||
               activeBoardQuests.length > 0 ||
-              activeSessions.length > 0
+              activeSessionCount > 0
                 ? 'text-amber-400 hover:text-amber-300'
                 : 'text-amber-500 hover:text-amber-400'
             }`}
             title="Adventurer's Guild"
           >
-            <Coins
-              size={12}
-              className={coinPulsing ? 'animate-coin-pulse' : ''}
-            />
-            <span className={`tabular-nums${coinPulsing ? ' animate-coin-pulse' : ''}`}>
-              {coins.toLocaleString()}
-            </span>
+            <CoinBalance />
           </button>
           {vimEnabled && <VimStatusLine mode={vimCurrentMode} />}
         </div>

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageJSONStorage } from './localforageStorage'
 import type { PlayerFileData, PlayerStats } from '../types'
 import { getItemById } from '../lib/items'
 
@@ -23,18 +23,7 @@ interface PlayerState {
   setRetroactiveGrantApplied: () => void
 }
 
-const localforageStorage = createJSONStorage<PlayerState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    return value
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+const localforageStorage = localforageJSONStorage<PlayerState>()
 
 export const usePlayerStore = create<PlayerState>()(
   persist(
