@@ -384,6 +384,18 @@ const statMarkerBaseTheme = EditorView.baseTheme({
     fontStyle: 'italic',
     color: '#78716c',
   },
+  // Light editor themes (e.g. Parchment): dark ink on a faint tint.
+  '&light .cm-stat-chip': {
+    backgroundColor: 'rgba(68,52,32,0.08)',
+    color: '#57534e',
+  },
+  '&light .cm-stat-chip:hover': {
+    backgroundColor: 'rgba(68,52,32,0.14)',
+    color: '#292524',
+  },
+  '&light .cm-stat-chip-more, &light .cm-stat-chip-empty': {
+    color: '#78716c',
+  },
 })
 
 /** Bundle of the StateField, ViewPlugin, and base theme. */

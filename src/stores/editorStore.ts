@@ -14,6 +14,12 @@ interface EditorState extends EditorPreferences {
   statChipMode: StatChipMode
   setStatChipMode: (mode: StatChipMode) => void
   cycleStatChipMode: () => void
+  /** Offer ghost-chip stat changes for sentences that describe one (local matching). */
+  statSuggestions: boolean
+  /** Suggestion pattern keys the writer asked never to see again. */
+  mutedStatSuggestions: string[]
+  toggleStatSuggestions: () => void
+  muteStatSuggestions: (keys: string[]) => void
   setVimMode: (enabled: boolean) => void
   toggleVimMode: () => void
   setFontFamily: (family: EditorPreferences['fontFamily']) => void
@@ -49,7 +55,12 @@ export const useEditorStore = create<EditorState>()(
       recentColors: [],
       rightPanelActiveTab: null,
       statChipMode: 'chips',
+      statSuggestions: true,
+      mutedStatSuggestions: [],
 
+      toggleStatSuggestions: () => set({ statSuggestions: !get().statSuggestions }),
+      muteStatSuggestions: (keys: string[]) =>
+        set({ mutedStatSuggestions: [...new Set([...get().mutedStatSuggestions, ...keys])] }),
       setStatChipMode: (mode: StatChipMode) => set({ statChipMode: mode }),
       cycleStatChipMode: () => {
         const next: Record<StatChipMode, StatChipMode> = { chips: 'dots', dots: 'hidden', hidden: 'chips' }
@@ -114,6 +125,8 @@ export const useEditorStore = create<EditorState>()(
           recentColors: state.recentColors,
           rightPanelActiveTab: state.rightPanelActiveTab,
           statChipMode: state.statChipMode,
+          statSuggestions: state.statSuggestions,
+          mutedStatSuggestions: state.mutedStatSuggestions,
         }) as unknown as EditorState,
     }
   )

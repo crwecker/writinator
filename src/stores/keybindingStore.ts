@@ -18,6 +18,8 @@ export type ActionName =
   | 'openFile'
   | 'toggleVim'
   | 'cycleStatChips'
+  | 'toggleStatSuggestions'
+  | 'toggleChapterSummary'
   | 'toggleQuietMode'
 
 export interface KeyCombo {
@@ -47,6 +49,8 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   openFile: 'Open file',
   toggleVim: 'Toggle VIM mode',
   cycleStatChips: 'Cycle stat change display', // no default binding
+  toggleStatSuggestions: 'Toggle stat suggestions', // no default binding
+  toggleChapterSummary: 'Toggle chapter summary', // no default binding
   toggleQuietMode: 'Toggle quiet mode', // no default binding (avoids VIM conflicts)
 }
 
