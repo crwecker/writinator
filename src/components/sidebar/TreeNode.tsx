@@ -3,6 +3,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
 import { getIconComponent } from '../../lib/icons'
 import { AppearancePicker } from './AppearancePicker'
+import { useStoryletHoverCard } from './useStoryletHoverCard'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import type { Storylet } from '../../types'
@@ -64,6 +65,11 @@ export function TreeNode({
     setNodeRef,
     isDragging,
   } = useSortable({ id: storylet.id })
+
+  const hoverCard = useStoryletHoverCard(
+    storylet.id,
+    isDragging || isDragSource || isEditing || showContextMenu || showAppearancePicker,
+  )
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -167,6 +173,7 @@ export function TreeNode({
 
   return (
     <div className="relative" ref={setNodeRef}>
+      {hoverCard.card}
       {/* Insert-before indicator line */}
       {dropIndicator === 'insert-before' && (
         <div
@@ -187,6 +194,8 @@ export function TreeNode({
           ${dropIndicator === 'reparent' ? 'bg-blue-500/20' : ''}
           ${dropIndicator === 'invalid' ? 'bg-red-500/10' : ''}`}
         onClick={() => !isEditing && onClick()}
+        onMouseEnter={hoverCard.onMouseEnter}
+        onMouseLeave={hoverCard.onMouseLeave}
         onDoubleClick={locked ? undefined : startEditing}
         onContextMenu={locked ? undefined : handleContextMenu}
         {...(locked ? {} : attributes)}

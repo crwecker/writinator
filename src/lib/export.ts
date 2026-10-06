@@ -7,6 +7,7 @@ import type {
   Storylet,
   EquippedItem,
   StatDelta,
+  StatDefinition,
   StatValue,
 } from '../types'
 import type { Root, Content, Parent, PhrasingContent } from 'mdast'
@@ -29,6 +30,8 @@ import { NOTE_MARKER_REGEX } from './noteUtils'
 import { expandRefs, formatStatValueInline } from './statRefs'
 import { EXPORT_VALUE_FORMAT, formatStatValue } from './statFormat'
 import { renderStoryletAsMarkdown, renderStoryletAsHtml } from './render'
+import { renderThemedStatblockText } from './statblockThemes'
+import type { StatblockTheme } from '../types'
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -263,8 +266,8 @@ export function buildDocumentStylesCss(styles: DocumentStyles | undefined): stri
 export type StatblockExportFormat = 'markdown' | 'html' | 'docx' | 'epub' | 'plain'
 
 /** A stat value as it reads in an exported statblock (see `EXPORT_VALUE_FORMAT`). */
-export function formatStatValueForExport(v: StatValue): string {
-  return formatStatValue(v, EXPORT_VALUE_FORMAT)
+export function formatStatValueForExport(v: StatValue, def?: StatDefinition): string {
+  return formatStatValue(v, EXPORT_VALUE_FORMAT, def)
 }
 
 /**
@@ -276,14 +279,18 @@ export function renderStatblockText(
   state: CharacterState,
   effective: Record<string, StatValue>,
   fields: string[] | undefined,
-  format: StatblockExportFormat
+  format: StatblockExportFormat,
+  theme: StatblockTheme = 'classic'
 ): string {
+  if (theme !== 'classic') {
+    return renderThemedStatblockText(character, state, effective, fields, format, theme)
+  }
   const defs = resolveStatblockDefinitions(character, fields)
   const lines: Array<{ label: string; value: string }> = []
   for (const def of defs) {
     const v = effective[def.id]
     if (!v) continue
-    lines.push({ label: def.name, value: formatStatValueForExport(v) })
+    lines.push({ label: def.name, value: formatStatValueForExport(v, def) })
   }
   const equippedEntries: [string, EquippedItem][] = Object.entries(state.equipped)
   const buffs: ActiveBuff[] = state.activeBuffs
@@ -343,6 +350,8 @@ export interface CharacterMarkerContext {
   characters: Character[]
   markers: Record<string, StatDelta[]>
   snippets: Record<string, string> | undefined
+  /** The book's status-window look (absent = classic). */
+  statblockTheme?: StatblockTheme
 }
 
 export function getCharacterMarkerContext(
@@ -357,6 +366,7 @@ export function getCharacterMarkerContext(
     characters: store.characters,
     markers: store.markers,
     snippets: slStore.globalSettings.snippets,
+    statblockTheme: slStore.globalSettings.statblockTheme,
   }
 }
 
@@ -402,7 +412,8 @@ export function processCharacterMarkers(
       computed.state,
       computed.effective,
       fields,
-      format
+      format,
+      ctx.statblockTheme
     )
     // Bracket with blank lines so it becomes its own block in markdown/html.
     return `\n\n${rendered}\n\n`
@@ -440,7 +451,7 @@ export function processCharacterMarkers(
         })
         const value = computed.effective[hit.def.id]
         if (!value) return null
-        return formatStatValueInline(value, hit.subkey)
+        return formatStatValueInline(value, hit.subkey, hit.def)
       },
     })
   }

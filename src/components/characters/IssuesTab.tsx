@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import type { EditorView } from '@codemirror/view'
-import type { Book, Character, ConsistencyIssue } from '../../types'
+import type { Book, Character, ConsistencyIssue, StatDelta } from '../../types'
+import type { OrphanLink, ReattachSuggestion } from '../../lib/relink'
+import { buildMarkerChip } from '../../lib/statFormat'
 
 interface IssuesTabProps {
   issues: ConsistencyIssue[]
@@ -12,6 +14,15 @@ interface IssuesTabProps {
   onCreateEmptyDelta: (markerId: string) => void
   onDeleteInverseOrphan: (markerId: string) => void
   onAddSlot: (characterId: string, slot: string) => void
+  /** Store entries, to describe what a lost change did. */
+  markers?: Record<string, StatDelta[]>
+  /** Where each lost change (inverse orphan) likely belonged, keyed by marker id. */
+  reattachSuggestions?: Record<string, ReattachSuggestion>
+  /** Text markers that lost their change, paired with a matching lost change. */
+  orphanLinks?: OrphanLink[]
+  onReattach?: (markerId: string, suggestion: ReattachSuggestion) => void
+  onReattachAtCursor?: (markerId: string) => void
+  onLinkOrphan?: (link: OrphanLink) => void
 }
 
 function groupIssues(issues: ConsistencyIssue[]): Record<ConsistencyIssue['kind'], ConsistencyIssue[]> {
@@ -45,6 +56,12 @@ export function IssuesTab({
   onCreateEmptyDelta,
   onDeleteInverseOrphan,
   onAddSlot,
+  markers,
+  reattachSuggestions,
+  orphanLinks,
+  onReattach,
+  onReattachAtCursor,
+  onLinkOrphan,
 }: IssuesTabProps) {
   if (!book) {
     return <div className="text-center text-xs text-gray-500 py-8">No active book.</div>
@@ -64,6 +81,14 @@ export function IssuesTab({
     characters.find((c) => c.id === id)?.name ?? 'Unknown'
   const docName = (id: string | undefined) =>
     id ? book.storylets.find((d) => d.id === id)?.name ?? '(unknown doc)' : '(unknown doc)'
+  const charactersById = new Map(characters.map((c) => [c.id, c]))
+  const describeChange = (markerId: string): string | null => {
+    const deltas = markers?.[markerId]
+    if (!deltas || deltas.length === 0) return null
+    return buildMarkerChip(deltas, charactersById).text
+  }
+  const linkForText = (markerId: string) => orphanLinks?.find((l) => l.textMarkerId === markerId)
+  const linkForStore = (markerId: string) => orphanLinks?.find((l) => l.storeMarkerId === markerId)
 
   return (
     <div className="space-y-3" data-testid="character-panel-issues">
@@ -92,6 +117,15 @@ export function IssuesTab({
                         <span className="text-gray-300">{docName(issue.storyletId)}</span>
                       </div>
                       <div className="flex gap-1.5 flex-wrap">
+                        {(() => {
+                          const link = linkForText(issue.markerId)
+                          if (!link || !onLinkOrphan) return null
+                          return (
+                            <IssueButton onClick={() => onLinkOrphan(link)}>
+                              Restore lost change{describeChange(link.storeMarkerId) ? ` (${describeChange(link.storeMarkerId)})` : ''}
+                            </IssueButton>
+                          )
+                        })()}
                         <IssueButton onClick={() => onRemoveOrphanFromText(issue.markerId, issue.storyletId)}>
                           Remove from text
                         </IssueButton>
@@ -111,7 +145,26 @@ export function IssuesTab({
                         <code className="text-gray-400">{issue.markerId.slice(0, 8)}…</code>
                         <span className="text-gray-500"> has no text reference.</span>
                       </div>
-                      <div className="flex gap-1.5">
+                      {describeChange(issue.markerId) && (
+                        <div className="text-gray-400 truncate">{describeChange(issue.markerId)}</div>
+                      )}
+                      <div className="flex gap-1.5 flex-wrap">
+                        {(() => {
+                          const suggestion = reattachSuggestions?.[issue.markerId]
+                          if (!suggestion || !onReattach || linkForStore(issue.markerId)) return null
+                          return (
+                            <IssueButton onClick={() => onReattach(issue.markerId, suggestion)}>
+                              {suggestion.reason === 'excerpt'
+                                ? `Re-attach in ${docName(suggestion.storyletId)}`
+                                : `Re-attach at end of ${docName(suggestion.storyletId)}`}
+                            </IssueButton>
+                          )
+                        })()}
+                        {onReattachAtCursor && !linkForStore(issue.markerId) && (
+                          <IssueButton onClick={() => onReattachAtCursor(issue.markerId)}>
+                            Re-attach at cursor
+                          </IssueButton>
+                        )}
                         <IssueButton onClick={() => onDeleteInverseOrphan(issue.markerId)}>
                           Delete store entry
                         </IssueButton>

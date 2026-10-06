@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCharacterStore, DEFAULT_RANK_TIERS } from '../../stores/characterStore'
 import { StatFieldEditor } from './StatFieldEditor'
+import { NewCharacterMenu } from './NewCharacterMenu'
+import { CurrencyToggle } from './CurrencyToggle'
 import { planStatTypeChange } from '../../lib/statTypeChange'
 import { useStoryletStore } from '../../stores/storyletStore'
 import type { StatDefinition, StatType, StatValue } from '../../types'
@@ -74,7 +76,6 @@ export function CharacterSheetModal({ open, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
   const characters = useCharacterStore((s) => s.characters)
-  const createCharacter = useCharacterStore((s) => s.createCharacter)
   const updateCharacter = useCharacterStore((s) => s.updateCharacter)
   const removeCharacter = useCharacterStore((s) => s.removeCharacter)
   const setBaseValue = useCharacterStore((s) => s.setBaseValue)
@@ -119,11 +120,6 @@ export function CharacterSheetModal({ open, onClose }: Props) {
 
   if (!open) return null
 
-  function handleNewCharacter() {
-    const id = createCharacter('New Character')
-    setSelectedId(id)
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div
@@ -146,13 +142,7 @@ export function CharacterSheetModal({ open, onClose }: Props) {
         <div className="flex flex-1 min-h-0">
           {/* Character list */}
           <div className="w-56 shrink-0 border-r border-gray-700 bg-gray-800/50 flex flex-col">
-            <button
-              data-testid="new-character"
-              onClick={handleNewCharacter}
-              className="text-sm text-gray-200 bg-gray-700 hover:bg-gray-600 transition-colors m-2 rounded px-2 py-1.5"
-            >
-              + New Character
-            </button>
+            <NewCharacterMenu selected={selected} onCreated={setSelectedId} />
             <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
               {characters.map((c) => (
                 <button
@@ -577,6 +567,11 @@ function CharacterSheet({
                     </select>
                   </div>
                 )}
+                <CurrencyToggle
+                  stat={stat}
+                  value={value}
+                  onChange={(currency) => onUpdateStatDef(stat.id, { currency })}
+                />
                 {value && (
                   <StatFieldEditor
                     definition={stat}

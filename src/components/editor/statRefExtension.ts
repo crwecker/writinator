@@ -292,7 +292,7 @@ function buildDecorations(view: EditorView): DecorationSet {
     })
     const value = computed.effective[hit.def.id]
     if (!value) return null
-    return formatStatValueInline(value, hit.subkey)
+    return formatStatValueInline(value, hit.subkey, hit.def)
   }
 
   const builder = new RangeSetBuilder<Decoration>()

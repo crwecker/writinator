@@ -14,7 +14,8 @@ import {
 import { createRoot, type Root } from 'react-dom/client'
 import { createElement } from 'react'
 import { STATBLOCK_MARKER_REGEX, parseStatblockOptions, statblockFields } from '../../lib/markerUtils'
-import StatBlockWidget from '../characters/StatBlockWidget'
+// Renders the classic StatBlockWidget, or the book's chosen status-window theme.
+import ThemedStatBlock from '../characters/ThemedStatBlock'
 import { useStoryletStore } from '../../stores/storyletStore'
 import type { Book } from '../../types'
 import { getLiveBook, liveBookChanged } from './statRefExtension'
@@ -75,7 +76,7 @@ class StatBlockWidgetType extends WidgetType {
 
   private render(root: Root): void {
     root.render(
-      createElement(StatBlockWidget, {
+      createElement(ThemedStatBlock, {
         characterId: this.characterId,
         fields: this.fields,
         storyletId: this.storyletId,

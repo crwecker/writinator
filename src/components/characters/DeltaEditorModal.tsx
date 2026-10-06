@@ -26,6 +26,9 @@ import {
   type DeltaVerb,
 } from '../../lib/deltaVerbs'
 import { liveBookFor, stateLookupAt } from './statEntryContext'
+import { CatalogItemOptions } from './CatalogItemOptions'
+import { useItemCatalogStore } from '../../stores/itemCatalogStore'
+import { equipFromCatalog } from '../../lib/itemCatalog'
 
 interface Props {
   open: boolean
@@ -602,10 +605,12 @@ function VerbParams({ verb, op, character, onChange }: VerbParamsProps) {
             <input
               type="text"
               value={op.name}
+              list={kind === 'inventory' ? 'delta-catalog-items' : undefined}
               onChange={(e) => onChange({ ...op, name: e.target.value })}
               placeholder={`${noun.toLowerCase()} name`}
               className={INPUT_CLS}
             />
+            {kind === 'inventory' && <CatalogItemOptions id="delta-catalog-items" />}
           </Field>
           {op.kind === 'itemAdd' && kind === 'inventory' && (
             <Field label="Qty">
@@ -804,6 +809,7 @@ function EquipParams({
   const slots = character?.equipmentSlots ?? []
   return (
     <div className="space-y-2">
+      <CatalogItemOptions id="delta-catalog-equip-items" />
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-1.5">
           <span className="text-xs text-gray-400">Slot</span>
@@ -825,7 +831,11 @@ function EquipParams({
           <input
             type="text"
             value={op.itemId}
-            onChange={(e) => onChange({ ...op, itemId: e.target.value })}
+            list="delta-catalog-equip-items"
+            // A catalog item brings its slot and stat bonuses along.
+            onChange={(e) =>
+              onChange(equipFromCatalog(op, e.target.value, character, useItemCatalogStore.getState().items))
+            }
             placeholder="item id"
             className={INPUT_CLS}
           />

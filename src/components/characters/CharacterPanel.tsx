@@ -12,9 +12,13 @@ import { SnippetsTab } from './SnippetsTab'
 import { GraphTab } from './GraphTab'
 import { IssuesTab } from './IssuesTab'
 import { ChangesTab } from './ChangesTab'
+import { ItemsTab } from './ItemsTab'
+import { MechanicsDisplaySettings } from './MechanicsDisplaySettings'
+import { suggestOrphanLinks, suggestReattach, type ReattachSuggestion } from '../../lib/relink'
+import { insertMarkerIntoStorylet } from '../../lib/reattachMarker'
 import type { ConsistencyIssue } from '../../types'
 
-type PanelTab = 'stats' | 'snippets' | 'graph' | 'issues' | 'changes'
+type PanelTab = 'stats' | 'snippets' | 'graph' | 'issues' | 'changes' | 'items'
 
 interface Props {
   open: boolean
@@ -74,6 +78,20 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
 
   const canEdit = !!activeStoryletId && !!editorView
 
+  // Re-link lost changes: suggestions are measured against the live text so
+  // offsets into the open storylet line up with the editor.
+  const relink = useMemo(() => {
+    const suggestions: Record<string, ReattachSuggestion> = {}
+    if (tab !== 'issues' || !liveBook) return { suggestions, links: [] }
+    for (const issue of issues) {
+      if (issue.kind !== 'inverseOrphan') continue
+      const s = suggestReattach(liveBook, markers[issue.markerId] ?? [])
+      if (s) suggestions[issue.markerId] = s
+    }
+    const hasTextOrphans = issues.some((i) => i.kind === 'orphanMarker')
+    return { suggestions, links: hasTextOrphans ? suggestOrphanLinks(liveBook, markers) : [] }
+  }, [tab, issues, liveBook, markers])
+
   // Why these values differ from a statblock further down: they're computed here.
   const activeStorylet = book?.storylets.find((s) => s.id === activeStoryletId)
   // Only the prose just before the cursor matters; don't stringify the whole chapter per keystroke.
@@ -120,6 +138,9 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
         <TabButton active={tab === 'snippets'} onClick={() => setTab('snippets')} testId="character-panel-tab-snippets">
           Snippets
         </TabButton>
+        <TabButton active={tab === 'items'} onClick={() => setTab('items')} testId="character-panel-tab-items">
+          Items
+        </TabButton>
         <TabButton active={tab === 'graph'} onClick={() => setTab('graph')} testId="character-panel-tab-graph">
           Graph
         </TabButton>
@@ -142,7 +163,7 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
-        {characters.length === 0 && tab !== 'snippets' ? (
+        {characters.length === 0 && tab !== 'snippets' && tab !== 'items' ? (
           <div
             data-testid="character-panel-empty"
             className="text-center text-xs text-gray-500 py-8 space-y-3"
@@ -169,6 +190,8 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
           />
         ) : tab === 'snippets' ? (
           <SnippetsTab editorView={editorView} canEdit={canEdit} />
+        ) : tab === 'items' ? (
+          <ItemsTab />
         ) : tab === 'graph' ? (
           <GraphTab
             characters={characters}
@@ -211,9 +234,43 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
               if (character.equipmentSlots.includes(slot)) return
               setEquipmentSlots(characterId, [...character.equipmentSlots, slot])
             }}
+            markers={markers}
+            reattachSuggestions={relink.suggestions}
+            orphanLinks={relink.links}
+            onReattach={(markerId, suggestion) => {
+              if (!liveBook) return
+              insertMarkerIntoStorylet({
+                book: liveBook,
+                storyletId: suggestion.storyletId,
+                activeStoryletId,
+                view: editorView,
+                offset: suggestion.offset,
+                markerId,
+              })
+            }}
+            onReattachAtCursor={
+              canEdit && liveBook && activeStoryletId
+                ? (markerId) =>
+                    insertMarkerIntoStorylet({
+                      book: liveBook,
+                      storyletId: activeStoryletId,
+                      activeStoryletId,
+                      view: editorView,
+                      offset: cursorOffset,
+                      markerId,
+                    })
+                : undefined
+            }
+            onLinkOrphan={(link) => {
+              const deltas = useCharacterStore.getState().markers[link.storeMarkerId]
+              if (!deltas) return
+              setMarker(link.textMarkerId, deltas)
+              removeMarkerFromStore(link.storeMarkerId)
+            }}
           />
         )}
       </div>
+      <MechanicsDisplaySettings />
     </>
   )
 

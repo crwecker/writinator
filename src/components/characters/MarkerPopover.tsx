@@ -3,6 +3,7 @@ import type { EditorView } from '@codemirror/view'
 import { Pencil, X } from 'lucide-react'
 import { useCharacterStore } from '../../stores/characterStore'
 import { useStoryletStore } from '../../stores/storyletStore'
+import { useItemCatalogStore } from '../../stores/itemCatalogStore'
 import { findDocStatMarkers, mergeEntriesIntoDeltas } from '../../lib/insertStatDelta'
 import { opToQuickEntry, type QuickEntryContext, type QuickEntryResult } from '../../lib/quickEntry'
 import { previewOp, type OpPreview } from '../../lib/statPreview'
@@ -42,6 +43,8 @@ export function MarkerPopover({ open, onClose, editorView, markerId, onOpenFullE
   const storyletId = useStoryletStore((s) => s.activeStoryletId)
   const [editing, setEditing] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  const catalog = useItemCatalogStore((s) => s.items)
+  const currency = useItemCatalogStore((s) => s.currency)
 
   const deltas = useMemo(() => (markerId ? markers[markerId] ?? [] : []), [markers, markerId])
   const docMarker = useMemo(
@@ -70,13 +73,13 @@ export function MarkerPopover({ open, onClose, editorView, markerId, onOpenFullE
       }
       working.set(character.id, state)
       const snapshot = new Map(working)
-      const { row, after: next } = previewOp(character, state, d.op)
-      out.push({ delta: d, preview: row, editText: opToQuickEntry(d.op, character, state), before: snapshot })
+      const { row, after: next } = previewOp(character, state, d.op, { catalog, currency })
+      out.push({ delta: d, preview: row, editText: opToQuickEntry(d.op, character, state, catalog), before: snapshot })
       working.set(character.id, next)
     }
     const afterLookup = (id: string) => working.get(id) ?? stateBefore(id)
     return { rows: out, after: afterLookup }
-  }, [deltas, characters, markers, book, storyletId, editorView, docMarker])
+  }, [deltas, characters, markers, book, storyletId, editorView, docMarker, catalog, currency])
 
   useEffect(() => {
     if (!open) return

@@ -3,6 +3,9 @@ import type { EditorView } from '@codemirror/view'
 import { insertStatDelta } from '../../lib/insertStatDelta'
 import { PANEL_VALUE_FORMAT, formatStatValue } from '../../lib/statFormat'
 import { ListItemSection, PlainListSection } from './ListItemSection'
+import { CharacterLoadLine } from './CharacterLoad'
+import { useItemCatalogStore } from '../../stores/itemCatalogStore'
+import { formatStatValueWithCurrency } from '../../lib/itemCatalog'
 import type {
   Character,
   CharacterState,
@@ -159,6 +162,8 @@ function StatRow({ character, def, base, effective, testId, canEdit, editorView 
     }
     prevEffectiveRef.current = effective
   }, [effective])
+  const currency = useItemCatalogStore((s) => s.currency)
+  const shownValue = formatStatValueWithCurrency(effective, def, currency) ?? formatValue(effective)
   const isTextEditable = def.type === 'text' && canEdit && !!editorView
   const commitText = (raw: string) => {
     setEditingText(null)
@@ -217,9 +222,9 @@ function StatRow({ character, def, base, effective, testId, canEdit, editorView 
               className={`text-sm tabular-nums truncate ${
                 differs ? 'text-blue-300' : 'text-gray-200'
               } ${isTextEditable ? 'cursor-text hover:text-gray-100' : ''}`}
-              title={isTextEditable ? 'Click to edit' : formatValue(effective)}
+              title={isTextEditable ? 'Click to edit' : shownValue}
             >
-              {formatValue(effective)}
+              {shownValue}
             </span>
           )}
           {differs && (
@@ -483,6 +488,8 @@ function CharacterSection({ character, computed, canEdit, editorView }: SectionP
               </div>
             ) : null,
           )}
+
+          <CharacterLoadLine character={character} state={state} effective={effective} />
 
           {/* Active buffs */}
           <div className="space-y-1 pt-1 border-t border-gray-800">

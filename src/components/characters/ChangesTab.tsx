@@ -3,6 +3,8 @@ import { getStoryletTreeOrder } from '../../lib/characterState'
 import { extractMarkers } from '../../lib/markerUtils'
 import { formatOpSummary, statNameLookup } from '../../lib/statFormat'
 import type { Book, Character, StatDelta } from '../../types'
+import { buildStatTimeline, timelineToCsv } from '../../lib/timelineCsv'
+import { downloadTextFile } from '../../lib/downloadFile'
 
 interface ChangeEntry {
   markerId: string
@@ -61,8 +63,22 @@ export function ChangesTab({
   const charById = new Map(characters.map((c) => [c.id, c]))
   let lastDocId: string | null = null
 
+  const exportCsv = () => {
+    const csv = timelineToCsv(buildStatTimeline(book, characters, markers))
+    downloadTextFile(csv, `${book.title || 'Book'} - stat timeline.csv`, 'text/csv')
+  }
+
   return (
     <div className="space-y-2" data-testid="character-panel-changes">
+      <div className="flex justify-end">
+        <button
+          onClick={exportCsv}
+          title="Every stat change as a spreadsheet: chapter, position, excerpt, character, stat, change, value after"
+          className="px-2 py-0.5 text-[10px] text-gray-400 border border-gray-700 hover:border-gray-500 hover:text-gray-200 rounded transition-colors"
+        >
+          Export CSV
+        </button>
+      </div>
       {entries.map((entry) => {
         const newDoc = entry.storyletId !== lastDocId
         lastDocId = entry.storyletId
