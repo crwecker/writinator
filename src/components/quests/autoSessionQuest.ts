@@ -12,7 +12,8 @@ let inFlight = false
 let pendingWords = 0
 
 function hasUntimedQuest(): boolean {
-  return useImageRevealStore.getState().activeSessions.some((s) => s.timeMinutes === undefined)
+  // Chapter/revision quests don't progress on typing, so they don't count here.
+  return useImageRevealStore.getState().activeSessions.some((s) => s.timeMinutes === undefined && s.progressSource === undefined)
 }
 
 async function start(): Promise<void> {

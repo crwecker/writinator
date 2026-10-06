@@ -21,6 +21,7 @@ import type {
 import { TagChipInput } from './TagChipInput'
 import { ColorPickerPopover } from './ColorPickerPopover'
 import { TagPopover } from './TagPopover'
+import { NoteQuestButton } from '../quests/NoteQuestButton'
 import { findStoryletWithMarker, markerCommentRegex, removeMarkerFromStorylet } from '../../lib/removeMarker'
 
 interface Props {
@@ -222,6 +223,7 @@ function StoryletNoteRow({
               }}
               data-testid="storylet-note-color"
             />
+            <NoteQuestButton body={draft} testIdPrefix="storylet-note" />
             <button
               ref={tagButtonRef}
               type="button"
@@ -545,6 +547,7 @@ function PositionNoteRow({
               }}
               data-testid="position-note-color"
             />
+            <NoteQuestButton body={draft} testIdPrefix="position-note" />
             <button
               ref={tagButtonRef}
               type="button"

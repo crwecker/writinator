@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { BookOpen, ExternalLink, Image as ImageIcon, X } from 'lucide-react'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
+import { useProgressionStore } from '../../stores/progressionStore'
+import { useStoryletStore } from '../../stores/storyletStore'
+import { GALLERY_SET_SIZE, GALLERY_SETS, gallerySetMeta, inferPictureSource, type PictureSource } from '../../lib/gallerySets'
 import { getWeaponMultiplier } from '../../lib/items'
 import { estimateSessionCoins, sessionDifficulty } from '../../lib/questRewards'
 import type { ImageRevealSession } from '../../types'
@@ -11,6 +14,7 @@ import { SessionTimer } from './ImageRevealWidgets'
 import { CoinAmount, DifficultyBadge, EmptyState, GuildButton, QuestProgress, SectionHeading } from './QuestUi'
 import { formatCoinRange } from './questStyles'
 import { useSessionImages } from './useSessionImages'
+import { useGalleryFrameClass } from '../../stores/cosmeticsStore'
 
 function boardCoinsFor(quest: { coinReward: number; bonusCoins?: number } | undefined): number {
   return quest ? quest.coinReward + (quest.bonusCoins ?? 0) : 0
@@ -57,6 +61,7 @@ function ActiveQuestCard({
             <DifficultyBadge difficulty={sessionDifficulty({ ...session, timeMinutes: session.timeMinutes })} />
           )}
         </div>
+        <TrackedHint session={session} />
         <div className="mt-2">
           <QuestProgress value={session.wordsWritten} max={session.wordGoal} />
         </div>
@@ -92,20 +97,51 @@ function ActiveQuestCard({
   )
 }
 
+/** What a chapter or revision quest measures (they don't progress on general typing). */
+function TrackedHint({ session }: { session: ImageRevealSession }) {
+  const tracking = useProgressionStore((s) => s.tracked[session.id])
+  const storyletName = useStoryletStore((s) =>
+    tracking?.kind === 'storylet' ? s.book?.storylets.find((st) => st.id === tracking.storyletId)?.name : undefined,
+  )
+  if (session.progressSource === 'revision') {
+    return <p className="mt-0.5 text-[11px] text-sky-300/80">Counts words you revise in existing text</p>
+  }
+  if (session.progressSource === 'storylet') {
+    return (
+      <p className="mt-0.5 truncate text-[11px] text-emerald-300/80">
+        Counts words in {storyletName ? `“${storyletName}”` : 'its storylet'}
+      </p>
+    )
+  }
+  return null
+}
+
 const RESULT_BADGE: Record<NonNullable<ImageRevealSession['result']>, { label: string; className: string }> = {
   success: { label: 'Revealed', className: 'bg-emerald-900/80 text-emerald-200' },
   failure: { label: "Time's up", className: 'bg-orange-950/80 text-orange-200' },
   abandoned: { label: 'Abandoned', className: 'bg-stone-800/90 text-stone-300' },
 }
 
-function GalleryItem({ session, onOpen }: { session: ImageRevealSession; onOpen: () => void }) {
+function GalleryItem({
+  session,
+  onOpen,
+  frameClass,
+  defaultFrameClass,
+}: {
+  session: ImageRevealSession
+  onOpen: () => void
+  /** A completed set's frame (border colour + glow); wins over the bought frame. */
+  frameClass?: string
+  /** The frame chosen in the Armory (full border classes). */
+  defaultFrameClass: string
+}) {
   const result = session.result ?? 'success'
   const badge = RESULT_BADGE[result]
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="group relative aspect-[4/3] overflow-hidden rounded-lg border-4 border-amber-950 bg-stone-900 shadow-[0_6px_16px_-6px_rgba(0,0,0,0.9)] outline-none ring-amber-400 transition-transform hover:-translate-y-0.5 focus-visible:ring-2"
+      className={`group relative aspect-[4/3] overflow-hidden rounded-lg ${frameClass ? `border-4 ${frameClass}` : `${defaultFrameClass} shadow-[0_6px_16px_-6px_rgba(0,0,0,0.9)]`} bg-stone-900 outline-none ring-amber-400 transition-transform hover:-translate-y-0.5 focus-visible:ring-2`}
     >
       <img
         src={session.imageUrl}
@@ -164,8 +200,10 @@ function Lightbox({ session, onClose }: { session: ImageRevealSession; onClose: 
                   </a>
                   {' on Unsplash'}
                 </>
-              ) : (
+              ) : session.imageUrl.startsWith('data:image/svg') ? (
                 ' · Generated scene'
+              ) : (
+                ' · Your picture'
               )}
             </p>
           </div>
@@ -188,13 +226,48 @@ function Lightbox({ session, onClose }: { session: ImageRevealSession; onClose: 
   )
 }
 
+function SetChip({ active, done = false, onClick, children }: { active: boolean; done?: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+        active
+          ? 'border-amber-500 bg-amber-500/15 text-amber-100'
+          : done
+            ? 'border-amber-700/60 text-amber-200/90 hover:border-amber-500'
+            : 'border-stone-700 text-stone-400 hover:border-stone-500 hover:text-stone-200'
+      }`}
+    >
+      {done && <span aria-hidden="true">✦ </span>}
+      {children}
+    </button>
+  )
+}
+
 /** Journal tab: quests in progress and the gallery of revealed images. */
 export function QuestJournalPanel({ onFindQuests }: { onFindQuests: () => void }) {
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
   const completedSessions = useImageRevealStore((s) => s.completedSessions)
   const activeBoardQuests = useWriteathonStore((s) => s.activeBoardQuests)
+  const boughtFrameClass = useGalleryFrameClass()
   const images = useSessionImages(activeSessions)
   const [viewing, setViewing] = useState<string | null>(null)
+  const [setFilter, setSetFilter] = useState<PictureSource | null>(null)
+  const reveals = useProgressionStore((s) => s.reveals)
+  const sourceByUrl = useProgressionStore((s) => s.sourceByUrl)
+  const completedSets = useProgressionStore((s) => s.completedSets)
+  const sourceOf = useMemo(() => {
+    const byId = new Map(reveals.map((r) => [r.id, r.source]))
+    return (session: ImageRevealSession): PictureSource =>
+      byId.get(session.id) ?? inferPictureSource(session.imageUrl, sourceByUrl[session.imageUrl])
+  }, [reveals, sourceByUrl])
+  const setCounts = useMemo(() => {
+    const counts = new Map<PictureSource, number>()
+    for (const r of reveals) counts.set(r.source, (counts.get(r.source) ?? 0) + 1)
+    return counts
+  }, [reveals])
 
   // Newest first, whatever order the store keeps them in.
   const gallery = useMemo(
@@ -212,7 +285,13 @@ export function QuestJournalPanel({ onFindQuests }: { onFindQuests: () => void }
       <section>
         <SectionHeading
           title="In progress"
-          subtitle={activeSessions.length > 0 ? 'Every word you write counts toward all of these at once.' : undefined}
+          subtitle={
+            activeSessions.length === 0
+              ? undefined
+              : activeSessions.some((s) => s.progressSource)
+                ? 'Your writing counts toward these at once. Chapter and revision quests count only their own words.'
+                : 'Every word you write counts toward all of these at once.'
+          }
         />
         {activeSessions.length === 0 ? (
           <EmptyState icon={<BookOpen size={28} />} title="No quests underway">
@@ -247,11 +326,36 @@ export function QuestJournalPanel({ onFindQuests }: { onFindQuests: () => void }
             Finished quests hang here.
           </EmptyState>
         ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {gallery.map((session) => (
-              <GalleryItem key={session.id} session={session} onOpen={() => setViewing(session.id)} />
-            ))}
-          </div>
+          <>
+            <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Gallery sets">
+              <SetChip active={setFilter === null} onClick={() => setSetFilter(null)}>All</SetChip>
+              {GALLERY_SETS.filter((g) => (setCounts.get(g.source) ?? 0) > 0 || completedSets[g.source]).map((g) => (
+                <SetChip key={g.source} active={setFilter === g.source} done={!!completedSets[g.source]} onClick={() => setSetFilter(g.source)}>
+                  {g.label}{' '}
+                  <span className="tabular-nums opacity-70">
+                    {Math.min(setCounts.get(g.source) ?? 0, GALLERY_SET_SIZE)}/{GALLERY_SET_SIZE}
+                  </span>
+                </SetChip>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {gallery
+                .filter((session) => setFilter === null || sourceOf(session) === setFilter)
+                .map((session) => {
+                  const source = sourceOf(session)
+                  const framed = completedSets[source] && (session.result ?? 'success') === 'success'
+                  return (
+                    <GalleryItem
+                      key={session.id}
+                      session={session}
+                      frameClass={framed ? gallerySetMeta(source).frameClass : undefined}
+                      defaultFrameClass={boughtFrameClass}
+                      onOpen={() => setViewing(session.id)}
+                    />
+                  )
+                })}
+            </div>
+          </>
         )}
       </section>
 

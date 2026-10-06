@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react'
-import { Clock, Feather, Loader2, PenLine, ScrollText, Sun } from 'lucide-react'
+import { BookOpen, Clock, Feather, Loader2, PenLine, Scissors, ScrollText, Sun } from 'lucide-react'
 import type { QuestDifficulty } from '../../types'
 import { DIFFICULTY_STYLES, formatCoinRange, formatMinutes } from './questStyles'
 
-export type QuestCardKind = 'daily' | 'permanent' | 'villager'
+export type QuestCardKind = 'daily' | 'permanent' | 'villager' | 'chapter' | 'revision'
 export type QuestCardStatus = 'available' | 'accepted' | 'done'
 
 const KIND_META: Record<QuestCardKind, { label: string; icon: ReactNode }> = {
   daily: { label: 'Writeathon', icon: <Sun size={12} /> },
   permanent: { label: 'Guild contract', icon: <Feather size={12} /> },
   villager: { label: 'Villager request', icon: <ScrollText size={12} /> },
+  chapter: { label: 'From your book', icon: <BookOpen size={12} /> },
+  revision: { label: 'Revision', icon: <Scissors size={12} /> },
 }
 
 interface QuestCardProps {
@@ -100,7 +102,7 @@ export function QuestCard({
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-stone-700">
         <span className="inline-flex items-center gap-1">
           <PenLine size={12} />
-          {wordGoal.toLocaleString()} words
+          {wordGoal.toLocaleString()} {kind === 'revision' ? 'revised words' : kind === 'chapter' ? 'words in this storylet' : 'words'}
         </span>
         {timeMinutes !== undefined && (
           <span className="inline-flex items-center gap-1">

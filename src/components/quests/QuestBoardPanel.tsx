@@ -13,6 +13,8 @@ import { SectionHeading } from './QuestUi'
 import { WriteathonBanner } from './WriteathonBanner'
 import { WriteathonSetup } from './WriteathonSetup'
 import { useAcceptQuest } from './useAcceptQuest'
+import { PicturePicker } from './PicturePicker'
+import { BookQuestsSection } from './BookQuestsSection'
 
 const TIMER_CHOICES: Array<number | undefined> = [undefined, 10, 20, 30]
 
@@ -56,6 +58,8 @@ export function QuestBoardPanel() {
   return (
     <div className="relative space-y-8 p-6">
       <WriteathonBanner onManage={() => setSetupOpen(true)} />
+
+      <PicturePicker />
 
       {error && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-red-900/60 bg-red-950/60 px-4 py-2 text-sm text-red-200">
@@ -105,6 +109,8 @@ export function QuestBoardPanel() {
           })}
         </div>
       </section>
+
+      <BookQuestsSection />
 
       <section>
         <SectionHeading title="Villager requests" subtitle="Quests you've pinned for yourself." />

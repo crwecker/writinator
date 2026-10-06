@@ -1,5 +1,6 @@
 import { installAutoSessionQuest } from './autoSessionQuest'
 import { installSessionTracker } from './sessionRecap'
+import { installProgression } from '../../stores/progressionStore'
 
 let installed = false
 
@@ -9,4 +10,5 @@ export function ensureQuestAutomation(): void {
   installed = true
   installAutoSessionQuest()
   installSessionTracker()
+  installProgression()
 }

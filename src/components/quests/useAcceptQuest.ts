@@ -2,9 +2,8 @@ import { useState } from 'react'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { usePlayerStore } from '../../stores/playerStore'
-import { useGameSettingsStore } from '../../stores/gameSettingsStore'
-import { fetchRandomImage } from '../../lib/unsplash'
-import { getQuestImage, type QuestImage } from '../../lib/questArt'
+import { type QuestImage } from '../../lib/questArt'
+import { chooseQuestImage } from './questPicture'
 import { getArmorTimeBonus } from '../../lib/items'
 import { PERMANENT_QUESTS, createBoardQuest } from '../../lib/writeathon'
 import type { BoardQuest, ImageRevealSession } from '../../types'
@@ -19,10 +18,9 @@ export function acceptBlocker(quest: Pick<BoardQuest, 'timeMinutes'>): string | 
   return null
 }
 
-/** A picture for a new quest: an Unsplash photo in the chosen theme, or generated art. */
+/** A picture for a new quest: the writer's chosen picture, an Unsplash photo in the chosen theme, or generated art. */
 export function questImage(): Promise<QuestImage> {
-  const theme = useGameSettingsStore.getState().imageTheme
-  return getQuestImage(() => fetchRandomImage(theme))
+  return chooseQuestImage()
 }
 
 /** Start an image-reveal session for an already-fetched picture. Returns '' if blocked. */

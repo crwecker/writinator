@@ -106,7 +106,7 @@ interface ImageRevealState {
     unsplashId?: string,
     timeMinutes?: number,
     title?: string,
-    options?: { boardCoins?: number },
+    options?: { boardCoins?: number; progressSource?: ImageRevealSession['progressSource'] },
   ) => string
   addWords: (count: number) => void
   creditWords: (sessionId: string, count: number) => void
@@ -213,7 +213,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
         unsplashId?: string,
         timeMinutes?: number,
         title?: string,
-        options?: { boardCoins?: number },
+        options?: { boardCoins?: number; progressSource?: ImageRevealSession['progressSource'] },
       ) => {
         const { activeSessions } = get()
         if (activeSessions.length >= 25) return ''
@@ -248,6 +248,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
             ? { timeMinutes: adjustedTimeMinutes, baseTimeMinutes: timeMinutes, pausedDuration: 0 }
             : {}),
           ...(options?.boardCoins ? { boardCoins: options.boardCoins } : {}),
+          ...(options?.progressSource ? { progressSource: options.progressSource } : {}),
         }
         set({ activeSessions: [...activeSessions, newSession] })
         return id
@@ -271,7 +272,8 @@ export const useImageRevealStore = create<ImageRevealState>()(
         }
 
         const coinsBefore = usePlayerStore.getState().coins
-        const finished = applyWords(count, burstCount, () => true, newEffects)
+        // Chapter and revision quests progress on their own measure, not typing.
+        const finished = applyWords(count, burstCount, (s) => s.progressSource === undefined, newEffects)
         emitProgress({ words: count, coins: Math.max(0, usePlayerStore.getState().coins - coinsBefore), finished })
       },
 

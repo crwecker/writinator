@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { BookOpen, ScrollText, Settings, Swords, X } from 'lucide-react'
+import { BookOpen, Landmark, ScrollText, Settings, Swords, X } from 'lucide-react'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { getArmorTimeBonus, getItemById, getWeaponMultiplier } from '../../lib/items'
 import { QuestBoardPanel } from './QuestBoardPanel'
 import { QuestJournalPanel } from './QuestJournalPanel'
 import { ArmoryPanel } from './ArmoryPanel'
+import { HallPanel } from './HallPanel'
+import { AuthorLevelBadge } from './AuthorLevel'
 import { CoinAmount } from './QuestUi'
 import { GuildSettingsPopover } from './GuildSettingsPopover'
 
-export type GuildTab = 'board' | 'journal' | 'armory'
+export type GuildTab = 'board' | 'journal' | 'armory' | 'hall'
 
 interface AdventurersGuildProps {
   open: boolean
@@ -86,6 +88,7 @@ export function AdventurersGuild({ open, activeTab, onTabChange, onClose }: Adve
     { id: 'board', label: 'Quest Board', icon: <ScrollText size={15} /> },
     { id: 'journal', label: 'Journal', icon: <BookOpen size={15} />, badge: activeCount },
     { id: 'armory', label: 'Armory', icon: <Swords size={15} /> },
+    { id: 'hall', label: 'Hall', icon: <Landmark size={15} /> },
   ]
 
   // The board shows more of the wood so the parchment looks pinned to it.
@@ -107,6 +110,7 @@ export function AdventurersGuild({ open, activeTab, onTabChange, onClose }: Adve
               <p className="mt-0.5 text-sm text-stone-400">Write to reveal pictures, earn coins and gear up.</p>
             </div>
             <div className="flex items-center gap-3">
+              <AuthorLevelBadge onOpen={() => onTabChange('hall')} />
               <PlayerStrip />
               <div className="relative">
                 <button
@@ -172,6 +176,7 @@ export function AdventurersGuild({ open, activeTab, onTabChange, onClose }: Adve
           {activeTab === 'board' && <QuestBoardPanel />}
           {activeTab === 'journal' && <QuestJournalPanel onFindQuests={() => onTabChange('board')} />}
           {activeTab === 'armory' && <ArmoryPanel />}
+          {activeTab === 'hall' && <HallPanel />}
         </div>
       </div>
     </div>
