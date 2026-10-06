@@ -78,6 +78,12 @@ export interface ImageRevealSession {
   pausedDuration?: number   // default 0, only for timed quests
   result?: QuestResult      // success/failure/abandoned — only for timed quests
   coinsEarned?: number      // recorded at completion
+  /** Time limit the writer chose, before armor or Second Wind extended it. */
+  baseTimeMinutes?: number
+  /** Coins the linked board quest pays on its own when this session succeeds. */
+  boardCoins?: number
+  /** Words written while Word Burst was active (they earn double coins). */
+  burstWords?: number
 }
 
 export interface Snapshot {

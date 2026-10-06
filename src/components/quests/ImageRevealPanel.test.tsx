@@ -7,7 +7,10 @@ import { makeSession } from '../../test/questFixtures'
 import { render, type Rendered } from '../../test/render'
 
 vi.mock('../../lib/pixelate', () => ({ drawPixelated: vi.fn(), animateReveal: vi.fn(() => () => {}) }))
-vi.mock('../../lib/unsplash', () => ({ loadImage: vi.fn(() => new Promise(() => {})) }))
+vi.mock('../../lib/unsplash', () => ({
+  loadImage: vi.fn(() => new Promise(() => {})),
+  fetchRandomImage: vi.fn(() => Promise.reject(new Error('offline'))),
+}))
 
 let view: Rendered | null = null
 
@@ -69,5 +72,21 @@ describe('ImageRevealPanel results', () => {
     expandPanel(view.container)
     expect(view.container.textContent).toContain('Time’s Up!')
     expect(view.container.textContent).toContain('40 / 100 words')
+  })
+
+  it('stays open on the new quest after "Another 100?"', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    useImageRevealStore.setState({ activeSessions: [makeSession('only')] })
+    view = render(<ImageRevealPanel />)
+    expandPanel(view.container)
+    act(() => useImageRevealStore.getState().addWords(100))
+    const another = [...view.container.querySelectorAll('button')].find((b) => /Another 100\?/.test(b.textContent ?? ''))
+    expect(another).toBeDefined()
+    await act(async () => {
+      another!.click()
+      for (let i = 0; i < 10; i++) await Promise.resolve()
+    })
+    expect(useImageRevealStore.getState().activeSessions).toHaveLength(1)
+    expect(view.container.querySelector('[title*="xpand"]')).toBeNull()
   })
 })

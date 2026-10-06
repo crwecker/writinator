@@ -40,6 +40,7 @@ import { renderModeField, setRenderModeEffect } from './renderMode'
 import { markdownDecorationPlugin, docStylesChangedEffect } from './markdownDecorations'
 import { countWords } from '../../lib/words'
 import { isWritingUpdate, wordCountDelta } from './wordCount'
+import { isLargePaste } from '../../lib/pasteRule'
 import {
   editorHistory,
   isProgrammaticLoad,
@@ -514,7 +515,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             // Undo/redo, snapshot restores and marker insertion change the text
             // but aren't writing: save them, but keep them out of WPM, metrics
             // and quest progress.
-            const countAsWriting = isWritingUpdate(update.transactions)
+            // Pastes over 50 words aren't writing either (quests, streaks, metrics).
+            const countAsWriting = isWritingUpdate(update.transactions) && !isLargePaste(update.transactions)
             // WPM ring-buffer sampling — hot path, must be cheap.
             if (countAsWriting && delta > 0) {
               useMetricsStore.getState().recordWpmSample(delta, Date.now())

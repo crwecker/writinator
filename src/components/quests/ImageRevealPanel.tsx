@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
+import { useGameSettingsStore } from '../../stores/gameSettingsStore'
 import { CollapsedThumbnail } from './ImageRevealCanvases'
 import { SessionTimer } from './ImageRevealWidgets'
 import { ImageRevealResult } from './ImageRevealResult'
@@ -13,6 +14,7 @@ import { useSessionImages } from './useSessionImages'
 type UserView = 'collapsed' | 'mini' | 'expanded'
 
 export function ImageRevealPanel() {
+  const quiet = useGameSettingsStore((s) => s.quietMode)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
   const resultQueue = useImageRevealStore((s) => s.resultQueue)
   const isPaused = useImageRevealStore((s) => s.isPaused)
@@ -31,7 +33,8 @@ export function ImageRevealPanel() {
   // ------------------------------------------------------------------
   const hasAnything = activeSessions.length > 0 || resultQueue.length > 0
 
-  if (!hasAnything) return null
+  // Quiet mode: results wait in the queue and show once it's turned off.
+  if (!hasAnything || quiet) return null
 
   const showingResult = userView !== 'collapsed' && resultQueue.length > 0
 
@@ -47,7 +50,8 @@ export function ImageRevealPanel() {
 
   const dismissResult = () => {
     useImageRevealStore.getState().dismissResult()
-    setUserView(activeSessions.length > 0 ? 'expanded' : 'collapsed')
+    // Read live state: "Another 500?" may have just started a new quest.
+    setUserView(useImageRevealStore.getState().activeSessions.length > 0 ? 'expanded' : 'collapsed')
   }
 
   const overallProgress =

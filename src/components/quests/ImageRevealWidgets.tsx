@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { getTimerState } from '../../lib/timer'
-import { CONSUMABLES } from '../../lib/items'
+import { CONSUMABLES, isPassiveConsumable } from '../../lib/items'
+
+// Passive items (Streak Freeze) work on their own and are never used from a quest.
+const QUEST_CONSUMABLES = CONSUMABLES.filter((c) => !isPassiveConsumable(c))
 import type { ImageRevealSession } from '../../types'
 
 function formatTime(seconds: number): string {
@@ -131,12 +134,12 @@ interface ConsumableButtonsProps {
 }
 
 export function ConsumableButtons({ inventory, onUse }: ConsumableButtonsProps) {
-  if (CONSUMABLES.length === 0) return null
+  if (QUEST_CONSUMABLES.length === 0) return null
   return (
     <div>
       <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-1.5">Consumables</p>
       <div className="flex items-center gap-2 flex-wrap">
-        {CONSUMABLES.map((item) => {
+        {QUEST_CONSUMABLES.map((item) => {
           const count = inventory[item.id] ?? 0
           return (
             <button

@@ -4,13 +4,17 @@ import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { getWeaponMultiplier } from '../../lib/items'
-import { calculateDifficulty, estimateQuestCoins } from '../../lib/questRewards'
+import { estimateSessionCoins, sessionDifficulty } from '../../lib/questRewards'
 import type { ImageRevealSession } from '../../types'
 import { CollapsedThumbnail } from './ImageRevealCanvases'
 import { SessionTimer } from './ImageRevealWidgets'
 import { CoinAmount, DifficultyBadge, EmptyState, GuildButton, QuestProgress, SectionHeading } from './QuestUi'
 import { formatCoinRange } from './questStyles'
 import { useSessionImages } from './useSessionImages'
+
+function boardCoinsFor(quest: { coinReward: number; bonusCoins?: number } | undefined): number {
+  return quest ? quest.coinReward + (quest.bonusCoins ?? 0) : 0
+}
 
 function sessionTitle(session: ImageRevealSession): string {
   return session.title ?? `${session.wordGoal.toLocaleString()}-word quest`
@@ -31,12 +35,7 @@ function ActiveQuestCard({
   const weaponMultiplier = usePlayerStore((s) => getWeaponMultiplier(s.equippedWeapon))
   const remaining = Math.max(session.wordGoal - session.wordsWritten, 0)
   const pct = Math.round(Math.min(session.wordsWritten / session.wordGoal, 1) * 100)
-  const coins = estimateQuestCoins({
-    wordGoal: session.wordGoal,
-    questCoins,
-    weaponMultiplier,
-    timeMinutes: session.timeMinutes,
-  })
+  const coins = estimateSessionCoins(session, weaponMultiplier, questCoins)
 
   return (
     <article className="flex gap-4 rounded-xl border border-stone-700/70 bg-stone-900/85 p-3 shadow-lg">
@@ -55,7 +54,7 @@ function ActiveQuestCard({
         <div className="flex items-start justify-between gap-2">
           <h3 className="truncate font-serif text-lg font-semibold text-amber-50">{sessionTitle(session)}</h3>
           {session.timeMinutes !== undefined && (
-            <DifficultyBadge difficulty={calculateDifficulty(session.wordGoal, session.timeMinutes)} />
+            <DifficultyBadge difficulty={sessionDifficulty({ ...session, timeMinutes: session.timeMinutes })} />
           )}
         </div>
         <div className="mt-2">
@@ -227,9 +226,7 @@ export function QuestJournalPanel({ onFindQuests }: { onFindQuests: () => void }
                 key={session.id}
                 session={session}
                 image={images[session.id]}
-                questCoins={
-                  activeBoardQuests.find((q) => q.imageRevealSessionId === session.id)?.coinReward ?? 0
-                }
+                questCoins={session.boardCoins ?? boardCoinsFor(activeBoardQuests.find((q) => q.imageRevealSessionId === session.id))}
               />
             ))}
           </div>

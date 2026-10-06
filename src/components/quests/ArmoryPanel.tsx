@@ -18,7 +18,7 @@ const SHELVES: { id: Shelf; label: string }[] = [
 function effectText(item: Item): string {
   if (item.category === 'weapon') {
     const m = (item as WeaponItem).wordMultiplier
-    return m === 1 ? 'Each word counts once' : `Each word counts ×${m} toward quests and coins`
+    return m === 1 ? 'Standard coin rewards' : `×${m} coin rewards`
   }
   if (item.category === 'armor') {
     const b = (item as ArmorItem).timeBonus
@@ -87,7 +87,7 @@ function LoadoutSlot({ slot }: { slot: 'weapon' | 'armor' }) {
               >
                 <span className="text-lg" aria-hidden="true">{item.icon}</span>
                 <span className="flex-1 text-stone-200">{item.name}</span>
-                <span className="text-xs text-stone-400">{effectText(item).replace('toward quests and coins', '')}</span>
+                <span className="text-xs text-stone-400">{effectText(item)}</span>
                 {isEquipped && <Check size={14} className="text-emerald-400" />}
               </button>
             )
@@ -102,7 +102,7 @@ function LoadoutSlot({ slot }: { slot: 'weapon' | 'armor' }) {
 function upgradeText(item: Item, equippedWeapon: string, equippedArmor: string): string | null {
   if (item.category === 'weapon') {
     const diff = (item as WeaponItem).wordMultiplier - getWeaponMultiplier(equippedWeapon)
-    return diff > 0 ? `+${Math.round(diff * 100)}% per word vs. equipped` : null
+    return diff > 0 ? `+${Math.round(diff * 100)}% coins vs. equipped` : null
   }
   if (item.category === 'armor') {
     const diff = (item as ArmorItem).timeBonus - getArmorTimeBonus(equippedArmor)
@@ -242,7 +242,7 @@ export function ArmoryPanel() {
   return (
     <div className="space-y-8 p-6">
       <section>
-        <SectionHeading title="Your loadout" subtitle="Gear applies to every quest automatically." />
+        <SectionHeading title="Your loadout" subtitle="Gear applies to every quest automatically. Quills raise coin rewards; a 500-word quest always takes 500 words." />
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <LoadoutSlot slot="weapon" />
           <LoadoutSlot slot="armor" />

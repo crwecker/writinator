@@ -9,7 +9,8 @@ import type { VimMode } from '../editor/VimStatusLine'
 import { HamburgerMenu, type MenuAction } from './HamburgerMenu'
 import { flushAndPersistNow, useStoryletStore } from '../../stores/storyletStore'
 import { useCharacterStore } from '../../stores/characterStore'
-import { insertStatMarkerAtSelection } from '../editor/statMarkerInsert'
+import { StatEntryHost } from '../characters/StatEntryHost'
+import { useStatEntryStore } from '../characters/statEntryStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { getStoredFileHandle, getLastLocalWriteAt } from '../../lib/fileSystem'
 import { isTauri, onTauriCloseRequested } from '../../lib/tauri'
@@ -20,6 +21,9 @@ import { FindInBook } from './FindInBook'
 import type { GuildTab } from '../quests/AdventurersGuild'
 import { ImageRevealPanel } from '../quests/ImageRevealPanel'
 import { QuestReminder } from '../quests/QuestReminder'
+import { QuestStatusRing } from '../quests/QuestStatusRing'
+import { QuestSessionLayer } from '../quests/QuestSessionLayer'
+import { useGameSettingsStore } from '../../stores/gameSettingsStore'
 import { RightPanelShell, type RightPanel } from './RightPanelShell'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
@@ -41,6 +45,7 @@ import { DailyTarget } from './DailyTarget'
 import { MilestoneFlash } from './MilestoneFlash'
 import { WriteathonCompleteCelebration } from '../quests/WriteathonCompleteCelebration'
 import { MetricsBar } from './MetricsBar'
+import { StreakFlame } from './StreakFlame'
 
 // Heavy panels/modals that are only shown on demand — split out of the main chunk.
 const ExportDialog = lazy(() => import('./ExportDialog').then((m) => ({ default: m.ExportDialog })))
@@ -93,6 +98,7 @@ function CoinBalance() {
 // Top-bar entry to the guild, with a badge for quests in progress.
 function QuestsButton({ onOpen }: { onOpen: (hasActive: boolean) => void }) {
   const active = useImageRevealStore((s) => s.activeSessions.length)
+  const quiet = useGameSettingsStore((s) => s.quietMode)
   return (
     <button
       type="button"
@@ -102,7 +108,7 @@ function QuestsButton({ onOpen }: { onOpen: (hasActive: boolean) => void }) {
     >
       <Swords size={13} />
       Quests
-      {active > 0 && (
+      {active > 0 && !quiet && (
         <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-bold leading-4 text-stone-950">{active}</span>
       )}
     </button>
@@ -149,7 +155,9 @@ export function AppShell() {
   const sidebarOpen = useEditorStore((s) => s.sidebarOpen)
   const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
   const vimEnabled = useEditorStore((s) => s.vimMode)
+  const statChipMode = useEditorStore((s) => s.statChipMode)
   const toggleVimMode = useEditorStore((s) => s.toggleVimMode)
+  const quietMode = useGameSettingsStore((s) => s.quietMode)
   const keymap = useKeybindingStore((s) => s.keymap)
 
   const activeStorylet = book?.storylets?.find((storylet) => storylet.id === activeStoryletId)
@@ -186,6 +194,10 @@ export function AppShell() {
   }, [storyletTitleValue, activeStoryletId, activeStorylet?.name, renameStorylet])
 
   const handleWordCountChange = useCallback((c: number) => useWordCountStore.getState().setWordCount(c), [])
+  const openGuildJournal = useCallback(() => {
+    setGuildTab('journal')
+    setGuildOpen(true)
+  }, [])
   const handleVimModeChange = useCallback((m: VimMode) => setVimCurrentMode(m), [])
   const handleEditorView = useCallback((v: EditorView | null) => {
     setEditorView(v)
@@ -220,7 +232,7 @@ export function AppShell() {
       if (!markerId) return
       e.preventDefault()
       e.stopPropagation()
-      setDeltaEditorState({ open: true, markerId, mode: 'edit' })
+      useStatEntryStore.getState().openMarkerPopover(markerId)
     }
     contentDOM.addEventListener('click', onClick)
     return () => contentDOM.removeEventListener('click', onClick)
@@ -259,8 +271,8 @@ export function AppShell() {
     const view = editorViewRef.current
     if (!view) return
     if (locked) return
-    insertStatMarkerAtSelection(view, handleInsertMarker)
-  }, [locked, handleInsertMarker])
+    useStatEntryStore.getState().openQuickEntry()
+  }, [locked])
 
   const handleInsertNote = useCallback(() => {
     const view = editorViewRef.current
@@ -318,6 +330,11 @@ export function AppShell() {
       if (km.toggleTypewriter && matchesEvent(km.toggleTypewriter, e)) {
         e.preventDefault()
         toggleDistractionFree()
+        return
+      }
+      if (km.toggleQuietMode && matchesEvent(km.toggleQuietMode, e)) {
+        e.preventDefault()
+        useGameSettingsStore.getState().toggleQuietMode()
         return
       }
       if (km.findInBook && matchesEvent(km.findInBook, e)) {
@@ -380,6 +397,11 @@ export function AppShell() {
       if (km.toggleVim && matchesEvent(km.toggleVim, e)) {
         e.preventDefault()
         toggleVimMode()
+        return
+      }
+      if (km.cycleStatChips && matchesEvent(km.cycleStatChips, e)) {
+        e.preventDefault()
+        useEditorStore.getState().cycleStatChipMode()
         return
       }
     }
@@ -541,23 +563,26 @@ export function AppShell() {
     { action: 'toggleRenderMode', label: 'Cycle presentation', onSelect: toggleRenderMode },
     { action: 'toggleFileTree', label: 'Toggle file tree', onSelect: () => useEditorStore.getState().toggleSidebar() },
     { action: 'toggleVim', label: vimEnabled ? 'Turn off VIM mode' : 'Turn on VIM mode', onSelect: toggleVimMode },
+    { action: 'toggleQuietMode', label: quietMode ? 'Turn off quiet mode' : 'Turn on quiet mode (hide game UI)', onSelect: () => useGameSettingsStore.getState().toggleQuietMode() },
     { action: 'findInBook', label: 'Find in book', onSelect: () => setFindOpen((prev) => !prev) },
     { action: 'snapshotHistory', label: 'History', onSelect: togglePublishedSnapshots },
     { action: 'toggleCharacterPanel', label: 'Character stats', onSelect: toggleCharacterPanel },
     { action: 'toggleNotesPanel', label: 'Notes', onSelect: toggleNotesPanel },
     { action: 'insertStatMarker', label: 'Insert stat change', onSelect: handleInsertStatMarker },
+    { action: 'cycleStatChips', label: `Stat changes: ${statChipMode} (cycle)`, onSelect: () => useEditorStore.getState().cycleStatChipMode() },
     { action: 'closeBook', label: 'Open new book', onSelect: () => { void useStoryletStore.getState().closeBook() } },
   ]
 
   if (!hasHydrated) return null
-  if (!book) return <LandingPage />
+  if (!book) return <><LandingPage /><QuestSessionLayer /></>
 
   return (
     <>
     <RewardToast />
     <GenericToast />
-    <MilestoneFlash />
-    <WriteathonCompleteCelebration />
+    {!quietMode && <MilestoneFlash />}
+    <QuestSessionLayer />
+    {!quietMode && <WriteathonCompleteCelebration />}
     <div className="flex flex-col h-screen w-screen bg-bg-darker text-gray-200 overflow-hidden">
       {/* Top bar — hidden in distraction-free mode */}
       {!distractionFree && (
@@ -742,6 +767,7 @@ export function AppShell() {
               />
             )}
           </Suspense>
+          <StatEntryHost editorView={editorView} onOpenDeltaEditor={handleInsertMarker} />
         </div>
 
         {!distractionFree && (
@@ -816,6 +842,8 @@ export function AppShell() {
         <LiveMetricsBar bookWordCount={bookWordCount} />
         <DailyTarget bookWordCount={bookWordCount} />
         <div className="flex items-center gap-3">
+          <StreakFlame />
+          <QuestStatusRing onOpen={openGuildJournal} />
           <button
             onClick={() => {
               setGuildTab('board')

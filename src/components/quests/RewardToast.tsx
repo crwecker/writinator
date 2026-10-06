@@ -2,6 +2,7 @@ import { useState, useEffect, useSyncExternalStore } from 'react'
 import { Coins } from 'lucide-react'
 import { subscribeToasts, getToastsSnapshot } from './rewardToastStore'
 import type { Toast } from './rewardToastStore'
+import { useGameSettingsStore } from '../../stores/gameSettingsStore'
 
 // ── Individual toast item ────────────────────────────────────────────────────
 
@@ -47,8 +48,9 @@ function ToastItem({ toast }: { toast: Toast }) {
 
 export function RewardToast() {
   const currentToasts = useSyncExternalStore(subscribeToasts, getToastsSnapshot)
+  const quiet = useGameSettingsStore((s) => s.quietMode)
 
-  if (currentToasts.length === 0) return null
+  if (currentToasts.length === 0 || quiet) return null
 
   return (
     <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">

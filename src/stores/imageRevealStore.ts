@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import { localforageJSONStorage } from './localforageStorage'
 import type { ActiveEffect, ImageRevealFileData, ImageRevealSession } from '../types'
 import { getWeaponMultiplier, getArmorTimeBonus, getItemById } from '../lib/items'
-import { calculateDifficulty, calculateQuestReward } from '../lib/questRewards'
+import { calculateQuestReward, sessionDifficulty } from '../lib/questRewards'
 import { getTimerState } from '../lib/timer'
 import { usePlayerStore } from './playerStore'
 
@@ -19,6 +19,66 @@ export function getPixelLevelIndex(progress: number): number {
 
 export function getPixelLevel(progress: number): number {
   return PIXEL_LEVELS[getPixelLevelIndex(progress)]
+}
+
+/** What one batch of counted words (or a timer running out) did for the player. */
+export interface QuestProgressEvent {
+  /** Words counted as writing (0 for a timed-out quest). */
+  words: number
+  /** Coins the player gained, including board-quest rewards paid alongside. */
+  coins: number
+  /** Quests completed successfully. */
+  finished: number
+}
+
+type QuestProgressListener = (e: QuestProgressEvent) => void
+const progressListeners = new Set<QuestProgressListener>()
+
+/**
+ * Subscribe to counted words and quest payouts. Fires on every `addWords`
+ * (even with no quest running) and when a timed quest runs out. Returns an
+ * unsubscribe function.
+ */
+export function onQuestProgress(listener: QuestProgressListener): () => void {
+  progressListeners.add(listener)
+  return () => {
+    progressListeners.delete(listener)
+  }
+}
+
+function emitProgress(e: QuestProgressEvent): void {
+  for (const l of [...progressListeners]) l(e)
+}
+
+/** Coins a successful session pays, including its Word Burst bonus. */
+function completionCoins(session: ImageRevealSession, wordsWritten: number, isPaused: boolean, pauseStartedAt: number | null): number {
+  const weaponMultiplier = getWeaponMultiplier(usePlayerStore.getState().equippedWeapon)
+  let coins: number
+  if (session.timeMinutes !== undefined && session.pausedDuration !== undefined) {
+    const timerState = getTimerState(
+      Date.parse(session.startedAt),
+      session.timeMinutes * 60,
+      session.pausedDuration,
+      isPaused && pauseStartedAt !== null ? pauseStartedAt : undefined,
+    )
+    coins = calculateQuestReward({
+      wordGoal: session.wordGoal,
+      wordsWritten,
+      weaponMultiplier,
+      timeMinutes: session.timeMinutes,
+      timeUsedSeconds: timerState.elapsedSeconds,
+      difficulty: sessionDifficulty({ ...session, timeMinutes: session.timeMinutes }),
+      boardCoins: session.boardCoins,
+    })
+  } else {
+    coins = calculateQuestReward({ wordGoal: session.wordGoal, wordsWritten, weaponMultiplier })
+  }
+  // Word Burst: burst words earn their share of the whole payout a second time.
+  const burstWords = session.burstWords ?? 0
+  if (burstWords > 0 && session.wordGoal > 0) {
+    coins += Math.floor((coins + (session.boardCoins ?? 0)) * Math.min(burstWords, session.wordGoal) / session.wordGoal)
+  }
+  return coins
 }
 
 interface ImageRevealState {
@@ -46,8 +106,10 @@ interface ImageRevealState {
     unsplashId?: string,
     timeMinutes?: number,
     title?: string,
+    options?: { boardCoins?: number },
   ) => string
   addWords: (count: number) => void
+  creditWords: (sessionId: string, count: number) => void
   tickTimer: () => void
   pauseTimer: () => void
   resumeTimer: () => void
@@ -67,7 +129,73 @@ function noTimedSessionsRemain(sessions: ImageRevealSession[]): boolean {
 
 export const useImageRevealStore = create<ImageRevealState>()(
   persist(
-    (set, get) => ({
+    (set, get) => {
+      /**
+       * Add `count` real words to the active sessions matching `include`,
+       * completing (and paying for) any that reach their goal. Gear never
+       * changes word progress. Returns how many sessions completed.
+       */
+      function applyWords(
+        count: number,
+        burstCount: number,
+        include: (s: ImageRevealSession) => boolean,
+        effects: ActiveEffect[],
+      ): number {
+        const { activeSessions, completedSessions, isPaused, pauseStartedAt, resultQueue } = get()
+        const playerState = usePlayerStore.getState()
+        const stillActive: ImageRevealSession[] = []
+        const newlyCompleted: ImageRevealSession[] = []
+
+        for (const session of activeSessions) {
+          // Skip finished sessions, ones not targeted, and timed sessions while paused
+          if (session.completed || !include(session) || (session.timeMinutes !== undefined && isPaused)) {
+            stillActive.push(session)
+            continue
+          }
+
+          const newWordsWritten = Math.min(session.wordsWritten + count, session.wordGoal)
+          const applied = newWordsWritten - session.wordsWritten
+          const burstWords = (session.burstWords ?? 0) + Math.min(burstCount, applied)
+          const withWords: ImageRevealSession = {
+            ...session,
+            wordsWritten: newWordsWritten,
+            currentLevel: getPixelLevelIndex(newWordsWritten / session.wordGoal),
+            ...(burstWords > 0 ? { burstWords } : {}),
+          }
+
+          if (newWordsWritten >= session.wordGoal) {
+            const coinsEarned = completionCoins(withWords, newWordsWritten, isPaused, pauseStartedAt)
+            if (coinsEarned > 0) playerState.addCoins(coinsEarned)
+            playerState.addQuestStats(1, newWordsWritten, coinsEarned)
+            newlyCompleted.push({
+              ...withWords,
+              completed: true,
+              completedAt: new Date().toISOString(),
+              result: 'success',
+              coinsEarned,
+            })
+          } else {
+            stillActive.push(withWords)
+          }
+        }
+
+        const updates: Partial<ImageRevealState> = {
+          activeSessions: stillActive,
+          completedSessions: [...completedSessions, ...newlyCompleted],
+          activeEffects: effects,
+          ...(newlyCompleted.length > 0 ? { resultQueue: [...resultQueue, ...newlyCompleted] } : {}),
+        }
+        // If all timed sessions are gone, clear timer state (Word Burst is kept:
+        // it pays out on any quest).
+        if (noTimedSessionsRemain(stillActive)) {
+          updates.isPaused = false
+          updates.pauseStartedAt = null
+        }
+        set(updates)
+        return newlyCompleted.length
+      }
+
+      return {
       activeSessions: [],
       completedSessions: [],
       isPaused: false,
@@ -85,6 +213,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
         unsplashId?: string,
         timeMinutes?: number,
         title?: string,
+        options?: { boardCoins?: number },
       ) => {
         const { activeSessions } = get()
         if (activeSessions.length >= 25) return ''
@@ -116,8 +245,9 @@ export const useImageRevealStore = create<ImageRevealState>()(
           ...(title ? { title } : {}),
           ...(photographer ? { photographer, photographerUrl } : {}),
           ...(adjustedTimeMinutes !== undefined
-            ? { timeMinutes: adjustedTimeMinutes, pausedDuration: 0 }
+            ? { timeMinutes: adjustedTimeMinutes, baseTimeMinutes: timeMinutes, pausedDuration: 0 }
             : {}),
+          ...(options?.boardCoins ? { boardCoins: options.boardCoins } : {}),
         }
         set({ activeSessions: [...activeSessions, newSession] })
         return id
@@ -125,120 +255,29 @@ export const useImageRevealStore = create<ImageRevealState>()(
 
       addWords: (count: number) => {
         if (count <= 0) return
-        const { activeSessions, completedSessions, isPaused, activeEffects, resultQueue } = get()
+        const { activeEffects } = get()
 
-        const playerState = usePlayerStore.getState()
-        const weaponMultiplier = getWeaponMultiplier(playerState.equippedWeapon)
-
-        // Apply Word Burst effect
-        const wordBurstIdx = activeEffects.findIndex((e) => e.type === 'wordBurst')
-        const hasWordBurst = wordBurstIdx !== -1
-        const effectiveCount = Math.ceil(count * weaponMultiplier * (hasWordBurst ? 2 : 1))
-
-        let newEffects = [...activeEffects]
-        if (hasWordBurst) {
-          const burst = newEffects[wordBurstIdx]
-          const newRemaining = burst.remainingValue - count
-          if (newRemaining <= 0) {
-            newEffects = newEffects.filter((_, i) => i !== wordBurstIdx)
-          } else {
-            newEffects = newEffects.map((e, i) =>
-              i === wordBurstIdx ? { ...e, remainingValue: newRemaining } : e
-            )
-          }
+        // Word Burst: the next N counted words earn double coins (progress is unchanged).
+        const burstIdx = activeEffects.findIndex((e) => e.type === 'wordBurst')
+        let burstCount = 0
+        let newEffects = activeEffects
+        if (burstIdx !== -1) {
+          const burst = activeEffects[burstIdx]
+          burstCount = Math.min(count, burst.remainingValue)
+          const remaining = burst.remainingValue - count
+          newEffects = remaining <= 0
+            ? activeEffects.filter((_, i) => i !== burstIdx)
+            : activeEffects.map((e, i) => (i === burstIdx ? { ...e, remainingValue: remaining } : e))
         }
 
-        const stillActive: ImageRevealSession[] = []
-        const newlyCompleted: ImageRevealSession[] = []
+        const coinsBefore = usePlayerStore.getState().coins
+        const finished = applyWords(count, burstCount, () => true, newEffects)
+        emitProgress({ words: count, coins: Math.max(0, usePlayerStore.getState().coins - coinsBefore), finished })
+      },
 
-        for (const session of activeSessions) {
-          if (session.completed) {
-            stillActive.push(session)
-            continue
-          }
-
-          // Skip timed sessions while paused
-          if (session.timeMinutes !== undefined && isPaused) {
-            stillActive.push(session)
-            continue
-          }
-
-          const newWordsWritten = Math.min(session.wordsWritten + effectiveCount, session.wordGoal)
-          const progress = newWordsWritten / session.wordGoal
-          const currentLevel = getPixelLevelIndex(progress)
-          const completed = newWordsWritten >= session.wordGoal
-
-          if (completed) {
-            // Calculate reward
-            const { pauseStartedAt } = get()
-            let coinsEarned = 0
-            if (session.timeMinutes !== undefined && session.pausedDuration !== undefined) {
-              const totalSeconds = session.timeMinutes * 60
-              const startedAtMs = Date.parse(session.startedAt)
-              const timerState = getTimerState(
-                startedAtMs,
-                totalSeconds,
-                session.pausedDuration,
-                isPaused && pauseStartedAt !== null ? pauseStartedAt : undefined,
-              )
-              const difficulty = calculateDifficulty(session.wordGoal, session.timeMinutes)
-              coinsEarned = calculateQuestReward({
-                wordGoal: session.wordGoal,
-                wordsWritten: newWordsWritten,
-                weaponMultiplier,
-                timeMinutes: session.timeMinutes,
-                timeUsedSeconds: timerState.elapsedSeconds,
-                difficulty,
-              })
-            } else {
-              coinsEarned = calculateQuestReward({
-                wordGoal: session.wordGoal,
-                wordsWritten: newWordsWritten,
-                weaponMultiplier,
-              })
-            }
-
-            if (coinsEarned > 0) {
-              playerState.addCoins(coinsEarned)
-            }
-            playerState.addQuestStats(1, newWordsWritten, coinsEarned)
-
-            const updated: ImageRevealSession = {
-              ...session,
-              wordsWritten: newWordsWritten,
-              currentLevel,
-              completed: true,
-              completedAt: new Date().toISOString(),
-              result: 'success',
-              coinsEarned,
-            }
-            newlyCompleted.push(updated)
-          } else {
-            const updated: ImageRevealSession = {
-              ...session,
-              wordsWritten: newWordsWritten,
-              currentLevel,
-            }
-            stillActive.push(updated)
-          }
-        }
-
-        const newActiveSessions = stillActive
-        const updates: Partial<ImageRevealState> = {
-          activeSessions: newActiveSessions,
-          completedSessions: [...completedSessions, ...newlyCompleted],
-          activeEffects: newEffects,
-          ...(newlyCompleted.length > 0 ? { resultQueue: [...resultQueue, ...newlyCompleted] } : {}),
-        }
-
-        // If all timed sessions are gone, clear timer state
-        if (noTimedSessionsRemain(newActiveSessions)) {
-          updates.isPaused = false
-          updates.pauseStartedAt = null
-          updates.activeEffects = []
-        }
-
-        set(updates)
+      creditWords: (sessionId: string, count: number) => {
+        if (count <= 0) return
+        applyWords(count, 0, (s) => s.id === sessionId, get().activeEffects)
       },
 
       tickTimer: () => {
@@ -327,10 +366,10 @@ export const useImageRevealStore = create<ImageRevealState>()(
         if (noTimedSessionsRemain(newActiveSessions)) {
           updates.isPaused = false
           updates.pauseStartedAt = null
-          updates.activeEffects = []
         }
 
         set(updates)
+        emitProgress({ words: 0, coins: partialCoins, finished: 0 })
       },
 
       abandonSession: (sessionId: string) => {
@@ -360,7 +399,6 @@ export const useImageRevealStore = create<ImageRevealState>()(
         if (noTimedSessionsRemain(newActiveSessions)) {
           updates.isPaused = false
           updates.pauseStartedAt = null
-          updates.activeEffects = []
         }
 
         set(updates)
@@ -432,7 +470,8 @@ export const useImageRevealStore = create<ImageRevealState>()(
       dismissResult: () => {
         set((state) => ({ resultQueue: state.resultQueue.slice(1) }))
       },
-    }),
+    }
+    },
     {
       name: 'writinator-image-reveal',
       storage: localforageStorage,

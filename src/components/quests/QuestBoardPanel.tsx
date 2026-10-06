@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { usePlayerStore } from '../../stores/playerStore'
+import { useGameSettingsStore } from '../../stores/gameSettingsStore'
 import { PERMANENT_QUESTS, createBoardQuest } from '../../lib/writeathon'
 import { getWeaponMultiplier } from '../../lib/items'
 import { calculateDifficulty, estimateQuestCoins } from '../../lib/questRewards'
@@ -48,6 +49,7 @@ export function QuestBoardPanel() {
   const villagerQuests = useWriteathonStore((s) => s.villagerQuests)
   const activeBoardQuests = useWriteathonStore((s) => s.activeBoardQuests)
   const weaponMultiplier = usePlayerStore((s) => getWeaponMultiplier(s.equippedWeapon))
+  const defaultTimer = useGameSettingsStore((s) => s.defaultTimerMinutes ?? undefined)
 
   const isActive = (q: BoardQuest) => activeBoardQuests.some((a) => a.id === q.id && a.accepted && !a.completedAt)
 
@@ -69,7 +71,8 @@ export function QuestBoardPanel() {
         />
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {PERMANENT_QUESTS.map((pq) => {
-            const minutes = timers[pq.wordGoal]
+            // A card the writer hasn't touched uses the default timer.
+            const minutes = pq.wordGoal in timers ? timers[pq.wordGoal] : defaultTimer
             const accepted = activeBoardQuests.some(
               (q) => q.type === 'permanent' && q.wordGoal === pq.wordGoal && !q.completedAt,
             )

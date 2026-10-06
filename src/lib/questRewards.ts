@@ -8,65 +8,60 @@ export function calculateDifficulty(wordGoal: number, timeMinutes: number): Ques
   return 'epic';
 }
 
-export function calculateReward(
-  wordGoal: number,
-  timeMinutes: number,
-  wordsWritten: number,
-  timeUsedSeconds: number,
-  difficulty: QuestDifficulty,
-): number {
-  if (wordsWritten < wordGoal) return 0;
-
-  const multiplierMap: Record<QuestDifficulty, number> = {
-    easy: 1.0,
-    medium: 1.5,
-    hard: 2.0,
-    epic: 3.0,
-  };
-
-  const base = wordGoal;
-  const difficultyMultiplier = multiplierMap[difficulty];
-  const completionRatio = Math.min(wordsWritten / wordGoal, 1.0);
-
-  const totalTimeSeconds = timeMinutes * 60;
-  const timeRemainingSeconds = totalTimeSeconds - timeUsedSeconds;
-  const speedBonus =
-    timeRemainingSeconds > 0 ? (timeRemainingSeconds / totalTimeSeconds) * 0.5 : 0;
-
-  return Math.floor(base * difficultyMultiplier * completionRatio * (1 + speedBonus));
+/**
+ * Difficulty of a timed session, judged on the time limit the writer chose —
+ * armor and Second Wind lengthen the clock but don't make the quest cheaper.
+ */
+export function sessionDifficulty(s: { wordGoal: number; timeMinutes: number; baseTimeMinutes?: number }): QuestDifficulty {
+  return calculateDifficulty(s.wordGoal, s.baseTimeMinutes ?? s.timeMinutes)
 }
 
+/** A timed quest pays this multiple of the same quest's untimed reward. */
+export const TIMED_REWARD_MULTIPLIER: Record<QuestDifficulty, number> = {
+  easy: 1.5,
+  medium: 2,
+  hard: 2.5,
+  epic: 3,
+}
+
+/** Finishing instantly adds this much on top; finishing at the buzzer adds nothing. */
+export const MAX_SPEED_BONUS = 0.2
+
+/** Speed bonus (0 … MAX_SPEED_BONUS) for the share of the timer left unused. */
+export function calculateSpeedBonus(timeMinutes: number, timeUsedSeconds: number): number {
+  const totalSeconds = timeMinutes * 60
+  const remaining = totalSeconds - timeUsedSeconds
+  return remaining > 0 && totalSeconds > 0 ? (remaining / totalSeconds) * MAX_SPEED_BONUS : 0
+}
+
+/** Everything a completed timed quest pays, given what the untimed quest would. */
+function timedTotal(untimedTotal: number, difficulty: QuestDifficulty, speedBonus: number): number {
+  return Math.floor(untimedTotal * TIMED_REWARD_MULTIPLIER[difficulty] * (1 + speedBonus))
+}
+
+/** The image-reveal session's own reward. Gear raises coins, never word progress. */
 export function calculateBaseReward(wordGoal: number, weaponMultiplier: number): number {
   return Math.floor(wordGoal * 0.1 * weaponMultiplier)
 }
 
+/**
+ * Extra coins a completed timed quest pays over its untimed reward
+ * (`untimedTotal` = board reward + session base reward).
+ */
 export function calculateTimedBonus(
-  wordGoal: number,
-  timeMinutes: number,
-  wordsWritten: number,
-  timeUsedSeconds: number,
+  untimedTotal: number,
   difficulty: QuestDifficulty,
+  timeMinutes: number,
+  timeUsedSeconds: number,
 ): number {
-  if (wordsWritten < wordGoal) return 0
-
-  const multiplierMap: Record<QuestDifficulty, number> = {
-    easy: 1.0,
-    medium: 1.5,
-    hard: 2.0,
-    epic: 3.0,
-  }
-
-  const difficultyMultiplier = multiplierMap[difficulty]
-  const completionRatio = Math.min(wordsWritten / wordGoal, 1.0)
-
-  const totalTimeSeconds = timeMinutes * 60
-  const timeRemainingSeconds = totalTimeSeconds - timeUsedSeconds
-  const speedBonus =
-    timeRemainingSeconds > 0 ? (timeRemainingSeconds / totalTimeSeconds) * 0.5 : 0
-
-  return Math.floor(wordGoal * difficultyMultiplier * completionRatio * (1 + speedBonus))
+  return timedTotal(untimedTotal, difficulty, calculateSpeedBonus(timeMinutes, timeUsedSeconds)) - untimedTotal
 }
 
+/**
+ * Coins the image-reveal session itself pays on completion. A linked board
+ * quest pays `boardCoins` separately, so for a timed quest the session pays
+ * the rest of the multiplied total: (board + base) × multiplier × speed − board.
+ */
 export function calculateQuestReward(opts: {
   wordGoal: number
   wordsWritten: number
@@ -74,20 +69,17 @@ export function calculateQuestReward(opts: {
   timeMinutes?: number
   timeUsedSeconds?: number
   difficulty?: QuestDifficulty
+  boardCoins?: number
 }): number {
   const base = calculateBaseReward(opts.wordGoal, opts.weaponMultiplier)
   if (
     opts.timeMinutes !== undefined &&
     opts.timeUsedSeconds !== undefined &&
-    opts.difficulty !== undefined
+    opts.difficulty !== undefined &&
+    opts.wordsWritten >= opts.wordGoal
   ) {
-    return base + calculateTimedBonus(
-      opts.wordGoal,
-      opts.timeMinutes,
-      opts.wordsWritten,
-      opts.timeUsedSeconds,
-      opts.difficulty,
-    )
+    const board = opts.boardCoins ?? 0
+    return base + calculateTimedBonus(base + board, opts.difficulty, opts.timeMinutes, opts.timeUsedSeconds)
   }
   return base
 }
@@ -110,18 +102,12 @@ export function getDifficultyLabel(difficulty: QuestDifficulty): string {
   }
 }
 
-const DIFFICULTY_MULTIPLIER: Record<QuestDifficulty, number> = {
-  easy: 1.0,
-  medium: 1.5,
-  hard: 2.0,
-  epic: 3.0,
-}
-
 /**
- * Coins a board quest pays if completed: the quest's own reward (+ bonus)
- * plus the image-reveal session's base reward, plus — for timed quests — the
- * timed bonus, which grows with how much time is left (up to +50%).
- * Returns the range from finishing right at the buzzer to finishing instantly.
+ * Coins a quest pays if completed: the quest's own reward (+ bonus) plus the
+ * image-reveal session's base reward. A timed quest multiplies that total by
+ * its difficulty (1.5×–3×) plus a speed bonus of up to +20%. Returns the range
+ * from finishing right at the buzzer to finishing instantly. `timeMinutes` is
+ * the limit the writer chose (before armor).
  */
 export function estimateQuestCoins(opts: {
   wordGoal: number
@@ -130,11 +116,25 @@ export function estimateQuestCoins(opts: {
   weaponMultiplier: number
   timeMinutes?: number
 }): { min: number; max: number } {
-  const fixed = opts.questCoins + (opts.bonusCoins ?? 0) + calculateBaseReward(opts.wordGoal, opts.weaponMultiplier)
-  if (opts.timeMinutes === undefined) return { min: fixed, max: fixed }
-  const multiplier = DIFFICULTY_MULTIPLIER[calculateDifficulty(opts.wordGoal, opts.timeMinutes)]
+  const untimed = opts.questCoins + (opts.bonusCoins ?? 0) + calculateBaseReward(opts.wordGoal, opts.weaponMultiplier)
+  if (opts.timeMinutes === undefined) return { min: untimed, max: untimed }
+  const difficulty = calculateDifficulty(opts.wordGoal, opts.timeMinutes)
   return {
-    min: fixed + Math.floor(opts.wordGoal * multiplier),
-    max: fixed + Math.floor(opts.wordGoal * multiplier * 1.5),
+    min: timedTotal(untimed, difficulty, 0),
+    max: timedTotal(untimed, difficulty, MAX_SPEED_BONUS),
   }
+}
+
+/** The coin estimate for a session already under way (board reward included). */
+export function estimateSessionCoins(
+  session: { wordGoal: number; timeMinutes?: number; baseTimeMinutes?: number; boardCoins?: number },
+  weaponMultiplier: number,
+  questCoins: number = session.boardCoins ?? 0,
+): { min: number; max: number } {
+  return estimateQuestCoins({
+    wordGoal: session.wordGoal,
+    questCoins,
+    weaponMultiplier,
+    timeMinutes: session.timeMinutes === undefined ? undefined : (session.baseTimeMinutes ?? session.timeMinutes),
+  })
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { countWords } from '../../lib/words'
+import { useGameSettingsStore } from '../../stores/gameSettingsStore'
 
 interface QuestReminderProps {
   onStartQuest: () => void
@@ -19,6 +20,8 @@ export function QuestReminder({ onStartQuest }: QuestReminderProps) {
   const activeStoryletId = useStoryletStore((s) => s.activeStoryletId)
   const book = useStoryletStore((s) => s.book)
   const activeSessions = useImageRevealStore((s) => s.activeSessions)
+  // Redundant when a session quest starts on its own; hidden in quiet mode.
+  const suppressed = useGameSettingsStore((s) => s.autoQuest.enabled || s.quietMode)
 
   const currentWordCount = (() => {
     if (!book || !activeStoryletId) return 0
@@ -66,7 +69,7 @@ export function QuestReminder({ onStartQuest }: QuestReminderProps) {
     onStartQuest()
   }
 
-  if (dismissed || activeSessions.length > 0) return null
+  if (dismissed || suppressed || activeSessions.length > 0) return null
 
   return (
     <div

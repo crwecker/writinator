@@ -17,6 +17,8 @@ export type ActionName =
   | 'findInBook'
   | 'openFile'
   | 'toggleVim'
+  | 'cycleStatChips'
+  | 'toggleQuietMode'
 
 export interface KeyCombo {
   key: string  // e.g. 'f', 's', 'h'
@@ -44,6 +46,8 @@ export const ACTION_LABELS: Record<ActionName, string> = {
   findInBook: 'Find in book',
   openFile: 'Open file',
   toggleVim: 'Toggle VIM mode',
+  cycleStatChips: 'Cycle stat change display', // no default binding
+  toggleQuietMode: 'Toggle quiet mode', // no default binding (avoids VIM conflicts)
 }
 
 export const DEFAULT_KEYMAP: KeyMap = {

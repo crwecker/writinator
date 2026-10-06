@@ -1,5 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react'
-import { BookOpen, ScrollText, Swords, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { BookOpen, ScrollText, Settings, Swords, X } from 'lucide-react'
 import { usePlayerStore } from '../../stores/playerStore'
 import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { getArmorTimeBonus, getItemById, getWeaponMultiplier } from '../../lib/items'
@@ -7,6 +7,7 @@ import { QuestBoardPanel } from './QuestBoardPanel'
 import { QuestJournalPanel } from './QuestJournalPanel'
 import { ArmoryPanel } from './ArmoryPanel'
 import { CoinAmount } from './QuestUi'
+import { GuildSettingsPopover } from './GuildSettingsPopover'
 
 export type GuildTab = 'board' | 'journal' | 'armory'
 
@@ -30,7 +31,7 @@ function PlayerStrip() {
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
       <div className="flex items-center gap-4 text-stone-300">
         {weapon && (
-          <span className="inline-flex items-center gap-1.5" title={`${weapon.name}: each word counts ×${getWeaponMultiplier(weaponId)}`}>
+          <span className="inline-flex items-center gap-1.5" title={`${weapon.name}: ×${getWeaponMultiplier(weaponId)} coin rewards`}>
             <span aria-hidden="true">{weapon.icon}</span>
             <span className="tabular-nums">×{getWeaponMultiplier(weaponId)}</span>
           </span>
@@ -53,6 +54,8 @@ function PlayerStrip() {
 export function AdventurersGuild({ open, activeTab, onTabChange, onClose }: AdventurersGuildProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const activeCount = useImageRevealStore((s) => s.activeSessions.length)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const closeSettings = useCallback(() => setSettingsOpen(false), [])
 
   useEffect(() => {
     if (!open) return
@@ -105,6 +108,20 @@ export function AdventurersGuild({ open, activeTab, onTabChange, onClose }: Adve
             </div>
             <div className="flex items-center gap-3">
               <PlayerStrip />
+              <div className="relative">
+                <button
+                  type="button"
+                  data-guild-settings-toggle
+                  onClick={() => setSettingsOpen((v) => !v)}
+                  className={`rounded-lg p-1.5 transition-colors hover:bg-stone-800 hover:text-stone-100 ${settingsOpen ? 'bg-stone-800 text-amber-200' : 'text-stone-400'}`}
+                  aria-label="Quest settings"
+                  aria-expanded={settingsOpen}
+                  title="Quest settings"
+                >
+                  <Settings size={18} />
+                </button>
+                <GuildSettingsPopover open={settingsOpen} onClose={closeSettings} />
+              </div>
               <button
                 type="button"
                 onClick={onClose}

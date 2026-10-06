@@ -2,11 +2,12 @@ import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePlayerStore } from '../../stores/playerStore'
 import { getItemById, getWeaponMultiplier, getArmorTimeBonus } from '../../lib/items'
 import {
-  calculateDifficulty,
+  estimateSessionCoins,
   getDifficultyColor,
   getDifficultyLabel,
-  calculateBaseReward,
+  sessionDifficulty,
 } from '../../lib/questRewards'
+import { formatCoinRange } from './questStyles'
 import type { ImageRevealSession } from '../../types'
 import { DetailCanvas } from './ImageRevealCanvases'
 import { ConsumableButtons, ProgressBar, SessionTimer } from './ImageRevealWidgets'
@@ -32,13 +33,13 @@ export function ImageRevealSessionCard({ session, image, onMinimize }: ImageReve
 
   // For timed sessions, calculate difficulty and reward preview
   const difficulty = session.timeMinutes !== undefined
-    ? calculateDifficulty(session.wordGoal, session.timeMinutes)
+    ? sessionDifficulty({ ...session, timeMinutes: session.timeMinutes })
     : null
   const difficultyColorClass = difficulty ? getDifficultyColor(difficulty) : ''
 
   const weaponItem = getItemById(equippedWeapon)
   const weaponMultiplier = getWeaponMultiplier(equippedWeapon)
-  const coinEstimate = calculateBaseReward(session.wordGoal, weaponMultiplier)
+  const coinEstimate = formatCoinRange(estimateSessionCoins(session, weaponMultiplier))
 
   const armorBonus = getArmorTimeBonus(equippedArmor)
   const armorItem = getItemById(equippedArmor)
@@ -105,11 +106,11 @@ export function ImageRevealSessionCard({ session, image, onMinimize }: ImageReve
           </div>
           <div className={`flex items-center justify-between text-[10px] ${textShadow}`}>
             {weaponItem ? (
-              <span className="text-gray-200">{weaponItem.icon} {weaponItem.name} ({weaponMultiplier}x)</span>
+              <span className="text-gray-200" title="Raises coin rewards">{weaponItem.icon} {weaponItem.name} (×{weaponMultiplier} coins)</span>
             ) : (
               <span />
             )}
-            <span className="text-amber-300">~{coinEstimate} coins</span>
+            <span className="text-amber-300">{coinEstimate} coins</span>
           </div>
         </div>
       </div>
