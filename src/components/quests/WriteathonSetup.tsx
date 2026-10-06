@@ -1,327 +1,263 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { X } from 'lucide-react'
 import { useWriteathonStore } from '../../stores/writeathonStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { countWords } from '../../lib/words'
+import { getMilestoneReward, getMilestoneTier } from '../../lib/writeathon'
+import type { MilestoneTier } from '../../types'
+import { CoinAmount, GuildButton, QuestProgress } from './QuestUi'
 
 interface WriteathonSetupProps {
   open: boolean
   onClose: () => void
 }
 
-const REWARD_TIERS = [
-  { label: 'Apprentice', blocks: '1–6', perBlock: 150, bonusCoins: 500, total: 1400 },
-  { label: 'Journeyman', blocks: '7–12', perBlock: 250, bonusCoins: 1000, total: 2500 },
-  { label: 'Master', blocks: '13–18', perBlock: 400, bonusCoins: 1500, total: 3900 },
-  { label: 'Legendary', blocks: '19–24', perBlock: 600, bonusCoins: 2500, total: 6100 },
-]
+const TIER_LABEL: Record<MilestoneTier, string> = {
+  apprentice: 'Apprentice',
+  journeyman: 'Journeyman',
+  master: 'Master',
+  legendary: 'Legendary',
+}
 
-const TOTAL_POSSIBLE = 13900
+const DAY_PRESETS = [7, 14, 24, 30]
+
+/** Reward per tier for a writeathon of `totalBlocks` days, from the real milestone rules. */
+function rewardPreview(totalBlocks: number): { tier: MilestoneTier; days: number; coins: number }[] {
+  const rows = new Map<MilestoneTier, { days: number; coins: number }>()
+  for (let block = 1; block <= totalBlocks; block++) {
+    const tier = getMilestoneTier(block)
+    const row = rows.get(tier) ?? { days: 0, coins: 0 }
+    row.days++
+    row.coins += getMilestoneReward(block)
+    rows.set(tier, row)
+  }
+  return [...rows].map(([tier, row]) => ({ tier, ...row }))
+}
 
 export function WriteathonSetup({ open, onClose }: WriteathonSetupProps) {
   const panelRef = useRef<HTMLDivElement>(null)
-
   const config = useWriteathonStore((s) => s.config)
   const milestones = useWriteathonStore((s) => s.milestones)
   const book = useStoryletStore((s) => s.book)
+  const [confirmReset, setConfirmReset] = useState(false)
+  // Captured once per mount; days-elapsed doesn't need to tick while open.
+  const [now] = useState(() => Date.now())
 
-  const startingWordCount =
-    book?.storylets.reduce((sum, storylet) => sum + countWords(storylet.content), 0) ?? 0
-
-  const [targetWordCount, setTargetWordCount] = useState(79755)
+  const startingWordCount = useMemo(
+    () => book?.storylets.reduce((sum, storylet) => sum + countWords(storylet.content), 0) ?? 0,
+    [book],
+  )
+  const [targetWordCount, setTargetWordCount] = useState(() => Math.max(50000, startingWordCount + 10000))
   const [totalBlocks, setTotalBlocks] = useState(24)
 
-  // Escape key
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.preventDefault()
+        e.stopPropagation()
         onClose()
       }
     }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  // Click outside
-  useEffect(() => {
-    if (!open) return
     function onMouseDown(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose()
-      }
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose()
     }
-    document.addEventListener('mousedown', onMouseDown)
-    return () => document.removeEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKey, true)
+    document.addEventListener('mousedown', onMouseDown, true)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('mousedown', onMouseDown, true)
+    }
   }, [open, onClose])
 
   if (!open) return null
 
-  const isActive = config?.active === true
-
-  const wordsPerDay =
-    totalBlocks > 0 && targetWordCount > startingWordCount
-      ? Math.ceil((targetWordCount - startingWordCount) / totalBlocks)
-      : 0
-
-  const isSetupValid =
-    targetWordCount > startingWordCount + 999 && totalBlocks >= 1
-
-  function handleStart() {
-    if (!isSetupValid) return
-    useWriteathonStore.getState().startWriteathon(startingWordCount, targetWordCount, totalBlocks)
-    onClose()
-  }
-
-  function handleReset() {
-    if (!confirm('Reset the writeathon? All progress will be lost.')) return
-    useWriteathonStore.getState().resetWriteathon()
-  }
-
-  // Status view helpers
-  let daysElapsed = 0
-  let completedBlocks = 0
-  let remainingBlocks = 0
-  let progressPercent = 0
-
-  if (config) {
-    const start = new Date(config.startDate)
-    const now = new Date()
-    daysElapsed = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
-    completedBlocks = milestones.filter((m) => m.completed).length
-    remainingBlocks = config.totalBlocks - completedBlocks
-    progressPercent =
-      config.totalBlocks > 0
-        ? Math.round((completedBlocks / config.totalBlocks) * 100)
-        : 0
-  }
-
-  const storeState = useWriteathonStore.getState() as unknown as Record<string, unknown>
-  const hasPause = typeof storeState['pauseWriteathon'] === 'function'
-  const hasResume = typeof storeState['resumeWriteathon'] === 'function'
-  const isPaused = (config as unknown as { paused?: boolean } | null)?.paused === true
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center">
+  const shell = (children: ReactNode) => (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
       <div
         ref={panelRef}
-        className="border-4 border-amber-950 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-8 relative"
-        style={{
-          background: 'linear-gradient(180deg, #3d2817 0%, #2a1a0d 100%)',
-          backgroundImage:
-            'repeating-linear-gradient(90deg, rgba(0,0,0,0.1) 0px, transparent 2px, transparent 80px, rgba(0,0,0,0.1) 82px)',
-        }}
-        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Writeathon"
+        className="relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-amber-800/60 bg-gradient-to-b from-stone-900 to-stone-950 p-6 shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-amber-50 hover:text-amber-300 transition-colors text-xl font-bold w-8 h-8 flex items-center justify-center"
-          title="Close"
-        >
-          &#x2715;
+        <button type="button" onClick={onClose} aria-label="Close" className="absolute right-4 top-4 rounded p-1 text-stone-400 hover:text-stone-100">
+          <X size={18} />
         </button>
-
-        {!isActive ? (
-          <>
-            {/* Setup form */}
-            <div className="text-center mb-8">
-              <h1 className="text-3xl md:text-4xl font-serif font-bold text-amber-300">
-                Accept the Challenge
-              </h1>
-              <p className="text-amber-500 mt-2 text-sm">Commit to your writing journey</p>
-            </div>
-
-            <div className="space-y-5 mb-8">
-              {/* Starting word count — read only */}
-              <div>
-                <label className="block text-amber-200 text-sm font-medium mb-1">
-                  Starting word count
-                </label>
-                <div className="w-full bg-amber-950/40 border border-amber-800/50 rounded-lg px-4 py-3 text-amber-100 font-mono tabular-nums">
-                  {startingWordCount.toLocaleString()}
-                </div>
-                <p className="text-amber-700 text-xs mt-1">Auto-detected from your current book</p>
-              </div>
-
-              {/* Target word count */}
-              <div>
-                <label className="block text-amber-200 text-sm font-medium mb-1">
-                  Target word count
-                </label>
-                <input
-                  type="number"
-                  value={targetWordCount}
-                  min={startingWordCount + 1000}
-                  step={100}
-                  onChange={(e) => setTargetWordCount(Number(e.target.value))}
-                  className="w-full bg-amber-950/40 border border-amber-700 rounded-lg px-4 py-3 text-amber-100 font-mono tabular-nums outline-none focus:border-amber-500 transition-colors"
-                />
-              </div>
-
-              {/* Total working days */}
-              <div>
-                <label className="block text-amber-200 text-sm font-medium mb-1">
-                  Total working days
-                </label>
-                <input
-                  type="number"
-                  value={totalBlocks}
-                  min={1}
-                  max={365}
-                  step={1}
-                  onChange={(e) => setTotalBlocks(Number(e.target.value))}
-                  className="w-full bg-amber-950/40 border border-amber-700 rounded-lg px-4 py-3 text-amber-100 font-mono tabular-nums outline-none focus:border-amber-500 transition-colors"
-                />
-              </div>
-
-              {/* Computed words per day */}
-              {wordsPerDay > 0 && (
-                <p className="text-gray-400 text-sm">
-                  That&apos;s{' '}
-                  <span className="text-amber-400 font-medium">
-                    {wordsPerDay.toLocaleString()} words per day
-                  </span>
-                </p>
-              )}
-            </div>
-
-            {/* Reward preview */}
-            <div className="mb-8">
-              <h2 className="font-serif text-lg text-amber-200 mb-3">Reward Preview</h2>
-              <div className="rounded-lg overflow-hidden border border-amber-900/60">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-amber-950/60">
-                      <th className="text-left px-4 py-2 text-amber-400 font-medium">Tier</th>
-                      <th className="text-right px-4 py-2 text-amber-400 font-medium">Blocks</th>
-                      <th className="text-right px-4 py-2 text-amber-400 font-medium">Per Block</th>
-                      <th className="text-right px-4 py-2 text-amber-400 font-medium">Bonus</th>
-                      <th className="text-right px-4 py-2 text-amber-400 font-medium">Subtotal</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {REWARD_TIERS.map((tier) => (
-                      <tr key={tier.label} className="border-t border-amber-900/40 bg-amber-950/20">
-                        <td className="px-4 py-2 text-amber-200">{tier.label}</td>
-                        <td className="px-4 py-2 text-right text-amber-300">{tier.blocks}</td>
-                        <td className="px-4 py-2 text-right text-amber-300">
-                          {tier.perBlock.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-2 text-right text-amber-300">
-                          +{tier.bonusCoins.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-2 text-right font-medium text-amber-200">
-                          {tier.total.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-amber-700 bg-amber-950/50">
-                      <td colSpan={4} className="px-4 py-3 font-serif text-amber-200 font-medium">
-                        Total possible
-                      </td>
-                      <td className="px-4 py-3 text-right font-bold text-amber-300 text-base">
-                        {TOTAL_POSSIBLE.toLocaleString()} coins
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-
-            {/* Accept button */}
-            <button
-              onClick={handleStart}
-              disabled={!isSetupValid}
-              className="w-full bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-amber-950 font-bold py-4 rounded-lg text-lg shadow-lg transition-all hover:scale-[1.02] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:from-amber-700 disabled:to-amber-600"
-            >
-              &#x2694; Accept the Challenge
-            </button>
-          </>
-        ) : (
-          <>
-            {/* Status view */}
-            <div className="text-center mb-8">
-              <h1 className="text-3xl md:text-4xl font-serif font-bold text-amber-300">
-                Challenge in Progress
-              </h1>
-              <p className="text-amber-500 mt-2 text-sm">Your journey continues, adventurer</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              <StatCard label="Starting words" value={config!.startingWordCount.toLocaleString()} />
-              <StatCard label="Target words" value={config!.targetWordCount.toLocaleString()} />
-              <StatCard label="Total blocks" value={String(config!.totalBlocks)} />
-              <StatCard label="Days elapsed" value={String(daysElapsed)} />
-              <StatCard label="Blocks completed" value={String(completedBlocks)} />
-              <StatCard label="Blocks remaining" value={String(remainingBlocks)} />
-              <StatCard
-                label="Progress"
-                value={`${progressPercent}%`}
-                highlight
-              />
-              <StatCard
-                label="Words per block"
-                value={config!.wordsPerBlock.toLocaleString()}
-              />
-            </div>
-
-            {/* Progress bar */}
-            <div className="mb-8">
-              <div className="h-2 bg-amber-950/60 rounded-full overflow-hidden border border-amber-900/40">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-600 to-amber-400 transition-[width] duration-500"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex gap-3">
-              {hasPause && hasResume && (
-                <button
-                  onClick={() => {
-                    const s = useWriteathonStore.getState() as unknown as Record<string, unknown>
-                    if (isPaused) {
-                      (s['resumeWriteathon'] as () => void)()
-                    } else {
-                      (s['pauseWriteathon'] as () => void)()
-                    }
-                  }}
-                  className="flex-1 bg-amber-800/60 hover:bg-amber-700/60 text-amber-200 font-semibold py-3 rounded-lg transition-colors border border-amber-700/50"
-                >
-                  {isPaused ? 'Resume' : 'Pause'}
-                </button>
-              )}
-              <button
-                onClick={handleReset}
-                className="flex-1 bg-red-900/40 hover:bg-red-800/50 text-red-300 font-semibold py-3 rounded-lg transition-colors border border-red-900/50"
-              >
-                Reset
-              </button>
-            </div>
-          </>
-        )}
+        {children}
       </div>
     </div>
   )
-}
 
-interface StatCardProps {
-  label: string
-  value: string
-  highlight?: boolean
-}
+  if (config?.active) {
+    const completedBlocks = milestones.filter((m) => m.completed).length
+    const daysElapsed = Math.max(0, Math.floor((now - Date.parse(config.startDate)) / 86_400_000))
+    const coinsEarned = milestones.reduce((sum, m) => sum + (m.completed ? m.coinsAwarded : 0), 0)
+    const stats: [string, string][] = [
+      ['Words', `${config.startingWordCount.toLocaleString()} → ${config.targetWordCount.toLocaleString()}`],
+      ['Per day', `${config.wordsPerBlock.toLocaleString()} words`],
+      ['Days done', `${completedBlocks} of ${config.totalBlocks}`],
+      ['Days since start', String(daysElapsed)],
+      ['Coins earned', coinsEarned.toLocaleString()],
+    ]
+    return shell(
+      <>
+        <h2 className="font-serif text-2xl font-semibold text-amber-100">
+          {config.completedAt ? 'Writeathon complete' : 'Writeathon in progress'}
+        </h2>
+        <div className="mt-4">
+          <QuestProgress value={completedBlocks} max={config.totalBlocks} />
+        </div>
+        <dl className="mt-5 grid grid-cols-2 gap-3">
+          {stats.map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-stone-800 bg-stone-950/60 px-3 py-2">
+              <dt className="text-xs text-stone-400">{label}</dt>
+              <dd className="font-semibold tabular-nums text-stone-100">{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          {!config.completedAt && (
+            <GuildButton
+              variant="secondary"
+              onClick={() => {
+                const store = useWriteathonStore.getState()
+                if (config.paused) store.resumeWriteathon()
+                else store.pauseWriteathon()
+              }}
+            >
+              {config.paused ? 'Resume' : 'Pause'}
+            </GuildButton>
+          )}
+          {confirmReset ? (
+            <>
+              <span className="self-center text-sm text-stone-300">End it and lose progress?</span>
+              <GuildButton variant="ghost" onClick={() => setConfirmReset(false)}>Keep</GuildButton>
+              <GuildButton
+                variant="danger"
+                onClick={() => {
+                  useWriteathonStore.getState().resetWriteathon()
+                  setConfirmReset(false)
+                }}
+              >
+                End writeathon
+              </GuildButton>
+            </>
+          ) : (
+            <GuildButton variant="danger" onClick={() => setConfirmReset(true)}>
+              {config.completedAt ? 'Clear and start over' : 'End writeathon'}
+            </GuildButton>
+          )}
+        </div>
+      </>,
+    )
+  }
 
-function StatCard({ label, value, highlight = false }: StatCardProps) {
-  return (
-    <div className="bg-amber-950/30 border border-amber-900/40 rounded-lg px-4 py-3">
-      <p className="text-amber-600 text-xs font-medium mb-1">{label}</p>
-      <p className={`font-mono font-bold tabular-nums ${highlight ? 'text-amber-300 text-lg' : 'text-amber-100'}`}>
-        {value}
+  const wordsToWrite = targetWordCount - startingWordCount
+  const wordsPerDay = totalBlocks > 0 && wordsToWrite > 0 ? Math.ceil(wordsToWrite / totalBlocks) : 0
+  const valid = wordsToWrite >= 1000 && totalBlocks >= 1 && totalBlocks <= 365
+  const preview = rewardPreview(Math.max(1, Math.min(365, totalBlocks)))
+  const totalCoins = preview.reduce((sum, row) => sum + row.coins, 0)
+  const input =
+    'w-full rounded-lg border border-stone-700 bg-stone-950/70 px-3 py-2 font-mono tabular-nums text-stone-100 outline-none focus:border-amber-500'
+
+  return shell(
+    <>
+      <h2 className="font-serif text-2xl font-semibold text-amber-100">Plan a writeathon</h2>
+      <p className="mt-1 text-sm text-stone-400">
+        Your book has <span className="text-stone-200">{startingWordCount.toLocaleString()}</span> words today.
       </p>
-    </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-4">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-stone-400">Finish at (words)</span>
+          <input
+            type="number"
+            min={startingWordCount + 1000}
+            step={1000}
+            value={targetWordCount}
+            onChange={(e) => setTargetWordCount(Number(e.target.value))}
+            className={input}
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-stone-400">Writing days</span>
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={totalBlocks}
+            onChange={(e) => setTotalBlocks(Number(e.target.value))}
+            className={input}
+          />
+          <span className="mt-1.5 flex gap-1">
+            {DAY_PRESETS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setTotalBlocks(d)}
+                className={`rounded px-2 py-0.5 text-[11px] font-semibold ${totalBlocks === d ? 'bg-amber-500 text-stone-950' : 'bg-stone-800 text-stone-300 hover:bg-stone-700'}`}
+              >
+                {d}
+              </button>
+            ))}
+          </span>
+        </label>
+      </div>
+
+      <p className="mt-4 rounded-lg border border-amber-800/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+        {valid ? (
+          <>
+            That's <span className="font-semibold">{wordsPerDay.toLocaleString()} words a day</span> for {totalBlocks} day
+            {totalBlocks === 1 ? '' : 's'}.
+          </>
+        ) : (
+          'Aim at least 1,000 words past where you are now, over 1–365 days.'
+        )}
+      </p>
+
+      <div className="mt-5 overflow-hidden rounded-lg border border-stone-800">
+        <table className="w-full text-sm">
+          <thead className="bg-stone-900 text-xs text-stone-400">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Tier</th>
+              <th className="px-3 py-2 text-right font-medium">Days</th>
+              <th className="px-3 py-2 text-right font-medium">Coins</th>
+            </tr>
+          </thead>
+          <tbody>
+            {preview.map((row) => (
+              <tr key={row.tier} className="border-t border-stone-800 text-stone-200">
+                <td className="px-3 py-1.5">{TIER_LABEL[row.tier]}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{row.days}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{row.coins.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-stone-700 bg-stone-900/70">
+              <td className="px-3 py-2 font-medium text-stone-200" colSpan={2}>If you finish every day</td>
+              <td className="px-3 py-2 text-right">
+                <CoinAmount amount={totalCoins.toLocaleString()} className="font-semibold" />
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div className="mt-6 flex justify-end gap-2">
+        <GuildButton variant="ghost" onClick={onClose}>Not now</GuildButton>
+        <GuildButton
+          disabled={!valid}
+          onClick={() => {
+            useWriteathonStore.getState().startWriteathon(startingWordCount, targetWordCount, totalBlocks)
+            onClose()
+          }}
+          className="px-5"
+        >
+          Start writeathon
+        </GuildButton>
+      </div>
+    </>,
   )
 }

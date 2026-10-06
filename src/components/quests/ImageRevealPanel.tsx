@@ -84,14 +84,22 @@ export function ImageRevealPanel() {
       <div className="fixed bottom-12 right-4 z-40">
         <button
           onClick={expand}
-          className="group relative flex items-center gap-2 bg-gray-900 border border-gray-700 shadow-2xl rounded-lg p-1.5 hover:border-gray-600 transition-colors"
-          title="Expand image quests"
+          className="group relative flex items-center gap-2 bg-stone-950/95 border border-amber-900/50 shadow-2xl rounded-xl p-1.5 hover:border-amber-700/70 transition-colors"
+          title={firstSession?.title ? `${firstSession.title} — click to expand` : 'Expand image quests'}
         >
-          {firstSession && firstImage ? (
-            <CollapsedThumbnail session={firstSession} image={firstImage} />
-          ) : (
-            <div className="w-16 h-16 rounded bg-gray-800" />
-          )}
+          {/* Ring fills as the quests progress */}
+          <span
+            className="rounded-lg p-[2px]"
+            style={{
+              background: `conic-gradient(#fbbf24 ${overallProgress * 360}deg, rgba(120,113,108,0.35) 0deg)`,
+            }}
+          >
+            {firstSession && firstImage ? (
+              <CollapsedThumbnail session={firstSession} image={firstImage} className="block rounded-md" />
+            ) : (
+              <span className="block w-16 h-16 rounded-md bg-stone-800" />
+            )}
+          </span>
 
           <div className="pr-1.5 flex flex-col items-center gap-1">
             {activeSessions.length > 1 && (

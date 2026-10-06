@@ -59,6 +59,8 @@ export interface ActiveEffect {
 
 export interface ImageRevealSession {
   id: string
+  /** Name of the quest this session belongs to (absent for older sessions). */
+  title?: string
   unsplashId?: string
   imageUrl: string
   imageWidth: number

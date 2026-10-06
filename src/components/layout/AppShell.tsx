@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import type { EditorView } from '@codemirror/view'
-import { Coins, Search, StickyNote } from 'lucide-react'
+import { Coins, Search, StickyNote, Swords } from 'lucide-react'
 import { Sidebar } from '../sidebar/Sidebar'
 import Editor from '../editor/Editor'
 import BubbleToolbar from '../editor/BubbleToolbar'
@@ -87,6 +87,25 @@ function CoinBalance() {
         {coins.toLocaleString()}
       </span>
     </>
+  )
+}
+
+// Top-bar entry to the guild, with a badge for quests in progress.
+function QuestsButton({ onOpen }: { onOpen: (hasActive: boolean) => void }) {
+  const active = useImageRevealStore((s) => s.activeSessions.length)
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(active > 0)}
+      className="relative inline-flex items-center gap-1 px-2 py-0.5 text-xs text-amber-300/80 transition-colors hover:text-amber-200"
+      title="Adventurer's Guild — quests, gallery and gear"
+    >
+      <Swords size={13} />
+      Quests
+      {active > 0 && (
+        <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-bold leading-4 text-stone-950">{active}</span>
+      )}
+    </button>
   )
 }
 
@@ -603,6 +622,12 @@ export function AppShell() {
           </div>
 
           <div className="flex items-center gap-1">
+            <QuestsButton
+              onOpen={(hasActive) => {
+                setGuildTab(hasActive ? 'journal' : 'board')
+                setGuildOpen(true)
+              }}
+            />
             <button
               onClick={() => setFindOpen((prev) => !prev)}
               className="text-gray-500 hover:text-gray-300 transition-colors px-1.5 py-0.5"

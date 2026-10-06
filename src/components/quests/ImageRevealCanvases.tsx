@@ -84,9 +84,12 @@ export function CelebrationCanvas({ session, image }: SessionCanvasProps) {
 interface CollapsedThumbnailProps {
   session: ImageRevealSession
   image: HTMLImageElement
+  /** Rendered size in CSS pixels (square). */
+  size?: number
+  className?: string
 }
 
-export function CollapsedThumbnail({ session, image }: CollapsedThumbnailProps) {
+export function CollapsedThumbnail({ session, image, size = 64, className = 'rounded' }: CollapsedThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -97,9 +100,10 @@ export function CollapsedThumbnail({ session, image }: CollapsedThumbnailProps) 
   return (
     <canvas
       ref={canvasRef}
-      width={64}
-      height={64}
-      className="w-16 h-16 rounded object-cover"
+      width={size}
+      height={size}
+      style={{ width: size, height: size }}
+      className={`object-cover ${className}`}
     />
   )
 }

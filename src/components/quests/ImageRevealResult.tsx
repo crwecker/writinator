@@ -45,6 +45,7 @@ function RevealedBody({ session, image }: BodyProps) {
     <div className="p-3">
       <div className="text-center mb-2">
         <h3 className="text-lg font-bold text-emerald-400">Image Revealed!</h3>
+        {session.title && <p className="font-serif text-sm text-amber-100">{session.title}</p>}
         <p className="text-gray-400 text-xs mt-0.5">
           {session.wordGoal.toLocaleString()} words written
         </p>
@@ -68,19 +69,10 @@ function TimedSuccessBody({ session, image }: BodyProps) {
     <div className="p-3 flex flex-col gap-3">
       <div className="text-center">
         <h3 className="text-lg font-bold text-emerald-400">Quest Complete!</h3>
+        {session.title && <p className="font-serif text-sm text-amber-100">{session.title}</p>}
       </div>
       <CelebrationCanvas session={revealed} image={image} />
-      {session.photographer && (
-        <p className="text-center text-gray-500 text-[10px]">
-          Photo by{' '}
-          {session.photographerUrl ? (
-            <a href={session.photographerUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 underline">
-              {session.photographer}
-            </a>
-          ) : session.photographer}{' '}
-          on Unsplash
-        </p>
-      )}
+      <PhotographerCredit session={session} />
       <div className="flex items-center justify-center gap-2">
         <span className="text-xl">&#x1FA99;</span>
         <span className="text-emerald-400 font-medium text-sm">+{session.coinsEarned ?? 0} coins</span>
@@ -95,6 +87,7 @@ function TimedFailureBody({ session, image }: BodyProps) {
     <div className="p-3 flex flex-col gap-3">
       <div className="text-center">
         <h3 className="text-lg font-bold text-orange-400">Time&rsquo;s Up!</h3>
+        {session.title && <p className="font-serif text-sm text-amber-100">{session.title}</p>}
       </div>
       {image && (
         <img

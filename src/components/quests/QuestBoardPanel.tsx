@@ -1,199 +1,163 @@
 import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import { useWriteathonStore } from '../../stores/writeathonStore'
-import { useImageRevealStore } from '../../stores/imageRevealStore'
-import {
-  PERMANENT_QUESTS,
-  getDailyQuestTitle,
-  getMilestoneReward,
-  createBoardQuest,
-} from '../../lib/writeathon'
-import { fetchRandomImage } from '../../lib/unsplash'
+import { usePlayerStore } from '../../stores/playerStore'
+import { PERMANENT_QUESTS, createBoardQuest } from '../../lib/writeathon'
+import { getWeaponMultiplier } from '../../lib/items'
+import { calculateDifficulty, estimateQuestCoins } from '../../lib/questRewards'
 import type { BoardQuest } from '../../types'
-import { ParchmentCard } from './ParchmentCard'
+import { QuestCard } from './QuestCard'
+import { PinRequestDialog } from './PinRequestDialog'
+import { SectionHeading } from './QuestUi'
+import { WriteathonBanner } from './WriteathonBanner'
 import { WriteathonSetup } from './WriteathonSetup'
+import { useAcceptQuest } from './useAcceptQuest'
+
+const TIMER_CHOICES: Array<number | undefined> = [undefined, 10, 20, 30]
+
+function TimerPicker({ value, onChange }: { value: number | undefined; onChange: (m: number | undefined) => void }) {
+  return (
+    <div className="flex items-center gap-1" role="radiogroup" aria-label="Time limit">
+      {TIMER_CHOICES.map((m) => {
+        const active = m === value
+        return (
+          <button
+            key={m ?? 'none'}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(m)}
+            className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+              active ? 'bg-stone-800 text-amber-100' : 'bg-amber-900/10 text-stone-700 hover:bg-amber-900/20'
+            }`}
+          >
+            {m === undefined ? 'No timer' : `${m}m`}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 export function QuestBoardPanel() {
   const [setupOpen, setSetupOpen] = useState(false)
-  const [acceptingId, setAcceptingId] = useState<string | null>(null)
-  const [acceptError, setAcceptError] = useState<string | null>(null)
+  const [pinOpen, setPinOpen] = useState(false)
+  const [timers, setTimers] = useState<Record<number, number | undefined>>({})
+  const { accept, acceptingId, error, clearError } = useAcceptQuest()
 
-  const config = useWriteathonStore((s) => s.config)
-  const milestones = useWriteathonStore((s) => s.milestones)
   const villagerQuests = useWriteathonStore((s) => s.villagerQuests)
   const activeBoardQuests = useWriteathonStore((s) => s.activeBoardQuests)
-  const dailyQuestAccepted = useWriteathonStore((s) => s.dailyQuestAccepted)
+  const weaponMultiplier = usePlayerStore((s) => getWeaponMultiplier(s.equippedWeapon))
 
-  const currentBlock = useWriteathonStore((s) => s.getCurrentBlock())
-  const dailyTarget = useWriteathonStore((s) => s.getDailyTarget())
-
-  async function handleAccept(quest: BoardQuest) {
-    if (acceptingId) return
-    setAcceptingId(quest.id)
-    setAcceptError(null)
-    try {
-      const img = await fetchRandomImage()
-      const sessionId = useImageRevealStore.getState().startSession(
-        img.url,
-        img.width,
-        img.height,
-        quest.wordGoal,
-        img.photographer,
-        img.photographerUrl,
-        img.id,
-        quest.timeMinutes,
-      )
-      if (sessionId === '') {
-        setAcceptError('Quest capacity reached (25 active). Complete or abandon one first.')
-        return
-      }
-      useWriteathonStore.getState().acceptBoardQuest(quest, sessionId)
-    } catch (err) {
-      setAcceptError(err instanceof Error ? err.message : 'Failed to fetch quest image.')
-    } finally {
-      setAcceptingId(null)
-    }
-  }
-
-  function handleAcceptPermanent(pq: { wordGoal: number; title: string; coinReward: number }) {
-    const quest = createBoardQuest('permanent', pq.wordGoal, {
-      title: pq.title,
-      coinReward: pq.coinReward,
-    })
-    void handleAccept(quest)
-  }
-
-  const dailyCompleted = milestones[currentBlock - 1]?.completed ?? false
+  const isActive = (q: BoardQuest) => activeBoardQuests.some((a) => a.id === q.id && a.accepted && !a.completedAt)
 
   return (
-    <div className="p-6">
-        {/* Start Writeathon + errors */}
-        <div className="text-center mb-6">
-          {!config?.active && (
-            <button
-              onClick={() => setSetupOpen(true)}
-              className="font-serif font-semibold px-6 py-2 rounded-lg border-2 border-amber-700 text-amber-300 bg-amber-950/40 hover:bg-amber-900/50 hover:text-amber-200 hover:border-amber-600 transition-all text-sm tracking-wide shadow-md"
-            >
-              &#x2694; Start Writeathon
-            </button>
-          )}
-          {acceptingId && (
-            <p className="mt-3 text-amber-200 text-xs italic">Fetching quest image…</p>
-          )}
-          {acceptError && (
-            <p className="mt-3 text-red-300 text-xs">{acceptError}</p>
-          )}
+    <div className="relative space-y-8 p-6">
+      <WriteathonBanner onManage={() => setSetupOpen(true)} />
+
+      {error && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-900/60 bg-red-950/60 px-4 py-2 text-sm text-red-200">
+          {error}
+          <button type="button" onClick={clearError} className="text-xs text-red-300 hover:text-red-100">Dismiss</button>
         </div>
+      )}
 
-        {/* Daily Writeathon Quest */}
-        <section className="mb-8">
-          <h2 className="font-serif text-xl text-amber-200 mb-4">Today's Writeathon Quest</h2>
-          {config?.active && !config?.completedAt ? (
-            <ParchmentCard
-              variant="daily"
-              title={getDailyQuestTitle(currentBlock)}
-              description={`Block ${currentBlock} of ${config.totalBlocks} — the journey continues...`}
-              wordGoal={dailyTarget}
-              coinReward={getMilestoneReward(currentBlock)}
-              accepted={dailyQuestAccepted}
-              completed={dailyCompleted}
-              onAccept={
-                !dailyQuestAccepted && !dailyCompleted
-                  ? () => useWriteathonStore.getState().acceptDailyQuest()
-                  : undefined
-              }
-            />
-          ) : (
-            <p className="italic text-amber-200 text-sm">
-              No active writeathon. Start one from the Writeathon menu.
-            </p>
-          )}
-        </section>
+      <section>
+        <SectionHeading
+          title="Guild contracts"
+          subtitle="Always on offer. Add a timer to raise the stakes and the reward."
+        />
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          {PERMANENT_QUESTS.map((pq) => {
+            const minutes = timers[pq.wordGoal]
+            const accepted = activeBoardQuests.some(
+              (q) => q.type === 'permanent' && q.wordGoal === pq.wordGoal && !q.completedAt,
+            )
+            const cardId = `permanent-${pq.wordGoal}`
+            return (
+              <QuestCard
+                key={pq.wordGoal}
+                kind="permanent"
+                title={pq.title}
+                description={`Write ${pq.wordGoal.toLocaleString()} words in one sitting.`}
+                wordGoal={pq.wordGoal}
+                timeMinutes={minutes}
+                difficulty={minutes ? calculateDifficulty(pq.wordGoal, minutes) : undefined}
+                coins={estimateQuestCoins({ wordGoal: pq.wordGoal, questCoins: pq.coinReward, weaponMultiplier, timeMinutes: minutes })}
+                status={accepted ? 'accepted' : 'available'}
+                accepting={acceptingId === cardId}
+                timerPicker={
+                  <TimerPicker value={minutes} onChange={(m) => setTimers((t) => ({ ...t, [pq.wordGoal]: m }))} />
+                }
+                onAccept={() => {
+                  const quest = createBoardQuest('permanent', pq.wordGoal, {
+                    title: pq.title,
+                    coinReward: pq.coinReward,
+                    timeMinutes: minutes,
+                  })
+                  void accept(quest, cardId)
+                }}
+              />
+            )
+          })}
+        </div>
+      </section>
 
-        {/* Permanent Quests */}
-        <section className="mb-8">
-          <h2 className="font-serif text-xl text-amber-200 mb-4">Apprentice Quests</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {PERMANENT_QUESTS.map((pq) => {
-              const isAccepted = activeBoardQuests.some(
-                (q) => q.wordGoal === pq.wordGoal && q.type === 'permanent',
-              )
+      <section>
+        <SectionHeading title="Villager requests" subtitle="Quests you've pinned for yourself." />
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          {villagerQuests
+            .filter((q) => !q.completedAt)
+            .map((quest) => {
+              const active = isActive(quest)
               return (
-                <ParchmentCard
-                  key={pq.wordGoal}
-                  variant="permanent"
-                  title={pq.title}
-                  description={`Complete a writing session of ${pq.wordGoal.toLocaleString()} words`}
-                  wordGoal={pq.wordGoal}
-                  coinReward={pq.coinReward}
-                  accepted={isAccepted}
-                  completed={false}
-                  onAccept={!isAccepted ? () => handleAcceptPermanent(pq) : undefined}
+                <QuestCard
+                  key={quest.id}
+                  kind="villager"
+                  title={quest.title}
+                  description={quest.description}
+                  wordGoal={quest.wordGoal}
+                  timeMinutes={quest.timeMinutes}
+                  difficulty={quest.timeMinutes ? calculateDifficulty(quest.wordGoal, quest.timeMinutes) : undefined}
+                  coins={estimateQuestCoins({
+                    wordGoal: quest.wordGoal,
+                    questCoins: quest.coinReward,
+                    bonusCoins: quest.bonusCoins,
+                    weaponMultiplier,
+                    timeMinutes: quest.timeMinutes,
+                  })}
+                  status={active ? 'accepted' : 'available'}
+                  accepting={acceptingId === quest.id}
+                  tiltSeed={quest.id}
+                  onAccept={() => void accept(quest)}
+                  footerExtra={
+                    !active && (
+                      <button
+                        type="button"
+                        onClick={() => useWriteathonStore.getState().removeVillagerQuest(quest.id)}
+                        className="text-xs font-medium text-stone-600 underline-offset-2 hover:text-red-800 hover:underline"
+                      >
+                        Retract
+                      </button>
+                    )
+                  }
                 />
               )
             })}
-          </div>
-        </section>
-
-        {/* Villager Requests */}
-        <section className="mb-8">
-          <h2 className="font-serif text-xl text-amber-200 mb-4">Villager Requests</h2>
-          {villagerQuests.length === 0 ? (
-            <p className="italic text-amber-200 text-sm">No villager requests pending.</p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {villagerQuests.map((quest) => {
-                const isAccepted = activeBoardQuests.some((q) => q.id === quest.id && q.accepted)
-                const isCompleted = !!quest.completedAt
-                return (
-                  <ParchmentCard
-                    key={quest.id}
-                    variant="villager"
-                    title={quest.title}
-                    description={quest.description}
-                    wordGoal={quest.wordGoal}
-                    timeMinutes={quest.timeMinutes}
-                    coinReward={quest.coinReward}
-                    bonusCoins={quest.bonusCoins}
-                    accepted={isAccepted}
-                    completed={isCompleted}
-                    onAccept={
-                      !isAccepted && !isCompleted
-                        ? () => { void handleAccept(quest) }
-                        : undefined
-                    }
-                  />
-                )
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* Active Quests */}
-        {activeBoardQuests.length > 0 && (
-          <section>
-            <h2 className="font-serif text-xl text-amber-200 mb-4">Active Quests</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {activeBoardQuests
-                .filter((q) => q.accepted && !q.completedAt)
-                .map((quest) => (
-                  <ParchmentCard
-                    key={quest.id}
-                    variant={quest.type}
-                    title={quest.title}
-                    description={quest.description}
-                    wordGoal={quest.wordGoal}
-                    timeMinutes={quest.timeMinutes}
-                    coinReward={quest.coinReward}
-                    bonusCoins={quest.bonusCoins}
-                    accepted={true}
-                    completed={false}
-                  />
-                ))}
-            </div>
-          </section>
-        )}
+          <button
+            type="button"
+            onClick={() => setPinOpen(true)}
+            className="flex min-h-[180px] flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-amber-800/50 bg-stone-950/30 text-amber-200/80 transition-colors hover:border-amber-500 hover:bg-stone-950/50 hover:text-amber-100"
+          >
+            <Plus size={24} />
+            <span className="font-serif text-lg">Pin a request</span>
+            <span className="text-xs text-stone-400">Your own goal, your own reward</span>
+          </button>
+        </div>
+      </section>
 
       <WriteathonSetup open={setupOpen} onClose={() => setSetupOpen(false)} />
+      <PinRequestDialog open={pinOpen} onClose={() => setPinOpen(false)} />
     </div>
   )
 }

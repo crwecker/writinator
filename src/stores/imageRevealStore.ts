@@ -45,6 +45,7 @@ interface ImageRevealState {
     photographerUrl?: string,
     unsplashId?: string,
     timeMinutes?: number,
+    title?: string,
   ) => string
   addWords: (count: number) => void
   tickTimer: () => void
@@ -83,6 +84,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
         photographerUrl?: string,
         unsplashId?: string,
         timeMinutes?: number,
+        title?: string,
       ) => {
         const { activeSessions } = get()
         if (activeSessions.length >= 25) return ''
@@ -111,6 +113,7 @@ export const useImageRevealStore = create<ImageRevealState>()(
           currentLevel: 0,
           completed: false,
           startedAt: new Date().toISOString(),
+          ...(title ? { title } : {}),
           ...(photographer ? { photographer, photographerUrl } : {}),
           ...(adjustedTimeMinutes !== undefined
             ? { timeMinutes: adjustedTimeMinutes, pausedDuration: 0 }
