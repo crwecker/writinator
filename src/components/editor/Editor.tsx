@@ -23,6 +23,10 @@ import {
   dispatchCharacterSnapshot,
 } from './statMarkerExtension'
 import {
+  statRefExtension,
+  dispatchStatRefStoryletContext,
+} from './statRefExtension'
+import {
   statblockMarkerExtension,
   dispatchStatblockActiveStorylet,
 } from './statblockMarkerExtension'
@@ -804,6 +808,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         markdownDecorationPlugin,
         atomicCursorSnap,
         statMarkerExtension(),
+        statRefExtension(),
         noteMarkerExtension(),
         statblockMarkerExtension(),
         placeholder('Start writing...'),
@@ -1000,6 +1005,13 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const view = viewRef.current
     if (view) {
       dispatchStatblockActiveStorylet(view, activeStoryletId ?? '')
+      const slState = useStoryletStore.getState()
+      dispatchStatRefStoryletContext(view, {
+        book: slState.book ?? null,
+        storyletId: activeStoryletId ?? null,
+        documentStyles: slState.globalSettings.documentStyles,
+        snippets: slState.globalSettings.snippets,
+      })
     }
   }, [activeStoryletId, activeDocVersion, loadStorylet])
 
@@ -1064,6 +1076,33 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         markers: state.markers,
       })
     })
+    // Same idea for the stat-ref widget: re-resolve `{HP}` tokens whenever
+    // the storylet store mutates (book reference change or active storylet
+    // change). Reference equality is fine — Zustand updates produce new
+    // references on relevant writes.
+    const unsubStorylet = useStoryletStore.subscribe((state, prev) => {
+      if (
+        state.book === prev.book &&
+        state.activeStoryletId === prev.activeStoryletId &&
+        state.globalSettings.documentStyles === prev.globalSettings.documentStyles &&
+        state.globalSettings.snippets === prev.globalSettings.snippets
+      ) {
+        return
+      }
+      const v = viewRef.current
+      if (!v) return
+      dispatchStatRefStoryletContext(v, {
+        book: state.book ?? null,
+        storyletId: state.activeStoryletId ?? null,
+        documentStyles: state.globalSettings.documentStyles,
+        snippets: state.globalSettings.snippets,
+      })
+    })
+    const _origUnsubscribe = unsubscribe
+    const unsubscribeAll = () => {
+      _origUnsubscribe()
+      unsubStorylet()
+    }
     // Dev-only: expose the character store on window so Puppeteer QA can seed
     // markers without shipping a public API.
     if (import.meta.env.DEV) {
@@ -1115,7 +1154,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         }
       })
     }
-    return unsubscribe
+    return unsubscribeAll
   }, [])
 
   // Sync notes store → CM6 snapshot so note-marker squares refresh on store

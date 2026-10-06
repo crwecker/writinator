@@ -168,6 +168,13 @@ export interface EditorPreferences {
 
 export interface GlobalSettings {
   documentStyles?: DocumentStyles
+  /**
+   * Author-defined snippets. Key is the snippet name (referenced from prose
+   * as `{SnippetName}`); value is the template text that may itself contain
+   * `{Stat}` references. Resolved recursively (with a depth limit) so
+   * snippets can compose other snippets.
+   */
+  snippets?: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------

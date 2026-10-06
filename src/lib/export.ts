@@ -15,12 +15,14 @@ import type { Root, Content, PhrasingContent } from 'mdast'
 import JSZip from 'jszip'
 import { parseMarkdown } from './ast'
 import { useCharacterStore } from '../stores/characterStore'
+import { useStoryletStore } from '../stores/storyletStore'
 import { computeStateAt } from './characterState'
 import {
   STAT_MARKER_REGEX,
   STATBLOCK_MARKER_REGEX,
 } from './markerUtils'
 import { NOTE_MARKER_REGEX } from './noteUtils'
+import { expandRefs, formatStatValueInline } from './statRefs'
 import { renderStoryletAsMarkdown, renderStoryletAsHtml } from './render'
 
 // ─── Helpers ────────────────────────────────────────────
@@ -185,7 +187,7 @@ function parseStatblockOptions(raw: string | undefined): Record<string, string> 
   return out
 }
 
-function formatStatValueForExport(v: StatValue): string {
+export function formatStatValueForExport(v: StatValue): string {
   switch (v.kind) {
     case 'number':
       return String(v.value)
@@ -315,6 +317,7 @@ export interface CharacterMarkerContext {
   storyletId: string
   characters: Character[]
   markers: Record<string, StatDelta[]>
+  snippets: Record<string, string> | undefined
 }
 
 export function getCharacterMarkerContext(
@@ -322,11 +325,13 @@ export function getCharacterMarkerContext(
   storyletId: string
 ): CharacterMarkerContext {
   const store = useCharacterStore.getState()
+  const slStore = useStoryletStore.getState()
   return {
     book,
     storyletId,
     characters: store.characters,
     markers: store.markers,
+    snippets: slStore.globalSettings.snippets,
   }
 }
 
@@ -343,6 +348,28 @@ export function processCharacterMarkers(
 ): string {
   if (!content) return content
   let out = content
+
+  // 0) Resolve inline `{HP}` / `{SnippetName}` references against effective
+  // character state at the token's offset, plus any author-defined snippets.
+  // Run BEFORE stripping stat markers so the offsets we hand to
+  // `computeStateAt` still match the original document positions of the
+  // stat-delta comments. Unrecognized tokens (e.g. `{align:center}`) stay raw
+  // for the downstream alignment pass.
+  if (ctx.characters.length > 0 || ctx.snippets) {
+    out = expandRefs(out, {
+      characters: ctx.characters,
+      snippets: ctx.snippets,
+      formatStat: (hit, offset) => {
+        const computed = computeStateAt(hit.character, ctx.book, ctx.markers, {
+          storyletId: ctx.storyletId,
+          offset,
+        })
+        const value = computed.effective[hit.def.id]
+        if (!value) return null
+        return formatStatValueInline(value, hit.subkey)
+      },
+    })
+  }
 
   // 1) Strip stat-delta markers (unless MD preserve flag is set).
   if (!options?.preserveStatMarkers) {

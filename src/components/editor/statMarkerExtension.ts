@@ -36,7 +36,7 @@ const EMPTY_SNAPSHOT: CharacterSnapshot = { markers: {}, characters: [] }
 export const setCharacterSnapshotEffect = StateEffect.define<CharacterSnapshot>()
 
 /** Holds the latest CharacterSnapshot — used by the decoration plugin. */
-const characterSnapshotField = StateField.define<CharacterSnapshot>({
+export const characterSnapshotField = StateField.define<CharacterSnapshot>({
   create: () => EMPTY_SNAPSHOT,
   update(value, tr) {
     for (const e of tr.effects) {
