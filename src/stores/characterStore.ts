@@ -1,12 +1,15 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import * as localforage from 'localforage'
+import { persist } from 'zustand/middleware'
+import { localforageJSONStorage } from './localforageStorage'
 import type {
   Character,
   StatDefinition,
   StatValue,
   StatDelta,
 } from '../types'
+import { STAT_MARKER_REGEX } from '../lib/markerUtils'
+// Runtime-only use (inside actions): storyletStore imports this module too.
+import { useStoryletStore } from './storyletStore'
 
 interface CharacterState {
   characters: Character[]
@@ -133,18 +136,26 @@ export function createDefaultCharacter(name: string, color?: string): Character 
   }
 }
 
-const localforageStorage = createJSONStorage<CharacterState>(() => ({
-  getItem: async (name: string) => {
-    const value = await localforage.getItem<string>(name)
-    return value
-  },
-  setItem: async (name: string, value: string) => {
-    await localforage.setItem(name, value)
-  },
-  removeItem: async (name: string) => {
-    await localforage.removeItem(name)
-  },
-}))
+/**
+ * Delete `<!-- stat:id -->` comments for the given marker ids from every
+ * storylet's text. Pending typing is flushed first so the edit applies to the
+ * latest text; `setStoryletContent` bumps docVersion so an open editor reloads.
+ */
+function removeStatComments(ids: Set<string>): void {
+  const storylets = useStoryletStore.getState()
+  storylets._flushContentUpdate()
+  const book = useStoryletStore.getState().book
+  if (!book) return
+  const re = new RegExp(STAT_MARKER_REGEX.source, 'g')
+  for (const storylet of book.storylets) {
+    const content = storylet.content
+    if (!content) continue
+    const next = content.replace(re, (match: string, mid: string) => (ids.has(mid) ? '' : match))
+    if (next !== content) storylets.setStoryletContent(storylet.id, next)
+  }
+}
+
+const localforageStorage = localforageJSONStorage<CharacterState>()
 
 export const useCharacterStore = create<CharacterState>()(
   persist(
@@ -174,15 +185,20 @@ export const useCharacterStore = create<CharacterState>()(
       },
 
       removeCharacter: (id: string) => {
+        const nextMarkers: Record<string, StatDelta[]> = {}
+        const emptied: string[] = []
+        for (const [mid, deltas] of Object.entries(get().markers)) {
+          const kept = deltas.filter((d) => d.characterId !== id)
+          // Drop markers that only held this character's deltas. Entries that
+          // were already empty ("Create empty entry") belong to nobody — keep.
+          if (kept.length === 0 && deltas.length > 0) emptied.push(mid)
+          else nextMarkers[mid] = kept.length === deltas.length ? deltas : kept
+        }
         set((state) => ({
           characters: state.characters.filter((c) => c.id !== id),
-          // Drop markers whose deltas all belonged to this character
-          markers: Object.fromEntries(
-            Object.entries(state.markers)
-              .map(([mid, deltas]) => [mid, deltas.filter((d) => d.characterId !== id)] as const)
-              .filter(([, deltas]) => deltas.length > 0)
-          ),
+          markers: nextMarkers,
         }))
+        if (emptied.length > 0) removeStatComments(new Set(emptied))
       },
 
       setBaseValue: (characterId, statId, value) => {

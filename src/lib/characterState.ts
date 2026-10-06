@@ -343,26 +343,56 @@ function applyDeltaOpWithDefs(
   return next
 }
 
-/** Decrement buff counters and drop expired ones. Called after each marker's ops applied. */
-function tickBuffs(state: CharacterState): CharacterState {
+/**
+ * Decrement buff counters and drop expired ones. Buffs in `fresh` were
+ * (re)applied by the marker being processed and don't tick on it.
+ */
+function tickBuffs(state: CharacterState, fresh: ReadonlySet<string>): CharacterState {
   if (state.activeBuffs.length === 0) return state
   const nextBuffs: ActiveBuff[] = []
   let changed = false
   for (const buff of state.activeBuffs) {
-    if (buff.remaining === undefined) {
+    if (buff.remaining === undefined || fresh.has(buff.buffId)) {
       nextBuffs.push(buff)
       continue
     }
     const r = buff.remaining - 1
-    if (r <= 0) {
-      changed = true
-      continue
-    }
-    if (r !== buff.remaining) changed = true
+    changed = true
+    if (r <= 0) continue
     nextBuffs.push({ ...buff, remaining: r })
   }
-  if (!changed && nextBuffs.length === state.activeBuffs.length) return state
+  if (!changed) return state
   return { ...state, activeBuffs: nextBuffs }
+}
+
+/**
+ * Apply one marker's ops for a single character, then advance buff counters.
+ * The one place every book walk (state lookups, history, consistency) steps a
+ * character through a marker, so they all agree on buff expiry: a buff with
+ * `expiresAfter: N` stays active for the next N markers affecting the
+ * character after the one that applied it. `beforeOp` sees the state each op
+ * is about to be applied to.
+ */
+function applyMarkerOps(
+  state: CharacterState,
+  ops: StatDeltaOp[],
+  definitions: StatDefinition[],
+  beforeOp?: (state: CharacterState, op: StatDeltaOp) => void
+): CharacterState {
+  const fresh = new Set<string>()
+  for (const op of ops) {
+    beforeOp?.(state, op)
+    state = applyDeltaOpWithDefs(state, op, definitions)
+    if (op.kind === 'buffApply') fresh.add(op.buffId)
+  }
+  return tickBuffs(state, fresh)
+}
+
+/** The ops of `deltas` that belong to `characterId`, in marker order. */
+function opsFor(deltas: StatDelta[], characterId: string): StatDeltaOp[] {
+  const ops: StatDeltaOp[] = []
+  for (const d of deltas) if (d.characterId === characterId) ops.push(d.op)
+  return ops
 }
 
 /**
@@ -484,16 +514,10 @@ function buildTimeline(character: Character, book: Book, markers: Record<string,
       if (marker.kind !== 'delta') continue
       const deltas = markers[marker.id]
       if (!deltas || deltas.length === 0) continue
-      let appliedAny = false
-      for (const delta of deltas) {
-        if (delta.characterId !== character.id) continue
-        state = applyDeltaOpWithDefs(state, delta.op, character.stats)
-        appliedAny = true
-      }
-      if (appliedAny) {
-        state = tickBuffs(state)
-        checkpoints.push({ order, offset: marker.offset, state })
-      }
+      const ops = opsFor(deltas, character.id)
+      if (ops.length === 0) continue
+      state = applyMarkerOps(state, ops, character.stats)
+      checkpoints.push({ order, offset: marker.offset, state })
     }
   })
   return { orderIndex, initial, checkpoints }
@@ -527,7 +551,8 @@ function getTimeline(character: Character, book: Book, markers: Record<string, S
  * - Starts from `character.baseValues` (cloned).
  * - Only deltas whose `characterId` matches `character.id` are applied.
  * - Unknown marker ids (present in text but missing from `markers`) are skipped.
- * - Buff counters decrement once per marker that produced at least one applied op.
+ * - Buff counters decrement once per later marker that affects the character
+ *   (see `applyMarkerOps`).
  *
  * The walk over the book is cached per (book, markers, character), so
  * repeated lookups (every `{HP}` ref, every statblock) are a binary search.
@@ -556,6 +581,32 @@ export function computeStateAt(
     state = lo > 0 ? checkpoints[lo - 1].state : initial
   }
   return { state, effective: computeEffective(state, character.stats) }
+}
+
+let liveBookMemo: { book: Book; storyletId: string; content: string; result: Book } | null = null
+
+/**
+ * `book` with one storylet's content replaced by `content` — the editor's live
+ * text for the open storylet, which the store's copy trails by up to 1.5s.
+ * Memoized on (book, storyletId, content) so every consumer of the same live
+ * text (stat refs, statblocks, the panel) gets the same Book object and so
+ * shares one cached timeline per character.
+ */
+export function withLiveStorylet(book: Book, storyletId: string, content: string): Book {
+  const memo = liveBookMemo
+  if (memo && memo.book === book && memo.storyletId === storyletId && memo.content === content) {
+    return memo.result
+  }
+  const current = book.storylets.find((s) => s.id === storyletId)
+  const result =
+    !current || (current.content ?? '') === content
+      ? book
+      : {
+          ...book,
+          storylets: book.storylets.map((s) => (s.id === storyletId ? { ...s, content } : s)),
+        }
+  liveBookMemo = { book, storyletId, content, result }
+  return result
 }
 
 /** Approximate word-count in a slice of text. Used for history X-axis hints. */
@@ -611,17 +662,14 @@ export function computeHistory(
       if (marker.kind !== 'delta') continue
       const deltas = markers[marker.id]
       if (!deltas || deltas.length === 0) continue
-      const applicable = deltas.filter((d) => d.characterId === character.id)
-      if (applicable.length === 0) continue
+      const ops = opsFor(deltas, character.id)
+      if (ops.length === 0) continue
 
       // Count words from prevOffset up to this marker's offset.
       cumulativeWords += countWords(content.slice(prevOffset, marker.offset))
       prevOffset = marker.offset
 
-      for (const delta of applicable) {
-        state = applyDeltaOpWithDefs(state, delta.op, character.stats)
-      }
-      state = tickBuffs(state)
+      state = applyMarkerOps(state, ops, character.stats)
       markerIndex += 1
       samples.push({
         markerIndex,
@@ -721,44 +769,38 @@ export function checkConsistency(
         })
         continue
       }
-      for (const delta of deltas) {
-        const c = charactersById.get(delta.characterId)
-        if (!c) continue
-        const state = simStates.get(c.id)
-        if (!state) continue
-        const op = delta.op
-        if (op.kind === 'equip') {
-          if (!c.equipmentSlots.includes(op.slot)) {
-            issues.push({
-              kind: 'missingSlot',
-              characterId: c.id,
-              slot: op.slot,
-              markerId: marker.id,
-            })
-          }
-        } else if (op.kind === 'unequip') {
-          if (!state.equipped[op.slot]) {
-            issues.push({
-              kind: 'unequipEmpty',
-              characterId: c.id,
-              slot: op.slot,
-              markerId: marker.id,
-            })
-          }
-        }
-        const nextState = applyDeltaOpWithDefs(state, op, c.stats)
-        simStates.set(c.id, nextState)
-      }
-      // After applying, tick buffs and check invariants for each affected char.
+      // Step each affected character through the marker. Characters are
+      // independent, so grouping a compound marker's ops per character keeps
+      // each one's op order intact.
       const touched = new Set<string>()
       for (const delta of deltas) touched.add(delta.characterId)
       for (const cid of touched) {
         const c = charactersById.get(cid)
         const state = simStates.get(cid)
         if (!c || !state) continue
-        const ticked = tickBuffs(state)
-        simStates.set(cid, ticked)
-        checkImpossible(c, ticked, storylet.id, marker.offset)
+        const next = applyMarkerOps(state, opsFor(deltas, cid), c.stats, (before, op) => {
+          if (op.kind === 'equip') {
+            if (!c.equipmentSlots.includes(op.slot)) {
+              issues.push({
+                kind: 'missingSlot',
+                characterId: c.id,
+                slot: op.slot,
+                markerId: marker.id,
+              })
+            }
+          } else if (op.kind === 'unequip') {
+            if (!before.equipped[op.slot]) {
+              issues.push({
+                kind: 'unequipEmpty',
+                characterId: c.id,
+                slot: op.slot,
+                markerId: marker.id,
+              })
+            }
+          }
+        })
+        simStates.set(cid, next)
+        checkImpossible(c, next, storylet.id, marker.offset)
       }
     }
   }

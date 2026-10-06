@@ -10,6 +10,7 @@ import {
   StateEffect,
   StateField,
   RangeSetBuilder,
+  type EditorState,
   type Extension,
 } from '@codemirror/state'
 import type { Book, DocumentStyles, NamedStyle } from '../../types'
@@ -18,8 +19,10 @@ import {
   expandRefs,
   resolveRef,
   formatStatValueInline,
+  type StatRefHit,
 } from '../../lib/statRefs'
-import { computeStateAt } from '../../lib/characterState'
+import { computeStateAt, withLiveStorylet } from '../../lib/characterState'
+import { namedStyleToCss } from '../../lib/styleCss'
 import { characterSnapshotField } from './statMarkerExtension'
 import { renderModeField, setRenderModeEffect } from './renderMode'
 
@@ -54,6 +57,55 @@ const storyletContextField = StateField.define<StoryletContext>({
     return value
   },
 })
+
+/** Lazily-built book whose active storylet holds the editor's live text. */
+interface LiveBook {
+  get(): Book | null
+}
+
+function makeLiveBook(state: EditorState): LiveBook {
+  let cached: Book | null | undefined
+  return {
+    get() {
+      if (cached === undefined) {
+        const ctx = state.field(storyletContextField)
+        cached =
+          ctx.book && ctx.storyletId
+            ? withLiveStorylet(ctx.book, ctx.storyletId, state.doc.toString())
+            : ctx.book
+      }
+      return cached
+    },
+  }
+}
+
+/**
+ * The store's copy of the open storylet trails the editor by up to 1.5s, but
+ * offsets into the doc are live, so state lookups run against the store's
+ * book with the open storylet swapped for the doc. Rebuilt once per doc or
+ * context change (not per token); `withLiveStorylet` hands every consumer of
+ * the same text the same Book, so the per-book state cache walks it once.
+ */
+const liveBookField = StateField.define<LiveBook>({
+  create: makeLiveBook,
+  update(value, tr) {
+    const ctxChanged = tr.startState.field(storyletContextField) !== tr.state.field(storyletContextField)
+    return tr.docChanged || ctxChanged ? makeLiveBook(tr.state) : value
+  },
+})
+
+/**
+ * The book as the editor currently shows it (see `liveBookField`), or null
+ * when the stat-ref extension isn't installed or no storylet is open.
+ */
+export function getLiveBook(state: EditorState): Book | null {
+  return state.field(liveBookField, false)?.get() ?? null
+}
+
+/** Whether the live book may differ between two states (doc or context changed). */
+export function liveBookChanged(before: EditorState, after: EditorState): boolean {
+  return before.field(liveBookField, false) !== after.field(liveBookField, false)
+}
 
 export function dispatchStatRefStoryletContext(
   view: EditorView,
@@ -139,7 +191,7 @@ function buildSnippetDom(
         (match, cls: string) => {
           const named = documentStyles[cls]
           if (!named) return match
-          const css = namedStyleToCss(named)
+          const css = namedStyleCssDecl(named)
           return css ? `<span style="${css}">` : match
         },
       )
@@ -171,23 +223,10 @@ function sanitizeSnippetNode(n: Node): Node {
   return out
 }
 
-/**
- * Build a CSS string for a NamedStyle, matching the same property set the
- * markdown decoration plugin uses so widgets visually agree with the
- * surrounding prose.
- */
-function namedStyleToCss(style: NamedStyle): string {
-  const parts: string[] = []
-  if (style.fontFamily) parts.push(`font-family: ${style.fontFamily}`)
-  if (style.fontSize) parts.push(`font-size: ${style.fontSize}px`)
-  if (style.lineHeight) parts.push(`line-height: ${style.lineHeight}`)
-  if (style.color) parts.push(`color: ${style.color}`)
-  if (style.letterSpacing) parts.push(`letter-spacing: ${style.letterSpacing}`)
-  if (style.fontWeight) parts.push(`font-weight: ${style.fontWeight}`)
-  if (style.fontStyle) parts.push(`font-style: ${style.fontStyle}`)
-  if (style.textDecoration) parts.push(`text-decoration: ${style.textDecoration}`)
-  if (style.backgroundColor) parts.push(`background-color: ${style.backgroundColor}`)
-  return parts.length === 0 ? '' : parts.join('; ') + ';'
+/** CSS for a NamedStyle, with a trailing `;` (or '' when empty). */
+function namedStyleCssDecl(style: NamedStyle): string {
+  const css = namedStyleToCss(style)
+  return css ? css + ';' : ''
 }
 
 /**
@@ -223,7 +262,7 @@ function findEnclosingSpanCss(
   if (!best) return ''
   if (best.kind === 'style') return best.value
   const named = documentStyles?.[best.value]
-  return named ? namedStyleToCss(named) : ''
+  return named ? namedStyleCssDecl(named) : ''
 }
 
 function buildDecorations(view: EditorView): DecorationSet {
@@ -235,6 +274,7 @@ function buildDecorations(view: EditorView): DecorationSet {
   const ctx = view.state.field(storyletContextField)
   if (!ctx.book || !ctx.storyletId) return Decoration.none
   if (snapshot.characters.length === 0 && !ctx.snippets) return Decoration.none
+  const storyletId = ctx.storyletId
 
   // In `rendered` mode we reveal raw source on the cursor's line so the author
   // can edit refs in place. `preview` and `clean` never reveal.
@@ -243,13 +283,11 @@ function buildDecorations(view: EditorView): DecorationSet {
     mode === 'rendered' ? view.state.doc.lineAt(view.state.selection.main.head) : null
   const className = mode === 'clean' ? 'cm-stat-ref-plain' : 'cm-stat-ref'
 
-  const formatStat = (
-    hit: import('../../lib/statRefs').StatRefHit,
-    offset: number,
-  ): string | null => {
-    if (!ctx.book || !ctx.storyletId) return null
-    const computed = computeStateAt(hit.character, ctx.book, snapshot.markers, {
-      storyletId: ctx.storyletId,
+  const formatStat = (hit: StatRefHit, offset: number): string | null => {
+    const book = getLiveBook(view.state)
+    if (!book) return null
+    const computed = computeStateAt(hit.character, book, snapshot.markers, {
+      storyletId,
       offset,
     })
     const value = computed.effective[hit.def.id]
@@ -270,14 +308,13 @@ function buildDecorations(view: EditorView): DecorationSet {
       if (!hit) continue
       let formatted: string
       if (hit.kind === 'snippet') {
-        // Snippet — expand recursively. Stat refs inside the snippet use the
-        // CURRENT token's document offset so they see exactly the same earlier
-        // markers the author would see if they typed the snippet's text here.
-        formatted = expandRefs(hit.template, {
-          characters: snapshot.characters,
-          snippets: ctx.snippets,
-          formatStat: (innerHit) => formatStat(innerHit, start),
-        })
+        // Snippet — expand recursively. Stat refs inside the snippet resolve
+        // at this token's document offset, as they do in export.
+        formatted = expandRefs(
+          hit.template,
+          { characters: snapshot.characters, snippets: ctx.snippets, formatStat },
+          start,
+        )
       } else if (hit.kind === 'characterProperty') {
         formatted = hit.character.name
       } else {
@@ -307,6 +344,21 @@ function buildDecorations(view: EditorView): DecorationSet {
   return builder.finish()
 }
 
+/**
+ * A selection-only update matters only in `rendered` mode, where the cursor's
+ * line shows raw tokens: rebuild when the cursor moved to another line and
+ * either the line it left or the one it entered holds a `{...}` token.
+ */
+function cursorRevealChanged(update: ViewUpdate): boolean {
+  if (update.state.field(renderModeField) !== 'rendered') return false
+  const { doc } = update.state
+  const prev = update.startState.doc.lineAt(update.startState.selection.main.head)
+  const next = doc.lineAt(update.state.selection.main.head)
+  if (prev.number === next.number) return false
+  const hasToken = (text: string) => new RegExp(STAT_REF_REGEX.source).test(text)
+  return hasToken(prev.text) || hasToken(next.text)
+}
+
 const statRefViewPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet
@@ -326,10 +378,10 @@ const statRefViewPlugin = ViewPlugin.fromClass(
       if (
         update.docChanged ||
         update.viewportChanged ||
-        update.selectionSet ||
         snapshotChanged ||
         ctxChanged ||
-        renderModeChanged
+        renderModeChanged ||
+        (update.selectionSet && cursorRevealChanged(update))
       ) {
         this.decorations = buildDecorations(update.view)
       }
@@ -359,5 +411,5 @@ const statRefBaseTheme = EditorView.baseTheme({
 })
 
 export function statRefExtension(): Extension {
-  return [storyletContextField, statRefViewPlugin, statRefBaseTheme]
+  return [storyletContextField, liveBookField, statRefViewPlugin, statRefBaseTheme]
 }

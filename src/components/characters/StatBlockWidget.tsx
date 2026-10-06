@@ -2,8 +2,11 @@ import { useMemo } from 'react'
 import { useCharacterStore } from '../../stores/characterStore'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { computeStateAt } from '../../lib/characterState'
+import { resolveStatblockDefinitions } from '../../lib/markerUtils'
+import { STATBLOCK_VALUE_FORMAT, formatStatValue } from '../../lib/statFormat'
 import type {
   ActiveBuff,
+  Book,
   Character,
   EquippedItem,
   StatDefinition,
@@ -15,33 +18,11 @@ interface StatBlockWidgetProps {
   fields?: string[]
   storyletId: string
   offsetInStorylet: number
-}
-
-const DEFAULT_FIELD_IDS = ['hp', 'mp', 'level', 'xp', 'attributes']
-
-function formatScalar(v: StatValue): string {
-  switch (v.kind) {
-    case 'number':
-      return String(v.value)
-    case 'numberWithMax':
-      return `${v.value}/${v.max}`
-    case 'text':
-      return v.value || '—'
-    case 'list':
-      return v.items.length === 0 ? '(none)' : v.items.join(', ')
-    case 'attributeSet':
-      return Object.entries(v.values)
-        .map(([k, n]) => `${k} ${n}`)
-        .join(' • ')
-    case 'rank':
-      return v.tier
-    case 'inventory':
-      return v.items.length === 0 ? '(none)' : `${v.items.length} items`
-    case 'spellList':
-      return v.items.length === 0 ? '(none)' : `${v.items.length} items`
-    case 'skillList':
-      return v.items.length === 0 ? '(none)' : `${v.items.length} items`
-  }
+  /**
+   * Book to compute against — the editor passes one whose open storylet holds
+   * its live text, matching `offsetInStorylet`. Falls back to the store's book.
+   */
+  book?: Book | null
 }
 
 function StatRow({
@@ -182,7 +163,7 @@ function StatRow({
         {def.name}
       </span>
       <span className="font-mono text-sm text-gray-100">
-        {formatScalar(value)}
+        {formatStatValue(value, STATBLOCK_VALUE_FORMAT)}
       </span>
     </div>
   )
@@ -257,10 +238,12 @@ export default function StatBlockWidget({
   fields,
   storyletId,
   offsetInStorylet,
+  book: liveBook,
 }: StatBlockWidgetProps) {
   const characters = useCharacterStore((s) => s.characters)
   const markers = useCharacterStore((s) => s.markers)
-  const book = useStoryletStore((s) => s.book)
+  const storeBook = useStoryletStore((s) => s.book)
+  const book = liveBook ?? storeBook
 
   const character: Character | undefined = useMemo(
     () => characters.find((c) => c.id === characterId),
@@ -290,31 +273,7 @@ export default function StatBlockWidget({
     return null
   }
 
-  // Pick definitions to render
-  const fieldsToShow = fields && fields.length > 0 ? fields : DEFAULT_FIELD_IDS
-  const defsById = new Map(character.stats.map((s) => [s.id, s]))
-  const defsByNameLower = new Map(
-    character.stats.map((s) => [s.name.toLowerCase(), s])
-  )
-  const resolved: StatDefinition[] = []
-  const seen = new Set<string>()
-  for (const key of fieldsToShow) {
-    const lower = key.toLowerCase()
-    const def = defsById.get(key) ?? defsByNameLower.get(lower)
-    if (def && !seen.has(def.id)) {
-      resolved.push(def)
-      seen.add(def.id)
-    }
-  }
-  // If nothing matched (default list didn't hit any stat ids), fall back to all
-  if (resolved.length === 0) {
-    for (const def of character.stats) {
-      if (!seen.has(def.id)) {
-        resolved.push(def)
-        seen.add(def.id)
-      }
-    }
-  }
+  const resolved = resolveStatblockDefinitions(character, fields)
 
   return (
     <div

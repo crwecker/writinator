@@ -12,8 +12,9 @@ import {
   RangeSetBuilder,
   type Extension,
 } from '@codemirror/state'
-import type { Character, StatDelta, StatDeltaOp } from '../../types'
+import type { Character, StatDelta } from '../../types'
 import { STAT_MARKER_REGEX } from '../../lib/markerUtils'
+import { formatOpTooltip, statNameLookup } from '../../lib/statFormat'
 import {
   renderModeField,
   setRenderModeEffect,
@@ -63,14 +64,10 @@ export function summarizeDeltas(
   character: Character | undefined
 ): string {
   if (deltas.length === 0) return 'No changes'
-  const statName = (statId: string): string => {
-    if (!character) return statId
-    const def = character.stats.find((s) => s.id === statId)
-    return def?.name ?? statId
-  }
+  const statName = statNameLookup(character)
   const parts: string[] = []
   for (const d of deltas) {
-    parts.push(formatOp(d.op, statName))
+    parts.push(formatOpTooltip(d.op, statName))
   }
   return parts.join(', ')
 }
@@ -91,12 +88,7 @@ export function buildMarkerTooltip(
   const notes: string[] = []
   for (const d of deltas) {
     const character = charactersById.get(d.characterId)
-    const statName = (statId: string): string => {
-      if (!character) return statId
-      const def = character.stats.find((s) => s.id === statId)
-      return def?.name ?? statId
-    }
-    const summary = formatOp(d.op, statName)
+    const summary = formatOpTooltip(d.op, statNameLookup(character))
     // Prefix with character name when compound marker crosses characters.
     if (character && character.id !== firstCharacter?.id) {
       lines.push(`  [${character.name}] ${summary}`)
@@ -108,56 +100,6 @@ export function buildMarkerTooltip(
   }
   if (notes.length > 0) lines.push('', ...notes.map((n) => `"${n}"`))
   return lines.join('\n')
-}
-
-function formatOp(
-  op: StatDeltaOp,
-  statName: (id: string) => string
-): string {
-  switch (op.kind) {
-    case 'adjust': {
-      const sign = op.delta >= 0 ? '+' : ''
-      const label = op.attributeKey
-        ? `${statName(op.statId)}.${op.attributeKey}`
-        : statName(op.statId)
-      return `${label} ${sign}${op.delta}`
-    }
-    case 'set':
-      return `set ${statName(op.statId)}`
-    case 'maxAdjust': {
-      const sign = op.delta >= 0 ? '+' : ''
-      return `max${capitalize(statName(op.statId))} ${sign}${op.delta}`
-    }
-    case 'listAdd':
-      return `+${op.items.join(', ')} → ${statName(op.statId)}`
-    case 'listRemove':
-      return `-${op.items.join(', ')} from ${statName(op.statId)}`
-    case 'equip':
-      return `equip ${op.itemName ?? op.itemId} (${op.slot})`
-    case 'unequip':
-      return `unequip ${op.slot}`
-    case 'buffApply':
-      return `buff ${op.buffName ?? op.buffId}`
-    case 'buffRemove':
-      return `-buff ${op.buffId}`
-    case 'rankChange':
-      if (op.direction === 'set') {
-        return `${statName(op.statId)} → ${op.value ?? '?'}`
-      }
-      return `${statName(op.statId)} rank ${op.direction}`
-    case 'fill':
-      return `${statName(op.statId)} → max`
-    case 'itemAdd':
-      return `+${op.name} → ${statName(op.statId)}`
-    case 'itemRemove':
-      return `-${op.name} from ${statName(op.statId)}`
-    case 'itemFieldAdjust':
-      return `${op.name}.${op.field} ${op.delta >= 0 ? '+' : ''}${op.delta}`
-  }
-}
-
-function capitalize(s: string): string {
-  return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s
 }
 
 const NEUTRAL_COLOR = '#6b7280' // gray-500

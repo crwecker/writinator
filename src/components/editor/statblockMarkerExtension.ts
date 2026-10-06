@@ -16,31 +16,42 @@ import { createElement } from 'react'
 import { STATBLOCK_MARKER_REGEX, parseStatblockOptions, statblockFields } from '../../lib/markerUtils'
 import StatBlockWidget from '../characters/StatBlockWidget'
 import { useStoryletStore } from '../../stores/storyletStore'
+import type { Book } from '../../types'
+import { getLiveBook, liveBookChanged } from './statRefExtension'
 import {
   renderModeField,
   setRenderModeEffect,
   markerPresentation,
 } from './renderMode'
 
+/**
+ * React roots keyed by the widget's container. CodeMirror may keep a widget's
+ * DOM while swapping in a new widget instance (`updateDOM`), and calls
+ * `destroy(dom)` on whichever instance it holds last, so the root has to live
+ * with the DOM rather than on the instance that created it.
+ */
+const roots = new WeakMap<HTMLElement, Root>()
+
 class StatBlockWidgetType extends WidgetType {
   readonly characterId: string
   readonly fields: string[] | undefined
   readonly offsetInStorylet: number
   readonly storyletId: string
-
-  private root: Root | null = null
+  readonly book: Book | null
 
   constructor(
     characterId: string,
     fields: string[] | undefined,
     offsetInStorylet: number,
-    storyletId: string
+    storyletId: string,
+    book: Book | null
   ) {
     super()
     this.characterId = characterId
     this.fields = fields
     this.offsetInStorylet = offsetInStorylet
     this.storyletId = storyletId
+    this.book = book
   }
 
   eq(other: WidgetType): boolean {
@@ -57,7 +68,20 @@ class StatBlockWidgetType extends WidgetType {
       fieldsEq &&
       other.characterId === this.characterId &&
       other.offsetInStorylet === this.offsetInStorylet &&
-      other.storyletId === this.storyletId
+      other.storyletId === this.storyletId &&
+      other.book === this.book
+    )
+  }
+
+  private render(root: Root): void {
+    root.render(
+      createElement(StatBlockWidget, {
+        characterId: this.characterId,
+        fields: this.fields,
+        storyletId: this.storyletId,
+        offsetInStorylet: this.offsetInStorylet,
+        book: this.book,
+      })
     )
   }
 
@@ -67,24 +91,26 @@ class StatBlockWidgetType extends WidgetType {
     container.setAttribute('data-statblock-character-id', this.characterId)
     container.contentEditable = 'false'
     const root = createRoot(container)
-    root.render(
-      createElement(StatBlockWidget, {
-        characterId: this.characterId,
-        fields: this.fields,
-        storyletId: this.storyletId,
-        offsetInStorylet: this.offsetInStorylet,
-      })
-    )
-    this.root = root
+    roots.set(container, root)
+    this.render(root)
     return container
   }
 
-  destroy(): void {
-    if (this.root) {
-      const root = this.root
-      this.root = null
-      queueMicrotask(() => root.unmount())
-    }
+  /** Re-render the existing root with this widget's props instead of remounting. */
+  updateDOM(dom: HTMLElement): boolean {
+    const root = roots.get(dom)
+    if (!root) return false
+    dom.setAttribute('data-statblock-character-id', this.characterId)
+    this.render(root)
+    return true
+  }
+
+  destroy(dom: HTMLElement): void {
+    const root = roots.get(dom)
+    if (!root) return
+    roots.delete(dom)
+    // Unmounting synchronously while React may be rendering warns; defer.
+    queueMicrotask(() => root.unmount())
   }
 
   ignoreEvent(): boolean {
@@ -124,6 +150,9 @@ function buildDecorations(state: EditorState): DecorationSet {
   if (presentation === 'raw') return Decoration.none
 
   const storyletId = state.field(activeStoryletField, false) ?? ''
+  // The book as the editor shows it, so offsets into the live doc line up.
+  // Null without the stat-ref extension; the widget then reads the store.
+  const book = getLiveBook(state)
   const fullText = state.doc.toString()
   const re = new RegExp(STATBLOCK_MARKER_REGEX.source, 'g')
   const matches: Array<{
@@ -156,7 +185,8 @@ function buildDecorations(state: EditorState): DecorationSet {
           mm.characterId,
           mm.fields,
           mm.start,
-          storyletId
+          storyletId,
+          book
         ),
         block: true,
         side: 1,
@@ -175,7 +205,8 @@ const statblockDecorationField = StateField.define<DecorationSet>({
       e.is(setStatblockActiveStoryletEffect)
     )
     const renderModeChanged = tr.effects.some((e) => e.is(setRenderModeEffect))
-    if (tr.docChanged || docIdChanged || renderModeChanged) {
+    const bookChanged = liveBookChanged(tr.startState, tr.state)
+    if (tr.docChanged || docIdChanged || renderModeChanged || bookChanged) {
       return buildDecorations(tr.state)
     }
     return value

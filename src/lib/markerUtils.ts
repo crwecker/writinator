@@ -1,4 +1,5 @@
-import type { ExtractedMarker } from '../types'
+import type { Character, ExtractedMarker, StatDefinition } from '../types'
+import { escapeRegExp } from './regex'
 
 /**
  * Matches delta markers of the form `<!-- stat:<uuid> -->`.
@@ -57,6 +58,32 @@ export function statblockFields(options: Record<string, string>): string[] | und
   return fields.length > 0 ? fields : undefined
 }
 
+const DEFAULT_STATBLOCK_FIELD_KEYS = ['hp', 'mp', 'level', 'xp', 'attributes']
+
+/**
+ * The stat definitions a statblock shows, in order: each requested key
+ * matched by stat id, then case-insensitively by name. No `fields` means the
+ * default set; when nothing matches, every stat.
+ */
+export function resolveStatblockDefinitions(
+  character: Character,
+  fields: string[] | undefined
+): StatDefinition[] {
+  const wanted = fields && fields.length > 0 ? fields : DEFAULT_STATBLOCK_FIELD_KEYS
+  const byId = new Map(character.stats.map((s) => [s.id, s]))
+  const byName = new Map(character.stats.map((s) => [s.name.toLowerCase(), s]))
+  const resolved: StatDefinition[] = []
+  const seen = new Set<string>()
+  for (const key of wanted) {
+    const def = byId.get(key) ?? byName.get(key.toLowerCase())
+    if (def && !seen.has(def.id)) {
+      resolved.push(def)
+      seen.add(def.id)
+    }
+  }
+  return resolved.length > 0 ? resolved : [...character.stats]
+}
+
 /**
  * Extract every stat and statblock marker in `content` in occurrence order.
  * `offset` is the byte offset of the marker's `<` in the content string.
@@ -93,25 +120,6 @@ export function insertStatMarker(content: string, pos: number, id: string): stri
   return content.slice(0, clamped) + marker + content.slice(clamped)
 }
 
-/** Insert a statblock marker at `pos` returning the new content. */
-export function insertStatblockMarker(
-  content: string,
-  pos: number,
-  characterId: string,
-  options?: Record<string, string>
-): string {
-  const clamped = Math.max(0, Math.min(pos, content.length))
-  let suffix = ''
-  if (options && Object.keys(options).length > 0) {
-    const parts = Object.entries(options).map(([k, v]) =>
-      v === '' ? k : `${k}=${v}`
-    )
-    suffix = `:${parts.join(',')}`
-  }
-  const marker = `<!-- statblock:${characterId}${suffix} -->`
-  return content.slice(0, clamped) + marker + content.slice(clamped)
-}
-
 /**
  * Remove the first marker whose identifier matches `id`. Works for both kinds:
  * - delta markers are matched by the stat-marker uuid
@@ -123,7 +131,7 @@ export function insertStatblockMarker(
  * (the common case) plus simple statblock deletion.
  */
 export function removeMarker(content: string, id: string): string {
-  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const escaped = escapeRegExp(id)
   const statRe = new RegExp(`<!--\\s*stat:${escaped}\\s*-->`)
   const statblockRe = new RegExp(
     `<!--\\s*statblock:${escaped}(?::[^>]*?)?\\s*-->`

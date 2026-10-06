@@ -48,7 +48,7 @@ export function seedCharacters(characters: Character[], markers: Record<string, 
   useCharacterStore.setState({ characters, markers })
 }
 
-export function delta(characterId: string, op: StatDelta['op'], id = crypto.randomUUID()): StatDelta {
+export function delta(characterId: string, op: StatDelta['op'], id: string = crypto.randomUUID()): StatDelta {
   return { id, characterId, op }
 }
 

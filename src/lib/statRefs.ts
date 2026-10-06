@@ -1,5 +1,8 @@
-import type { Character, StatDefinition, StatValue } from '../types'
-import { formatQty } from './characterState'
+import type { Character, StatDefinition } from '../types'
+
+// Inline value formatting lives with the other stat formatters; re-exported
+// here because every `{...}` consumer reaches for it alongside expandRefs.
+export { formatStatValueInline } from './statFormat'
 
 /**
  * Inline stat reference token. `{HP}` in prose resolves to the current value
@@ -127,68 +130,6 @@ export function resolveStatRef(
 }
 
 /**
- * Render a stat value for inline use in prose. Prefers the most natural
- * single-token reading per kind:
- *  - numberWithMax: just the value (HP "12", not "12/10"). Pass subkey
- *    `'max'` for the max, `'value'` for explicit form.
- *  - attributeSet: pass subkey to pluck a single attribute (e.g. "STR").
- *    Without a subkey, joins all attributes ("STR 10 DEX 14 ...").
- *  - list / inventory: joined item names (inventory keeps qty via "Name xN")
- *  - text: the string (empty string when unset — caller decides whether to
- *    fall back to the raw `{...}` token)
- *
- * Returns '' for unsupported subkeys so the caller can fall back to the raw
- * token (helps authors spot typos like `{HP.maxx}`).
- */
-export function formatStatValueInline(
-  v: StatValue,
-  subkey: string | null = null,
-): string {
-  const key = subkey ? subkey.toLowerCase() : null
-  switch (v.kind) {
-    case 'number':
-      return String(v.value)
-    case 'numberWithMax':
-      if (key === 'max') return String(v.max)
-      if (key && key !== 'value') return ''
-      return String(v.value)
-    case 'text':
-      return v.value
-    case 'rank':
-      return v.tier
-    case 'list':
-      return v.items.join('<br/>')
-    case 'attributeSet': {
-      if (!key) {
-        return Object.entries(v.values)
-          .map(([k, n]) => `${k} ${n}`)
-          .join(' ')
-      }
-      for (const [k, n] of Object.entries(v.values)) {
-        if (k.toLowerCase() === key) return String(n)
-      }
-      return ''
-    }
-    case 'inventory':
-      return v.items
-        .map((it) => formatQty(it.name, it.fields.qty ?? 1))
-        .join('<br/>')
-    case 'spellList':
-      return v.items
-        .map((it) => {
-          const lv = it.fields.level ?? 1
-          const cost = it.fields.mana ?? 0
-          return `${it.name} · Lv ${lv} · Cost ${cost}`
-        })
-        .join('<br/>')
-    case 'skillList':
-      return v.items
-        .map((it) => `${it.name} · Lv ${it.fields.level ?? 1}`)
-        .join('<br/>')
-  }
-}
-
-/**
  * Resolve a `{...}` token to a snippet (first) or a stat (second). Returns
  * null when nothing matched — caller should preserve the raw `{...}` text.
  */
@@ -241,11 +182,17 @@ export interface ExpandContext {
  * accidentally write `{A}` that references `{B}` that references `{A}` see a
  * loop-breaker raw token instead of a stack overflow).
  *
+ * `formatStat` gets the document offset of the token being resolved. Refs
+ * inside a snippet resolve at the offset of the snippet's own token in the
+ * document — the template's internal offsets mean nothing there. Pass
+ * `anchorOffset` when `content` isn't the document itself (e.g. a snippet
+ * template rendered for a token at that offset) to resolve every ref there.
+ *
  * Pure — does not touch any store. Caller supplies `formatStat` which is the
  * only place runtime state-at-offset lives.
  */
-export function expandRefs(content: string, ctx: ExpandContext): string {
-  return expandRefsInner(content, ctx, 0, new Set())
+export function expandRefs(content: string, ctx: ExpandContext, anchorOffset?: number): string {
+  return expandRefsInner(content, ctx, 0, new Set(), anchorOffset)
 }
 
 function expandRefsInner(
@@ -253,6 +200,7 @@ function expandRefsInner(
   ctx: ExpandContext,
   depth: number,
   visiting: Set<string>,
+  anchorOffset: number | undefined,
 ): string {
   if (depth > MAX_SNIPPET_DEPTH) return content
   return content.replace(
@@ -260,21 +208,19 @@ function expandRefsInner(
     (match, ref: string, offset: number) => {
       const hit = resolveRef(ref, ctx.characters, ctx.snippets)
       if (!hit) return match
+      const docOffset = anchorOffset ?? offset
       if (hit.kind === 'snippet') {
         const key = hit.name.toLowerCase()
         if (visiting.has(key)) return match // cycle — keep raw to flag the loop
         visiting.add(key)
-        const expanded = expandRefsInner(hit.template, ctx, depth + 1, visiting)
+        const expanded = expandRefsInner(hit.template, ctx, depth + 1, visiting, docOffset)
         visiting.delete(key)
         return expanded
       }
       if (hit.kind === 'characterProperty') {
         return hit.character.name || match
       }
-      const formatted = ctx.formatStat(
-        hit.hit,
-        typeof offset === 'number' ? offset : 0,
-      )
+      const formatted = ctx.formatStat(hit.hit, docOffset)
       return formatted === null || formatted === '' ? match : formatted
     },
   )
