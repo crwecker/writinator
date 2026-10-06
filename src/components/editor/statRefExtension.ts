@@ -67,12 +67,20 @@ class StatRefWidget extends WidgetType {
   readonly raw: string
   readonly className: string
   readonly inlineStyle: string
-  constructor(text: string, raw: string, className: string, inlineStyle: string) {
+  readonly documentStyles: DocumentStyles | undefined
+  constructor(
+    text: string,
+    raw: string,
+    className: string,
+    inlineStyle: string,
+    documentStyles: DocumentStyles | undefined,
+  ) {
     super()
     this.text = text
     this.raw = raw
     this.className = className
     this.inlineStyle = inlineStyle
+    this.documentStyles = documentStyles
   }
   eq(other: WidgetType): boolean {
     return (
@@ -80,7 +88,8 @@ class StatRefWidget extends WidgetType {
       other.text === this.text &&
       other.raw === this.raw &&
       other.className === this.className &&
-      other.inlineStyle === this.inlineStyle
+      other.inlineStyle === this.inlineStyle &&
+      other.documentStyles === this.documentStyles
     )
   }
   toDOM(): HTMLElement {
@@ -88,15 +97,12 @@ class StatRefWidget extends WidgetType {
     span.className = this.className
     if (this.inlineStyle) span.setAttribute('style', this.inlineStyle)
     span.setAttribute('title', this.raw)
-    // Lists render with literal `<br/>` separators — split and build real DOM
-    // nodes so the widget renders multi-line in the editor (textContent would
-    // escape the HTML).
-    if (this.text.includes('<br/>')) {
-      const parts = this.text.split('<br/>')
-      parts.forEach((part, i) => {
-        if (i > 0) span.appendChild(document.createElement('br'))
-        span.appendChild(document.createTextNode(part))
-      })
+    // The expanded text may contain author-typed HTML (snippets), so parse +
+    // sanitize into real DOM nodes. The simpler `<br/>` list rendering falls
+    // out of the same path because <br> is in the allowlist.
+    if (/<[a-z]/i.test(this.text) || this.text.includes('<br')) {
+      const children = buildSnippetDom(this.text, this.documentStyles)
+      for (const child of children) span.appendChild(child)
     } else {
       span.textContent = this.text
     }
@@ -105,6 +111,64 @@ class StatRefWidget extends WidgetType {
   ignoreEvent(): boolean {
     return false
   }
+}
+
+/**
+ * Inline HTML allowed inside snippet templates. Block-level tags would break
+ * CodeMirror's per-line layout, and external/script-y tags are simply unsafe
+ * even though authoring is single-user.
+ */
+const SNIPPET_ALLOWED_TAGS = new Set([
+  'SPAN', 'B', 'I', 'EM', 'STRONG', 'U', 'S', 'SMALL', 'SUP', 'SUB', 'CODE', 'BR',
+])
+
+const UNSAFE_STYLE_RE = /javascript:|expression\(|behavior\s*:|@import|url\s*\(/i
+
+/**
+ * Parse a snippet-expanded HTML string into sanitized DOM nodes for the
+ * widget. Resolves `<span class="X">` against `documentStyles` so author
+ * named styles work inside snippets the same way they do in document prose.
+ */
+function buildSnippetDom(
+  html: string,
+  documentStyles: DocumentStyles | undefined,
+): Node[] {
+  const resolved = documentStyles
+    ? html.replace(
+        /<span\s+class="([^"]+)"\s*>/g,
+        (match, cls: string) => {
+          const named = documentStyles[cls]
+          if (!named) return match
+          const css = namedStyleToCss(named)
+          return css ? `<span style="${css}">` : match
+        },
+      )
+    : html
+  const tpl = document.createElement('template')
+  tpl.innerHTML = resolved
+  return Array.from(tpl.content.childNodes).map(sanitizeSnippetNode)
+}
+
+function sanitizeSnippetNode(n: Node): Node {
+  if (n.nodeType === Node.TEXT_NODE) {
+    return document.createTextNode(n.textContent ?? '')
+  }
+  if (n.nodeType !== Node.ELEMENT_NODE) {
+    return document.createTextNode('')
+  }
+  const el = n as HTMLElement
+  if (!SNIPPET_ALLOWED_TAGS.has(el.tagName)) {
+    return document.createTextNode(el.textContent ?? '')
+  }
+  const out = document.createElement(el.tagName.toLowerCase())
+  if (el.tagName === 'SPAN') {
+    const style = el.getAttribute('style')
+    if (style && !UNSAFE_STYLE_RE.test(style)) out.setAttribute('style', style)
+  }
+  for (const child of Array.from(el.childNodes)) {
+    out.appendChild(sanitizeSnippetNode(child))
+  }
+  return out
 }
 
 /**
@@ -235,7 +299,7 @@ function buildDecorations(view: EditorView): DecorationSet {
         start,
         end,
         Decoration.replace({
-          widget: new StatRefWidget(formatted, m[0], className, inlineStyle),
+          widget: new StatRefWidget(formatted, m[0], className, inlineStyle, ctx.documentStyles),
         }),
       )
     }

@@ -152,7 +152,8 @@ export function hasFileTetherCapability(): boolean {
 export async function buildWritinatorFile(
   book: Book,
   globalSettings: GlobalSettings,
-  saveCounter: number
+  saveCounter: number,
+  saveId?: string
 ): Promise<WritinatorFile> {
   const snapshots = await getAllSnapshots()
   const publishedSnapshots = await getAllPublishedSnapshots()
@@ -166,6 +167,7 @@ export async function buildWritinatorFile(
     characters,
     markers,
     saveCounter,
+    ...(saveId ? { saveId } : {}),
   }
   for (const section of EXTERNAL_SECTIONS) {
     // Cast required: TypeScript can't narrow the generic K assignment through the loop
@@ -179,7 +181,8 @@ export async function saveFile(
   globalSettings: GlobalSettings
 ): Promise<void> {
   const currentCounter = useStoryletStore.getState().lastSavedCounter
-  const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1)
+  const saveId = crypto.randomUUID()
+  const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1, saveId)
   const json = JSON.stringify(file, null, 2)
 
   if (isTauri()) {
@@ -189,7 +192,18 @@ export async function saveFile(
   } else {
     saveWithDownload(json, book.title)
   }
-  useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now())
+  useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now(), { saveId, book })
+}
+
+/**
+ * Whether the file on disk was written by someone else (another device, tab
+ * or app) since this app last saved or loaded it. Files from older versions
+ * have no `saveId`, so only the counter can be compared for them.
+ */
+export function fileChangedSinceLastSync(file: WritinatorFile): boolean {
+  const { lastSavedCounter, lastSavedId } = useStoryletStore.getState()
+  if (file.saveCounter !== lastSavedCounter) return true
+  return !!file.saveId && !!lastSavedId && file.saveId !== lastSavedId
 }
 
 /**
@@ -205,8 +219,8 @@ export async function exportWritinatorFile(
   book: Book,
   globalSettings: GlobalSettings
 ): Promise<void> {
-  const currentCounter = useStoryletStore.getState().lastSavedCounter
-  const file = await buildWritinatorFile(book, globalSettings, currentCounter)
+  const { lastSavedCounter: currentCounter, lastSavedId } = useStoryletStore.getState()
+  const file = await buildWritinatorFile(book, globalSettings, currentCounter, lastSavedId ?? undefined)
   const json = JSON.stringify(file, null, 2)
   saveWithDownload(json, book.title)
 }
@@ -217,8 +231,20 @@ export async function quickSave(
 ): Promise<boolean> {
   if (!storedFileHandle && !storedFilePath) return false
 
+  // Never overwrite a version of the file this app hasn't seen. Reconcile
+  // instead: it reloads the file, or keeps local edits and files the disk
+  // version in History, after which the next save goes through.
+  const onDisk = await readStoredFile()
+  const diskFile = onDisk ? parseFileJSON(onDisk.text) : null
+  if (diskFile && fileChangedSinceLastSync(diskFile)) {
+    const { reconcileWithFile } = await import('./reconcile')
+    await reconcileWithFile()
+    return true
+  }
+
   const currentCounter = useStoryletStore.getState().lastSavedCounter
-  const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1)
+  const saveId = crypto.randomUUID()
+  const file = await buildWritinatorFile(book, globalSettings, currentCounter + 1, saveId)
   const json = JSON.stringify(file, null, 2)
 
   if (storedFilePath) {
@@ -229,7 +255,7 @@ export async function quickSave(
     await writable.close()
   }
   lastLocalWriteAt = Date.now()
-  useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now())
+  useStoryletStore.getState().setLastSaved(currentCounter + 1, Date.now(), { saveId, book })
   return true
 }
 

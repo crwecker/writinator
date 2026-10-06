@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, keymap, placeholder, drawSelection, ViewPlugin, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { EditorState, Compartment, StateEffect, RangeSet, type Extension } from '@codemirror/state'
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { defaultKeymap, historyKeymap } from '@codemirror/commands'
 import {
   autocompletion,
   type CompletionContext,
@@ -41,6 +41,14 @@ import {
   setRenderModeEffect,
   shouldHideMarkdown,
 } from './renderMode'
+import {
+  editorHistory,
+  isProgrammaticLoad,
+  loadContentIntoView,
+  makeLockExt,
+  needsEditorReload,
+  type LoadedDoc,
+} from './docLoad'
 import './editor.css'
 
 // Map j/k to gj/gk so vim navigation respects visual (wrapped) lines
@@ -75,16 +83,6 @@ function makeFontSizeTheme(fontSize: number): Extension {
   })
 }
 
-// Blocks edits when the book is not connected to a granted file handle.
-// EditorState.readOnly stops user input; the transaction filter cancels
-// programmatic doc changes (bubble toolbar, stat markers, rich paste).
-function makeLockExt(locked: boolean): Extension {
-  if (!locked) return []
-  return [
-    EditorState.readOnly.of(true),
-    EditorState.transactionFilter.of((tr) => (tr.docChanged ? [] : tr)),
-  ]
-}
 
 function makeDocStylesTheme(styles: DocumentStyles | undefined): Extension {
   if (!styles) return []
@@ -706,6 +704,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   const activeDocVersion = useStoryletStore(
     (s) => s.book?.storylets.find((sl) => sl.id === s.activeStoryletId)?.docVersion ?? 0
   )
+  const bookLoadNonce = useStoryletStore((s) => s.bookLoadNonce)
   const fontFamily = useEditorStore((s) => s.fontFamily)
   const fontSize = useEditorStore((s) => s.fontSize)
   const renderMode = useEditorStore((s) => s.renderMode)
@@ -720,7 +719,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
   // Tracks which storylet (id + docVersion) is currently loaded into the EditorView.
   // docVersion lets external bulk mutations (e.g. Find-in-Book replace) force a reload
   // even when the active id is unchanged.
-  const loadedDocumentRef = useRef<{ id: string; version: number } | null>(null)
+  const loadedDocumentRef = useRef<LoadedDoc | null>(null)
   const fontCompartmentRef = useRef<Compartment | null>(null)
   const fontSizeCompartmentRef = useRef<Compartment | null>(null)
   const typewriterCompartmentRef = useRef<Compartment | null>(null)
@@ -790,7 +789,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         vimComp.of(useEditorStore.getState().vimMode ? vim() : []),
         drawSelection(),
         kjExitInsertMode(),
-        history(),
+        editorHistory(),
         keymap.of([
           { key: 'Ctrl-Shift-v', run: (view) => { void pasteStyle(view); return true }, preventDefault: true },
           { key: 'Meta-Shift-v', run: (view) => { void pasteStyle(view); return true }, preventDefault: true },
@@ -910,7 +909,9 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
           },
         }),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
+          // Swapping in a storylet's text is not typing: don't save it back or
+          // count it toward WPM.
+          if (update.docChanged && !update.transactions.some(isProgrammaticLoad)) {
             const text = update.state.doc.toString()
             const newCount = countWords(text)
             // WPM ring-buffer sampling — hot path, must be cheap.
@@ -922,9 +923,12 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             prevWordCountRef.current = newCount
             // Defer React state updates out of CM6's synchronous update cycle
             // to prevent React re-renders from interfering with CM6 DOM updates
+            // Tag the text with the storylet it was typed in, captured now —
+            // the active storylet may change before the microtask runs.
+            const storyletId = loadedDocumentRef.current?.id
             queueMicrotask(() => {
               callbacksRef.current.onWordCountChange?.(newCount)
-              updateContent(text)
+              updateContent(text, storyletId)
             })
           }
           if (update.selectionSet || update.docChanged) {
@@ -946,14 +950,18 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     // Load initial storylet content
     const store = useStoryletStore.getState()
     const activeStorylet = store.book?.storylets?.find((s) => s.id === store.activeStoryletId)
+    if (activeStorylet) {
+      loadedDocumentRef.current = {
+        id: activeStorylet.id,
+        version: activeStorylet.docVersion ?? 0,
+        loadNonce: store.bookLoadNonce,
+      }
+    }
     if (activeStorylet?.content) {
       // Seed prevWordCountRef so the first edit doesn't spike a huge delta
       prevWordCountRef.current = countWords(activeStorylet.content)
-      view.dispatch({ changes: { from: 0, to: 0, insert: activeStorylet.content } })
+      loadContentIntoView(view, activeStorylet.content)
       callbacksRef.current.onWordCountChange?.(countWords(activeStorylet.content))
-      loadedDocumentRef.current = { id: activeStorylet.id, version: activeStorylet.docVersion ?? 0 }
-    } else if (activeStorylet) {
-      loadedDocumentRef.current = { id: activeStorylet.id, version: activeStorylet.docVersion ?? 0 }
     }
 
     return () => {
@@ -988,15 +996,17 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
     const store = useStoryletStore.getState()
     const activeStorylet = store.book?.storylets?.find((s) => s.id === store.activeStoryletId)
     if (!activeStorylet) return
-    const currentVersion = activeStorylet.docVersion ?? 0
-    const loaded = loadedDocumentRef.current
-    if (loaded && loaded.id === activeStorylet.id && loaded.version === currentVersion) return
+    if (!needsEditorReload(loadedDocumentRef.current, activeStorylet, store.bookLoadNonce)) return
 
-    loadedDocumentRef.current = { id: activeStorylet.id, version: currentVersion }
+    loadedDocumentRef.current = {
+      id: activeStorylet.id,
+      version: activeStorylet.docVersion ?? 0,
+      loadNonce: store.bookLoadNonce,
+    }
     const content = activeStorylet.content ?? ''
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: content },
-    })
+    loadContentIntoView(view, content)
+    // Reset the WPM baseline so switching to a longer storylet isn't counted as typing.
+    prevWordCountRef.current = countWords(content)
     callbacksRef.current.onWordCountChange?.(countWords(content))
   }, [])
 
@@ -1013,7 +1023,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         snippets: slState.globalSettings.snippets,
       })
     }
-  }, [activeStoryletId, activeDocVersion, loadStorylet])
+  }, [activeStoryletId, activeDocVersion, bookLoadNonce, loadStorylet])
 
   // Update font family
   useEffect(() => {

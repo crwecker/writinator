@@ -8,6 +8,7 @@ import { useIsFileLocked } from '../../lib/fileLock'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { useRecentFilesStore } from '../../stores/recentFilesStore'
 import { showToast } from '../../stores/genericToastStore'
+import { tauriPathStatus } from '../../lib/tauri'
 
 // requestPermission is a Chrome-only extension to the File System Access API
 // not yet in the TypeScript lib types.
@@ -62,8 +63,12 @@ export function FileConnectionBanner() {
     if (mostRecent.path) {
       const ok = await restoreStoredFileHandleFromRecents()
       if (!ok) {
-        showToast('Saved file no longer exists at that path.', 'warning')
-        useRecentFilesStore.getState().removeRecent(mostRecent.name)
+        if ((await tauriPathStatus(mostRecent.path)) === 'missing') {
+          showToast('Saved file no longer exists at that path.', 'warning')
+          useRecentFilesStore.getState().removeRecent(mostRecent.name)
+        } else {
+          showToast("Can't access that file — use Open to pick it again.", 'warning')
+        }
       }
       return
     }

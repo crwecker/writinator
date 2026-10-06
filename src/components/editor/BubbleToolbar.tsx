@@ -37,7 +37,7 @@ function insertStatblockMarkerInline(
   const line = view.state.doc.lineAt(from)
   const insertAt = line.to
   const fieldsSuffix =
-    fields && fields.length > 0 ? `:fields=${fields.join(',')}` : ''
+    fields && fields.length > 0 ? `:fields=${fields.join('|')}` : ''
   const marker = `<!-- statblock:${characterId}${fieldsSuffix} -->`
   // Ensure newlines bracket the marker so the block widget sits on its own line.
   const insert = `\n${marker}\n`

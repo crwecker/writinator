@@ -458,38 +458,29 @@ export interface ComputedCharacterState {
   effective: Record<string, StatValue>
 }
 
-/**
- * Walk every document in tree order, extract markers, and apply every delta
- * op in order up to an optional `stopAt` point (inclusive of markers whose
- * offset is strictly less than `stopAt.offset` within that document).
- *
- * - Starts from `character.baseValues` (cloned).
- * - Only deltas whose `characterId` matches `character.id` are applied.
- * - Unknown marker ids (present in text but missing from `markers`) are skipped.
- * - Buff counters decrement once per marker that produced at least one applied op.
- */
-export function computeStateAt(
-  character: Character,
-  book: Book,
-  markers: Record<string, StatDelta[]>,
-  stopAt?: ComputeStopAt
-): ComputedCharacterState {
-  let state: CharacterState = {
-    base: cloneBase(character.baseValues),
-    equipped: {},
-    activeBuffs: [],
-  }
+/** State after each marker that changed the character, in book order. */
+interface StateTimeline {
+  orderIndex: Map<string, number>
+  initial: CharacterState
+  /** Sorted by (storylet order, offset). `state` is the state after the marker. */
+  checkpoints: Array<{ order: number; offset: number; state: CharacterState }>
+}
 
-  const order = getStoryletTreeOrder(book)
-  for (const storylet of order) {
-    const content = storylet.content ?? ''
-    const extracted = extractMarkers(content)
-    const isStopDoc = stopAt?.storyletId === storylet.id
+// One timeline per (book, markers, character). All three are replaced, not
+// mutated, when they change, so object identity is a safe cache key.
+const timelineCache = new WeakMap<
+  Book,
+  WeakMap<Record<string, StatDelta[]>, WeakMap<Character, StateTimeline>>
+>()
 
-    for (const marker of extracted) {
-      if (isStopDoc && marker.offset >= stopAt!.offset) {
-        return { state, effective: computeEffective(state, character.stats) }
-      }
+function buildTimeline(character: Character, book: Book, markers: Record<string, StatDelta[]>): StateTimeline {
+  const initial: CharacterState = { base: cloneBase(character.baseValues), equipped: {}, activeBuffs: [] }
+  const orderIndex = new Map<string, number>()
+  const checkpoints: StateTimeline['checkpoints'] = []
+  let state = initial
+  getStoryletTreeOrder(book).forEach((storylet, order) => {
+    orderIndex.set(storylet.id, order)
+    for (const marker of extractMarkers(storylet.content ?? '')) {
       if (marker.kind !== 'delta') continue
       const deltas = markers[marker.id]
       if (!deltas || deltas.length === 0) continue
@@ -501,15 +492,69 @@ export function computeStateAt(
       }
       if (appliedAny) {
         state = tickBuffs(state)
+        checkpoints.push({ order, offset: marker.offset, state })
       }
     }
+  })
+  return { orderIndex, initial, checkpoints }
+}
 
-    if (isStopDoc) {
-      // Stop offset was past every marker in this doc; finish here.
-      return { state, effective: computeEffective(state, character.stats) }
-    }
+function getTimeline(character: Character, book: Book, markers: Record<string, StatDelta[]>): StateTimeline {
+  let byMarkers = timelineCache.get(book)
+  if (!byMarkers) {
+    byMarkers = new WeakMap()
+    timelineCache.set(book, byMarkers)
   }
+  let byCharacter = byMarkers.get(markers)
+  if (!byCharacter) {
+    byCharacter = new WeakMap()
+    byMarkers.set(markers, byCharacter)
+  }
+  let timeline = byCharacter.get(character)
+  if (!timeline) {
+    timeline = buildTimeline(character, book, markers)
+    byCharacter.set(character, timeline)
+  }
+  return timeline
+}
 
+/**
+ * Character state at a point in the book: every delta op in tree order up to
+ * an optional `stopAt` point (markers whose offset is strictly less than
+ * `stopAt.offset` within that document). Without `stopAt`, or when its
+ * storylet isn't in the book, the state at the end of the book.
+ *
+ * - Starts from `character.baseValues` (cloned).
+ * - Only deltas whose `characterId` matches `character.id` are applied.
+ * - Unknown marker ids (present in text but missing from `markers`) are skipped.
+ * - Buff counters decrement once per marker that produced at least one applied op.
+ *
+ * The walk over the book is cached per (book, markers, character), so
+ * repeated lookups (every `{HP}` ref, every statblock) are a binary search.
+ * The returned `state` is shared — treat it as read-only.
+ */
+export function computeStateAt(
+  character: Character,
+  book: Book,
+  markers: Record<string, StatDelta[]>,
+  stopAt?: ComputeStopAt
+): ComputedCharacterState {
+  const { orderIndex, initial, checkpoints } = getTimeline(character, book, markers)
+  const stopOrder = stopAt ? orderIndex.get(stopAt.storyletId) : undefined
+  let state = checkpoints.length > 0 ? checkpoints[checkpoints.length - 1].state : initial
+  if (stopAt && stopOrder !== undefined) {
+    // Last checkpoint strictly before (stopOrder, stopAt.offset).
+    let lo = 0
+    let hi = checkpoints.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      const cp = checkpoints[mid]
+      const before = cp.order < stopOrder || (cp.order === stopOrder && cp.offset < stopAt.offset)
+      if (before) lo = mid + 1
+      else hi = mid
+    }
+    state = lo > 0 ? checkpoints[lo - 1].state : initial
+  }
   return { state, effective: computeEffective(state, character.stats) }
 }
 

@@ -250,6 +250,8 @@ export interface WritinatorFile {
   characters: Character[]
   markers: Record<string, StatDelta[]>          // keyed by marker UUID
   saveCounter: number
+  /** Random id written with every save; tells two saves with the same counter apart. */
+  saveId?: string
   // Cross-store sections — optional for back-compat (absent = no-op on load)
   player?: PlayerFileData
   quests?: ImageRevealFileData

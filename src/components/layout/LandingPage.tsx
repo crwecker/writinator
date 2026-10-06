@@ -8,8 +8,9 @@ import {
   createBookWithFile,
   hasFileTetherCapability,
 } from '../../lib/fileSystem'
-import { isTauri, readTauriTextFile, tauriBasename, tauriFileExists } from '../../lib/tauri'
+import { isTauri, readTauriTextFile, tauriBasename, tauriPathStatus } from '../../lib/tauri'
 import type { RecentFile } from '../../types'
+import { showToast } from '../../stores/genericToastStore'
 
 // requestPermission is a Chrome-only extension to the File System Access API
 // not yet in the TypeScript lib types.
@@ -91,7 +92,13 @@ export function LandingPage() {
     try {
       // Tauri entry: read by path.
       if (file.path && isTauri()) {
-        if (!(await tauriFileExists(file.path))) {
+        const status = await tauriPathStatus(file.path)
+        if (status === 'no-access') {
+          // Keep the entry: the file is probably still there.
+          showToast("Can't access that file — use Open to pick it again.", 'warning')
+          return
+        }
+        if (status === 'missing') {
           throw new Error('File no longer exists at the saved path')
         }
         const text = await readTauriTextFile(file.path)

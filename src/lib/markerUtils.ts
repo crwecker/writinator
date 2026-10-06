@@ -15,24 +15,46 @@ export const STAT_MARKER_REGEX = /<!--\s*stat:([A-Za-z0-9-]+)\s*-->/g
 export const STATBLOCK_MARKER_REGEX =
   /<!--\s*statblock:([A-Za-z0-9-]+)(?::([^\s>][^>]*?))?\s*-->/g
 
-function parseOptions(raw: string | undefined): Record<string, string> {
+/**
+ * Parse a statblock marker's options (`key=value,key=value`). The only key in
+ * use is `fields`, whose list the toolbar used to write comma-separated
+ * (`fields=hp,mp,level`), so bare segments after `fields=` are read as more
+ * fields rather than as flags.
+ */
+export function parseStatblockOptions(raw: string | undefined): Record<string, string> {
   if (!raw) return {}
   const out: Record<string, string> = {}
-  const pairs = raw.split(',')
-  for (const pair of pairs) {
-    const trimmed = pair.trim()
+  let lastKey: string | null = null
+  for (const segment of raw.split(',')) {
+    const trimmed = segment.trim()
     if (!trimmed) continue
     const eq = trimmed.indexOf('=')
     if (eq === -1) {
-      // bare flag — treat as boolean-style key with empty string value
-      out[trimmed] = ''
+      if (lastKey === 'fields') {
+        out.fields = out.fields ? `${out.fields}|${trimmed}` : trimmed
+      } else {
+        // bare flag — treat as boolean-style key with empty string value
+        out[trimmed] = ''
+        lastKey = trimmed
+      }
     } else {
       const key = trimmed.slice(0, eq).trim()
       const value = trimmed.slice(eq + 1).trim()
-      if (key) out[key] = value
+      if (key) {
+        out[key] = value
+        lastKey = key
+      }
     }
   }
   return out
+}
+
+/** The stat keys a statblock asks for, or undefined for the default set. */
+export function statblockFields(options: Record<string, string>): string[] | undefined {
+  const raw = options.fields
+  if (!raw) return undefined
+  const fields = raw.split(/[|,]/).map((s) => s.trim()).filter(Boolean)
+  return fields.length > 0 ? fields : undefined
 }
 
 /**
@@ -56,7 +78,7 @@ export function extractMarkers(content: string): ExtractedMarker[] {
       kind: 'statblock',
       characterId: m[1],
       offset: m.index,
-      options: parseOptions(m[2]),
+      options: parseStatblockOptions(m[2]),
     })
   }
 

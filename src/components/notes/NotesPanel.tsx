@@ -21,6 +21,7 @@ import type {
 import { TagChipInput } from './TagChipInput'
 import { ColorPickerPopover } from './ColorPickerPopover'
 import { TagPopover } from './TagPopover'
+import { findStoryletWithMarker, markerCommentRegex, removeMarkerFromStorylet } from '../../lib/removeMarker'
 
 interface Props {
   open: boolean
@@ -933,49 +934,28 @@ export function NotesPanel({
    *  store entry. Mirrors the old NoteEditorModal delete flow. */
   const handleDeletePositionNote = useCallback(
     (noteId: string) => {
-      if (!book) {
-        removePositionNote(noteId)
-        return
-      }
-      let owningStoryletId: string | null = null
-      let anchorStart = -1
-      let anchorLen = 0
-      for (const storylet of book.storylets) {
-        const content = storylet.content ?? ''
-        const escaped = noteId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        const re = new RegExp(`<!--\\s*note:${escaped}\\s*-->`)
-        const match = content.match(re)
-        if (match && typeof match.index === 'number') {
-          owningStoryletId = storylet.id
-          anchorStart = match.index
-          anchorLen = match[0].length
-          break
-        }
-      }
-      const dropStore = () => removePositionNote(noteId)
-      if (!owningStoryletId || anchorStart < 0) {
-        dropStore()
-        return
-      }
-      const dispatchRemoval = () => {
-        const v = editorView
-        if (!v) {
-          dropStore()
-          return
-        }
-        v.dispatch({
-          changes: { from: anchorStart, to: anchorStart + anchorLen, insert: '' },
+      const pattern = markerCommentRegex('note', noteId)
+      // Check the open storylet's live text first: a note anchored in the last
+      // 1.5s isn't in the stored copy yet.
+      const inOpenStorylet =
+        !!activeStoryletId && !!editorView && pattern.test(editorView.state.doc.toString())
+      const owningStoryletId = inOpenStorylet
+        ? activeStoryletId
+        : book
+          ? findStoryletWithMarker(book, pattern)
+          : null
+      if (book && owningStoryletId) {
+        removeMarkerFromStorylet({
+          book,
+          storyletId: owningStoryletId,
+          activeStoryletId,
+          view: editorView,
+          pattern,
         })
-        dropStore()
       }
-      if (owningStoryletId === activeStoryletId) {
-        dispatchRemoval()
-      } else {
-        setActiveStorylet(owningStoryletId)
-        setTimeout(dispatchRemoval, 30)
-      }
+      removePositionNote(noteId)
     },
-    [book, activeStoryletId, editorView, setActiveStorylet, removePositionNote],
+    [book, activeStoryletId, editorView, removePositionNote],
   )
 
   const totalPositionNotes = useMemo(

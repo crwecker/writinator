@@ -10,6 +10,19 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+/** Run `beforeClose` (awaited) when the desktop window is asked to close.
+ *  Returns an unsubscribe function. */
+export async function onTauriCloseRequested(beforeClose: () => Promise<void>): Promise<() => void> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  return getCurrentWindow().onCloseRequested(async () => {
+    try {
+      await beforeClose()
+    } catch (err) {
+      console.error('[tauri] save before close failed:', err)
+    }
+  })
+}
+
 export interface TauriSaveDialogOptions {
   suggestedName: string
 }
@@ -48,11 +61,17 @@ export async function writeTauriTextFile(path: string, contents: string): Promis
 }
 
 export async function tauriFileExists(path: string): Promise<boolean> {
+  return (await tauriPathStatus(path)) === 'exists'
+}
+
+/** 'no-access' means the app isn't allowed to look at that path (outside the
+ *  fs scope) — the file may well still be there, so don't forget it. */
+export async function tauriPathStatus(path: string): Promise<'exists' | 'missing' | 'no-access'> {
   try {
     const { exists } = await import('@tauri-apps/plugin-fs')
-    return await exists(path)
+    return (await exists(path)) ? 'exists' : 'missing'
   } catch {
-    return false
+    return 'no-access'
   }
 }
 

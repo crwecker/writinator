@@ -8,6 +8,7 @@ import { extractMarkers } from '../../lib/markerUtils'
 import { insertStatDelta } from '../../lib/insertStatDelta'
 import { LIST_STAT_FIELDS, defaultItemFields } from '../../lib/listStatFields'
 import { ProgressionGraph } from './ProgressionGraph'
+import { markerCommentRegex, removeMarkerFromStorylet } from '../../lib/removeMarker'
 import type {
   Character,
   CharacterState,
@@ -1357,31 +1358,14 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
             editorView={editorView}
             onJumpToMarker={jumpToMarker}
             onRemoveOrphanFromText={(markerId, storyletId) => {
-              if (!book || !editorView) return
-              const d = book.storylets.find((x) => x.id === storyletId)
-              if (!d) return
-              const content = d.content ?? ''
-              const escaped = markerId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-              const re = new RegExp(`<!--\\s*stat:${escaped}\\s*-->`)
-              const match = content.match(re)
-              if (!match || typeof match.index !== 'number') return
-              const doRemove = () => {
-                const view = editorView
-                if (!view) return
-                view.dispatch({
-                  changes: {
-                    from: match.index as number,
-                    to: (match.index as number) + match[0].length,
-                    insert: '',
-                  },
-                })
-              }
-              if (storyletId === activeStoryletId) {
-                doRemove()
-              } else {
-                setActiveStorylet(storyletId)
-                setTimeout(doRemove, 30)
-              }
+              if (!book) return
+              removeMarkerFromStorylet({
+                book,
+                storyletId,
+                activeStoryletId,
+                view: editorView,
+                pattern: markerCommentRegex('stat', markerId),
+              })
             }}
             onCreateEmptyDelta={(markerId) => {
               setMarker(markerId, [])

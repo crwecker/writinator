@@ -11,7 +11,7 @@ import type {
   StatDefinition,
   StatValue,
 } from '../types'
-import type { Root, Content, PhrasingContent } from 'mdast'
+import type { Root, Content, Parent, PhrasingContent } from 'mdast'
 import JSZip from 'jszip'
 import { parseMarkdown } from './ast'
 import { useCharacterStore } from '../stores/characterStore'
@@ -20,6 +20,8 @@ import { computeStateAt } from './characterState'
 import {
   STAT_MARKER_REGEX,
   STATBLOCK_MARKER_REGEX,
+  parseStatblockOptions,
+  statblockFields,
 } from './markerUtils'
 import { NOTE_MARKER_REGEX } from './noteUtils'
 import { expandRefs, formatStatValueInline } from './statRefs'
@@ -85,6 +87,106 @@ export function mergeGroupBlocks(content: string): string {
     for (const l of buffer) out.push(l)
   }
   return out.join('\n')
+}
+
+export type TextAlign = 'left' | 'center' | 'right'
+
+declare module 'mdast' {
+  interface Data {
+    /** Paragraph/heading alignment from a leading `{align:X}` directive. */
+    align?: TextAlign
+  }
+}
+
+const ALIGN_DIRECTIVE = /^\{align:(center|right|left)\}\s*/
+
+/** The editor writes `{align:X} ` at the very start of a line, before any `#`.
+ *  Move it after the heading marker so the line still parses as a heading. */
+function moveAlignAfterHeadingMarker(content: string): string {
+  return content.replace(/^\{align:(center|right|left)\}\s*(#{1,6}\s+)/gm, '$2{align:$1} ')
+}
+
+function hasChildren(node: unknown): node is Parent {
+  return typeof node === 'object' && node !== null && Array.isArray((node as { children?: unknown }).children)
+}
+
+/** Turn a leading `{align:X}` text prefix into `data.align` on paragraphs and headings. */
+function annotateAlignment(node: Parent): void {
+  for (const child of node.children) {
+    if ((child.type === 'paragraph' || child.type === 'heading') && child.children[0]?.type === 'text') {
+      const first = child.children[0]
+      const m = first.value.match(ALIGN_DIRECTIVE)
+      if (m) {
+        first.value = first.value.slice(m[0].length)
+        if (first.value === '') child.children.shift()
+        child.data = { ...child.data, align: m[1] as TextAlign }
+      }
+    }
+    if (hasChildren(child)) annotateAlignment(child)
+  }
+}
+
+const BLOCK_CONTAINERS = new Set(['root', 'blockquote', 'listItem'])
+
+/** For formats that can't render HTML: `<br>` becomes a line break, other
+ *  tags are dropped (their text is kept), and HTML blocks become plain
+ *  paragraphs of their text. */
+function stripHtml(node: Parent): void {
+  const out: Parent['children'] = []
+  for (const child of node.children) {
+    if (child.type !== 'html') {
+      if (hasChildren(child)) stripHtml(child)
+      out.push(child)
+      continue
+    }
+    if (/^<br\s*\/?>$/i.test(child.value.trim())) {
+      out.push({ type: 'break' })
+      continue
+    }
+    const text = child.value
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+    if (BLOCK_CONTAINERS.has(node.type)) {
+      if (text.trim()) out.push({ type: 'paragraph', children: [{ type: 'text', value: text.trim() }] })
+    } else if (text) {
+      out.push({ type: 'text', value: text })
+    }
+  }
+  node.children = out
+}
+
+/** A line break inside a paragraph (blockquotes, statblocks) is a real line
+ *  break in the editor, so make it one in every format — DOCX and RTF would
+ *  otherwise run the lines together. */
+function hardenLineBreaks(node: Parent): void {
+  const out: Parent['children'] = []
+  for (const child of node.children) {
+    if (child.type === 'text' && child.value.includes('\n')) {
+      child.value.split('\n').forEach((part, i) => {
+        if (i > 0) out.push({ type: 'break' })
+        if (part) out.push({ type: 'text', value: part })
+      })
+      continue
+    }
+    if (hasChildren(child)) hardenLineBreaks(child)
+    out.push(child)
+  }
+  node.children = out
+}
+
+/**
+ * Parse storylet content (character markers already processed) into mdast,
+ * the same way for every export format: `{group}` blocks merged, one
+ * paragraph per line, `{align:X}` turned into `data.align`. `keepHtml: false`
+ * for formats that can't render HTML.
+ */
+export function contentToAst(content: string, options: { keepHtml: boolean }): Root {
+  const tree = parseMarkdown(ensureBlockSeparation(mergeGroupBlocks(moveAlignAfterHeadingMarker(content))))
+  annotateAlignment(tree)
+  if (!options.keepHtml) stripHtml(tree)
+  hardenLineBreaks(tree)
+  return tree
 }
 
 /** Insert blank lines between consecutive non-empty lines so markdown treats
@@ -170,22 +272,6 @@ export function buildDocumentStylesCss(styles: DocumentStyles | undefined): stri
 // ─── Character marker processing ────────────────────────
 
 export type StatblockExportFormat = 'markdown' | 'html' | 'docx' | 'epub' | 'plain'
-
-function parseStatblockOptions(raw: string | undefined): Record<string, string> {
-  if (!raw) return {}
-  const out: Record<string, string> = {}
-  for (const pair of raw.split(',')) {
-    const trimmed = pair.trim()
-    if (!trimmed) continue
-    const eq = trimmed.indexOf('=')
-    if (eq === -1) {
-      out[trimmed] = ''
-    } else {
-      out[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
-    }
-  }
-  return out
-}
 
 export function formatStatValueForExport(v: StatValue): string {
   switch (v.kind) {
@@ -397,15 +483,7 @@ export function processCharacterMarkers(
         }
         return `<div class="writinator-statblock-missing">[missing character: ${charId}]</div>`
       }
-      const opts = parseStatblockOptions(rawOptions)
-      const fieldsRaw = opts.fields
-      const fields = fieldsRaw
-        ? fieldsRaw
-            .split('|')
-            .flatMap((s) => s.split(','))
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : undefined
+      const fields = statblockFields(parseStatblockOptions(rawOptions))
       const computed = computeStateAt(character, ctx.book, ctx.markers, {
         storyletId: ctx.storyletId,
         offset: actualOffset,
@@ -429,13 +507,12 @@ export function processCharacterMarkers(
 }
 
 /** Preprocess content for EPUB: convert styled HTML spans to semantic markup,
- *  strip remaining known HTML tags (keeping text content), convert {align:X}
- *  to markers. Preserves <<text>> and bare < since those aren't matched. */
+ *  strip remaining known HTML tags (keeping text content). Preserves <<text>>
+ *  and bare < since those aren't matched. */
 function preprocessForEpub(content: string): string {
   // Placeholder class-spans so the generic strip below doesn't eat them.
   const spanOpenStash: string[] = []
   let out = content
-    .replace(/\{align:(\w+)\}\s*/g, '%%ALIGN:$1%%\n')
     // Convert monospace spans to backtick-wrapped inline code
     .replace(/<span\s+style="[^"]*(?:monospace|Courier|JetBrains Mono)[^"]*">([\s\S]*?)<\/span>/gi,
       (_m, text: string) => '`' + text + '`')
@@ -503,17 +580,6 @@ export function inlineDocumentStyles(
   return out
 }
 
-/** Convert <!--align:X--> comments into styled wrappers on the next element */
-export function applyAlignmentMarkers(html: string): string {
-  return html.replace(/<!--align:(\w+)-->\s*(<[a-zA-Z][^>]*>)/g, (_m, align: string, tag: string) => {
-    if (tag.includes('style="')) {
-      return tag.replace('style="', `style="text-align: ${align}; `)
-    }
-    return tag.replace(/>$/, ` style="text-align: ${align};">`)
-  })
-}
-
-
 function download(content: string | Blob, filename: string, mimeType: string): void {
   const blob = content instanceof Blob
     ? content
@@ -560,6 +626,7 @@ function phrasingToText(nodes: PhrasingContent[]): string {
   return nodes.map((n) => {
     if (n.type === 'text') return n.value
     if (n.type === 'inlineCode') return n.value
+    if (n.type === 'break') return '\n'
     if ('children' in n) return phrasingToText(n.children as PhrasingContent[])
     return ''
   }).join('')
@@ -647,7 +714,7 @@ function astToPlainText(tree: Root): string {
   return lines.join('\n')
 }
 
-export function exportAsPlainText(book: Book): void {
+export function buildPlainText(book: Book): string {
   const parts: string[] = [book.title, '']
   for (const doc of book.storylets) {
     const depth = getDepth(doc, book.storylets)
@@ -657,10 +724,14 @@ export function exportAsPlainText(book: Book): void {
     if (doc.content) {
       const ctx = getCharacterMarkerContext(book, doc.id)
       const processed = processCharacterMarkers(doc.content, ctx, 'plain')
-      parts.push(astToPlainText(parseMarkdown(stripPasteArtifacts(processed))))
+      parts.push(astToPlainText(contentToAst(processed, { keepHtml: false })))
     }
   }
-  download(parts.join('\n'), `${sanitizeFilename(book.title)}.txt`, 'text/plain')
+  return parts.join('\n')
+}
+
+export function exportAsPlainText(book: Book): void {
+  download(buildPlainText(book), `${sanitizeFilename(book.title)}.txt`, 'text/plain')
 }
 
 // ─── HTML Export (via AST) ──────────────────────────────
@@ -691,12 +762,17 @@ export function astToHtml(tree: Root): string {
   return tree.children.map((node) => blockToHtml(node)).join('\n')
 }
 
+function alignAttr(node: Content): string {
+  const align = node.data?.align
+  return align ? ` style="text-align: ${align};"` : ''
+}
+
 function blockToHtml(node: Content): string {
   switch (node.type) {
     case 'heading':
-      return `<h${node.depth}>${phrasingToHtml(node.children)}</h${node.depth}>`
+      return `<h${node.depth}${alignAttr(node)}>${phrasingToHtml(node.children)}</h${node.depth}>`
     case 'paragraph':
-      return `<p>${phrasingToHtml(node.children)}</p>`
+      return `<p${alignAttr(node)}>${phrasingToHtml(node.children)}</p>`
     case 'blockquote':
       return `<blockquote>${node.children.map(blockToHtml).join('\n')}</blockquote>`
     case 'code':
@@ -785,15 +861,18 @@ function astToRtf(tree: Root): string {
   return blocks.join('\n')
 }
 
+const RTF_ALIGN: Record<TextAlign, string> = { left: '', center: '\\qc', right: '\\qr' }
+
 function blockToRtf(node: Content): string {
+  const align = node.data?.align ? RTF_ALIGN[node.data.align] : ''
   switch (node.type) {
     case 'heading': {
       const sizes = [48, 40, 32, 28, 26, 24] // half-points (RTF uses half-points)
       const size = sizes[Math.min(node.depth - 1, 5)]
-      return `{\\pard\\fs${size}\\b ${phrasingToRtf(node.children)}\\b0\\par}`
+      return `{\\pard${align}\\fs${size}\\b ${phrasingToRtf(node.children)}\\b0\\par}`
     }
     case 'paragraph':
-      return `{\\pard ${phrasingToRtf(node.children)}\\par}`
+      return `{\\pard${align} ${phrasingToRtf(node.children)}\\par}`
     case 'blockquote': {
       const inner = node.children.map(blockToRtf).join('\n')
       return `{\\pard\\li720 ${inner}\\par}`
@@ -817,7 +896,7 @@ function blockToRtf(node: Content): string {
   }
 }
 
-export function exportAsRtf(book: Book): void {
+export function buildRtf(book: Book): string {
   const header = `{\\rtf1\\ansi\\deff0\n{\\fonttbl{\\f0 Georgia;}{\\f1 Courier New;}}\n\\fs24\n`
 
   // Title
@@ -835,18 +914,21 @@ export function exportAsRtf(book: Book): void {
     if (doc.content) {
       const ctx = getCharacterMarkerContext(book, doc.id)
       const processed = processCharacterMarkers(doc.content, ctx, 'plain')
-      body += astToRtf(parseMarkdown(stripPasteArtifacts(processed))) + '\n\\par\n'
+      body += astToRtf(contentToAst(processed, { keepHtml: false })) + '\n\\par\n'
     }
   }
 
-  const rtf = header + body + '}'
-  download(rtf, `${sanitizeFilename(book.title)}.rtf`, 'application/rtf')
+  return header + body + '}'
+}
+
+export function exportAsRtf(book: Book): void {
+  download(buildRtf(book), `${sanitizeFilename(book.title)}.rtf`, 'application/rtf')
 }
 
 // ─── DOCX Export (AST → docx package) ───────────────────
 
-export async function exportAsDocx(book: Book): Promise<void> {
-  const { Document: DocxDocument, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, LevelFormat } =
+export async function buildDocx(book: Book): Promise<import('docx').Document> {
+  const { Document: DocxDocument, Paragraph, TextRun, HeadingLevel, AlignmentType, LevelFormat } =
     await import('docx')
 
   function phrasingToRuns(nodes: PhrasingContent[], opts: { bold?: boolean; italics?: boolean; strike?: boolean } = {}): InstanceType<typeof TextRun>[] {
@@ -897,15 +979,23 @@ export async function exportAsDocx(book: Book): Promise<void> {
     return children
   }
 
+  const docxAlign = {
+    left: AlignmentType.LEFT,
+    center: AlignmentType.CENTER,
+    right: AlignmentType.RIGHT,
+  } as const
+
   function blockToDocx(node: Content): InstanceType<typeof Paragraph>[] {
+    const alignment = node.data?.align ? docxAlign[node.data.align] : undefined
     switch (node.type) {
       case 'heading':
         return [new Paragraph({
           children: phrasingToRuns(node.children),
           heading: headingLevels[Math.min(node.depth - 1, 5)],
+          alignment,
         })]
       case 'paragraph':
-        return [new Paragraph({ children: phrasingToRuns(node.children), spacing: { after: 200 } })]
+        return [new Paragraph({ children: phrasingToRuns(node.children), spacing: { after: 200 }, alignment })]
       case 'blockquote':
         return node.children.flatMap((child) => {
           const paras = blockToDocx(child)
@@ -979,8 +1069,9 @@ export async function exportAsDocx(book: Book): Promise<void> {
     // Storylet content
     if (doc.content) {
       const ctx = getCharacterMarkerContext(book, doc.id)
-      const processed = processCharacterMarkers(doc.content, ctx, 'docx')
-      sectionChildren.push(...astToDocxChildren(parseMarkdown(stripPasteArtifacts(processed))))
+      // Statblocks as plain text: DOCX can't render the HTML version.
+      const processed = processCharacterMarkers(doc.content, ctx, 'plain')
+      sectionChildren.push(...astToDocxChildren(contentToAst(processed, { keepHtml: false })))
     }
   }
 
@@ -1017,30 +1108,21 @@ export async function exportAsDocx(book: Book): Promise<void> {
     }],
   })
 
-  const blob = await Packer.toBlob(docxDoc)
+  return docxDoc
+}
+
+export async function exportAsDocx(book: Book): Promise<void> {
+  const { Packer } = await import('docx')
+  const blob = await Packer.toBlob(await buildDocx(book))
   download(blob, `${sanitizeFilename(book.title)}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 }
 
 // ─── PDF Export (AST → pdfmake) ─────────────────────────
 
-export async function exportAsPdf(book: Book): Promise<void> {
-  type PdfValue = string | number | boolean | null | PdfObject | PdfValue[] | ((currentPage: number, pageCount?: number) => unknown)
-  interface PdfObject { [key: string]: PdfValue }
-  interface PdfMakeApi {
-    vfs?: unknown
-    createPdf: (definition: PdfObject) => { download: (filename: string) => void }
-  }
-  interface PdfFontsModule {
-    pdfMake?: { vfs?: unknown }
-    default?: { pdfMake?: { vfs?: unknown } }
-  }
+type PdfValue = string | number | boolean | null | PdfObject | PdfValue[] | ((currentPage: number, pageCount?: number) => unknown)
+export interface PdfObject { [key: string]: PdfValue }
 
-  const pdfMakeModule = await import('pdfmake/build/pdfmake') as unknown as (PdfMakeApi & { default?: PdfMakeApi })
-  const pdfMake = pdfMakeModule.default || pdfMakeModule
-  const pdfFonts = await import('pdfmake/build/vfs_fonts') as unknown as PdfFontsModule
-  const vfs = pdfFonts?.pdfMake?.vfs ?? pdfFonts?.default?.pdfMake?.vfs ?? pdfFonts?.default
-  if (vfs) pdfMake.vfs = vfs
-
+export function buildPdfDefinition(book: Book): PdfObject {
   type PdfContent = PdfObject
 
   function phrasingToPdf(nodes: PhrasingContent[], style: PdfObject = {}): PdfContent[] {
@@ -1061,6 +1143,9 @@ export async function exportAsPdf(book: Book): Promise<void> {
           break
         case 'inlineCode':
           result.push({ text: n.value, font: 'Courier', fontSize: 10, background: '#f0f0f0', ...style })
+          break
+        case 'break':
+          result.push({ text: '\n', ...style })
           break
         default:
           if (hasPhrasingChildren(n)) result.push(...phrasingToPdf(n.children, style))
@@ -1085,13 +1170,18 @@ export async function exportAsPdf(book: Book): Promise<void> {
         const sizes = [24, 20, 16, 14, 13, 12]
         return [{
           text: phrasingToPdf(node.children),
+          ...(node.data?.align ? { alignment: node.data.align } : {}),
           fontSize: sizes[Math.min(node.depth - 1, 5)],
           bold: true,
           margin: [0, node.depth <= 2 ? 20 : 10, 0, 6] as [number, number, number, number],
         }]
       }
       case 'paragraph':
-        return [{ text: phrasingToPdf(node.children), margin: [0, 0, 0, 10] as [number, number, number, number] }]
+        return [{
+          text: phrasingToPdf(node.children),
+          ...(node.data?.align ? { alignment: node.data.align } : {}),
+          margin: [0, 0, 0, 10] as [number, number, number, number],
+        }]
       case 'blockquote': {
         const inner = node.children.flatMap((child) => blockToPdf(child))
         return [{
@@ -1184,7 +1274,7 @@ export async function exportAsPdf(book: Book): Promise<void> {
     if (doc.content) {
       const ctx = getCharacterMarkerContext(book, doc.id)
       const processed = processCharacterMarkers(doc.content, ctx, 'plain')
-      content.push(...astToPdfContent(parseMarkdown(stripPasteArtifacts(processed))))
+      content.push(...astToPdfContent(contentToAst(processed, { keepHtml: false })))
     }
   }
 
@@ -1219,10 +1309,48 @@ export async function exportAsPdf(book: Book): Promise<void> {
     },
   }
 
-  pdfMake.createPdf(docDefinition).download(`${sanitizeFilename(book.title)}.pdf`)
+  return docDefinition
+}
+
+export async function exportAsPdf(book: Book): Promise<void> {
+  interface PdfMakeApi {
+    vfs?: unknown
+    createPdf: (definition: PdfObject) => { download: (filename: string) => void }
+  }
+  interface PdfFontsModule {
+    pdfMake?: { vfs?: unknown }
+    default?: { pdfMake?: { vfs?: unknown } }
+  }
+
+  const pdfMakeModule = await import('pdfmake/build/pdfmake') as unknown as (PdfMakeApi & { default?: PdfMakeApi })
+  const pdfMake = pdfMakeModule.default || pdfMakeModule
+  const pdfFonts = await import('pdfmake/build/vfs_fonts') as unknown as PdfFontsModule
+  const vfs = pdfFonts?.pdfMake?.vfs ?? pdfFonts?.default?.pdfMake?.vfs ?? pdfFonts?.default
+  if (vfs) pdfMake.vfs = vfs
+
+  pdfMake.createPdf(buildPdfDefinition(book)).download(`${sanitizeFilename(book.title)}.pdf`)
 }
 
 // ─── EPUB Export (JSZip-based) ─────────────────────────
+
+/** One storylet's content as EPUB-safe XHTML (no heading). */
+export function storyletToEpubXhtml(doc: Storylet, book: Book): string {
+  if (!doc.content) return ''
+  const ctx = getCharacterMarkerContext(book, doc.id)
+  const processed = processCharacterMarkers(doc.content, ctx, 'epub')
+  const tree = contentToAst(preprocessForEpub(processed), { keepHtml: true })
+  // Use standard HTML converters but escape any remaining html block nodes
+  let html = tree.children.map((node) => {
+    if (node.type === 'html') return `<p>${escapeHtml(node.value)}</p>`
+    return blockToHtml(node)
+  }).join('\n')
+  // Make XHTML-safe: self-close void elements
+  html = html.replace(/<br\s*\/?>/g, '<br/>').replace(/<hr\s*\/?>/g, '<hr/>')
+  // Escape any < that isn't part of a valid XHTML tag or closing tag
+  html = html.replace(/<(?!\/?(?:p|h[1-6]|strong|em|del|code|pre|ol|ul|li|blockquote|hr|br|div|span)\b[^>]*\/?>)/g, '&lt;')
+  return html
+}
+
 
 export async function exportAsEpub(book: Book, documentStyles?: DocumentStyles): Promise<void> {
   const zip = new JSZip()
@@ -1240,36 +1368,6 @@ export async function exportAsEpub(book: Book, documentStyles?: DocumentStyles):
 
   const escXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-  /** Convert %%ALIGN:X%% markers to styled elements in XHTML output */
-  function applyEpubAlignment(html: string): string {
-    return html.replace(/(?:<p>)?%%ALIGN:(\w+)%%(?:<\/p>)?\s*(<[a-zA-Z][^>]*>)/g, (_m, align: string, tag: string) => {
-      if (tag.includes('style="')) {
-        return tag.replace('style="', `style="text-align: ${align}; `)
-      }
-      return tag.replace(/>$/, ` style="text-align: ${align};">`)
-    })
-  }
-
-  function contentToXhtml(doc: Storylet): string {
-    if (!doc.content) return ''
-    const ctx = getCharacterMarkerContext(book, doc.id)
-    const processed = processCharacterMarkers(doc.content, ctx, 'epub')
-    const cleaned = preprocessForEpub(processed)
-    const tree = parseMarkdown(cleaned)
-    // Use standard HTML converters but escape any remaining html AST nodes
-    // by temporarily replacing the html passthrough
-    let html = tree.children.map((node) => {
-      if (node.type === 'html') return `<p>${escapeHtml(node.value)}</p>`
-      return blockToHtml(node)
-    }).join('\n')
-    // Make XHTML-safe: self-close void elements
-    html = html.replace(/<br>/g, '<br/>').replace(/<hr>/g, '<hr/>')
-    // Escape any < that isn't part of a valid XHTML tag or closing tag
-    html = html.replace(/<(?!\/?(?:p|h[1-6]|strong|em|del|code|pre|ol|ul|li|blockquote|hr|br|div|span)\b[^>]*\/?>)/g, '&lt;')
-    html = applyEpubAlignment(html)
-    return html
-  }
-
   // Group documents into chapters (top-level docs with their descendants)
   interface Chapter { id: string; title: string; xhtml: string }
   const chapters: Chapter[] = []
@@ -1279,7 +1377,7 @@ export async function exportAsEpub(book: Book, documentStyles?: DocumentStyles):
     const depth = getDepth(doc, book.storylets)
     const level = Math.min(depth + 2, 6)
     const heading = `<h${level}>${escapeHtml(doc.name)}</h${level}>`
-    const body = contentToXhtml(doc)
+    const body = storyletToEpubXhtml(doc, book)
 
     if (depth === 0) {
       chapters.push({ id: `chapter-${chapters.length}`, title: doc.name, xhtml: heading + '\n' + body })
@@ -1394,7 +1492,7 @@ ${spineItems}
 
 // ─── ZIP Export ────────────────────────────────────────
 
-function renderStoryletForZip(
+export function renderStoryletForZip(
   doc: Storylet,
   book: Book,
   format: 'md' | 'txt' | 'html',
@@ -1413,11 +1511,11 @@ function renderStoryletForZip(
   }
   if (format === 'txt') {
     const processed = processCharacterMarkers(doc.content, ctx, 'plain')
-    const text = astToPlainText(parseMarkdown(stripPasteArtifacts(processed)))
+    const text = astToPlainText(contentToAst(processed, { keepHtml: false }))
     return `${doc.name}\n\n${text}`
   }
   const processed = processCharacterMarkers(doc.content, ctx, 'html')
-  const body = applyAlignmentMarkers(astToHtml(parseMarkdown(ensureBlockSeparation(stripPasteArtifacts(processed)))))
+  const body = astToHtml(contentToAst(processed, { keepHtml: true }))
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

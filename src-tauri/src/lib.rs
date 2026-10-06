@@ -3,6 +3,10 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
+    // Remembers which files the user picked in a dialog across launches, so
+    // reopening a recent book doesn't fail the fs scope check. Must be
+    // registered after the fs plugin.
+    .plugin(tauri_plugin_persisted_scope::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

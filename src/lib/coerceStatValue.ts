@@ -30,6 +30,14 @@ function structuredItems(
 export function coerceStatValue(current: StatValue, targetType: StatType): StatValue {
   if (current.kind === targetType) return current
 
+  // number ↔ number with max: keep the value (a new max starts at the value)
+  if (current.kind === 'number' && targetType === 'numberWithMax') {
+    return { kind: 'numberWithMax', value: current.value, max: current.value }
+  }
+  if (current.kind === 'numberWithMax' && targetType === 'number') {
+    return { kind: 'number', value: current.value }
+  }
+
   // list → structured
   if (current.kind === 'list') {
     if (targetType === 'inventory') {

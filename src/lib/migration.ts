@@ -289,6 +289,7 @@ export function migrateFile(data: unknown): WritinatorFile {
       characters: (data.characters ?? []) as Character[],
       markers: (data.markers ?? {}) as Record<string, StatDelta[]>,
       saveCounter: typeof data.saveCounter === 'number' ? data.saveCounter : 0,
+      ...(typeof data.saveId === 'string' ? { saveId: data.saveId } : {}),
       ...extractExternalSections(data),
     }
   }

@@ -4,13 +4,10 @@ import {
   getCharacterMarkerContext,
   processCharacterMarkers,
   stripPasteArtifacts,
-  mergeGroupBlocks,
-  ensureBlockSeparation,
   escapeHtml,
-  applyAlignmentMarkers,
   astToHtml,
+  contentToAst,
 } from './export'
-import { parseMarkdown } from './ast'
 
 export function renderStoryletAsMarkdown(
   storylet: Storylet,
@@ -35,8 +32,6 @@ export function renderStoryletAsHtml(storylet: Storylet, book: Book): string {
   const processed = storylet.content
     ? processCharacterMarkers(storylet.content, ctx, 'html')
     : ''
-  const content = processed
-    ? applyAlignmentMarkers(astToHtml(parseMarkdown(ensureBlockSeparation(stripPasteArtifacts(mergeGroupBlocks(processed))))))
-    : ''
+  const content = processed ? astToHtml(contentToAst(processed, { keepHtml: true })) : ''
   return `${heading}\n${content}`
 }

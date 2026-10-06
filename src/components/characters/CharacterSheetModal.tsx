@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCharacterStore, DEFAULT_RANK_TIERS } from '../../stores/characterStore'
 import { StatFieldEditor } from './StatFieldEditor'
-import { coerceStatValue } from '../../lib/coerceStatValue'
-import { migrateStatDeltaOp } from '../../lib/migrateStatDeltaOp'
-import type { StatDefinition, StatDelta, StatType, StatValue } from '../../types'
+import { planStatTypeChange } from '../../lib/statTypeChange'
+import { useStoryletStore } from '../../stores/storyletStore'
+import type { StatDefinition, StatType, StatValue } from '../../types'
 
 const ALL_STAT_TYPES: StatType[] = [
   'number', 'numberWithMax', 'list', 'text', 'attributeSet', 'rank',
@@ -312,53 +312,15 @@ function CharacterSheet({
   }
 
   function handleTypeChange(statId: string, newType: StatType) {
-    const def = character.stats.find((s) => s.id === statId)
-    if (!def || def.type === newType) return
-    const oldType = def.type
-    const currentValue = character.baseValues[statId]
-    if (!currentValue) return
-    const coerced = coerceStatValue(currentValue, newType)
-    const patch: Partial<Omit<StatDefinition, 'id'>> = { type: newType }
-    if (def.type === 'spellList' && newType !== 'spellList') patch.manaStatId = undefined
-    onUpdateStatDef(statId, patch)
-    onBaseValueChange(statId, coerced)
-
-    // Migrate every marker delta that targets this character's changed stat.
-    // Reads/writes the store directly so we don't re-render on every marker change.
+    // Reads/writes the stores directly so we don't re-render on every marker change.
     const { markers, setMarker } = useCharacterStore.getState()
-    for (const [markerId, deltas] of Object.entries(markers)) {
-      let changed = false
-      const next: StatDelta[] = []
-      for (const delta of deltas) {
-        const op = delta.op
-        if (
-          delta.characterId !== character.id ||
-          !('statId' in op) ||
-          op.statId !== statId
-        ) {
-          next.push(delta)
-          continue
-        }
-        const migrated = migrateStatDeltaOp(op, oldType, newType)
-        if (migrated.length === 1 && migrated[0] === op) {
-          next.push(delta)
-          continue
-        }
-        changed = true
-        if (migrated.length === 1) {
-          next.push({ ...delta, op: migrated[0] })
-        } else {
-          for (const newOp of migrated) {
-            next.push({
-              id: crypto.randomUUID(),
-              characterId: delta.characterId,
-              op: newOp,
-              ...(delta.note !== undefined ? { note: delta.note } : {}),
-            })
-          }
-        }
-      }
-      if (changed) setMarker(markerId, next)
+    const book = useStoryletStore.getState().book
+    const plan = planStatTypeChange(character, book, markers, statId, newType)
+    if (!plan) return
+    onUpdateStatDef(statId, plan.defPatch)
+    onBaseValueChange(statId, plan.baseValue)
+    for (const [markerId, deltas] of Object.entries(plan.markers)) {
+      setMarker(markerId, deltas)
     }
   }
 

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import * as localforage from 'localforage'
 import type { Book, Storylet, DocumentStyles, GlobalSettings, NamedStyle, ReplaceScope, SearchOptions, WritinatorFile } from '../types'
-import { compileQuery, interpretReplacementEscapes, MAX_MATCHES_PER_STORYLET } from '../lib/bookSearch'
+import { compileQuery, replaceInContent } from '../lib/bookSearch'
 
 function createDefaultDocumentStyles(): DocumentStyles {
   return {
@@ -27,7 +27,7 @@ function flattenDocumentStyles(raw: unknown): DocumentStyles | undefined {
   return { ...(rest as Record<string, NamedStyle>), ...(namedStyles ?? {}) }
 }
 import { createSnapshot, getAllSnapshots, loadSnapshotsFromFile, snapshotBook } from './snapshotStore'
-import { loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
+import { getAllPublishedSnapshots, loadPublishedSnapshotsFromFile } from './publishedSnapshotStore'
 import { clearFileHandle, getHandleState, hasFileTetherCapability } from '../lib/fileSystem'
 import { showToast } from './genericToastStore'
 import { useImageRevealStore, hydrateImageReveal } from './imageRevealStore'
@@ -35,8 +35,9 @@ import { useWriteathonStore, hydrateWriteathon } from './writeathonStore'
 import { useMetricsStore, hydrateMetrics } from './metricsStore'
 import { useCharacterStore } from './characterStore'
 import { hydratePlayer } from './playerStore'
-import { hydrateNotes } from './notesStore'
+import { hydrateNotes, useNotesStore } from './notesStore'
 import { countWords } from '../lib/words'
+import { bookFingerprint } from '../lib/fingerprint'
 
 interface StoryletState {
   book: Book | null
@@ -45,8 +46,18 @@ interface StoryletState {
   hasHydrated: boolean
   lastSavedCounter: number
   lastSavedAt: number | null
+  /** `saveId` of the file version we last wrote or loaded. */
+  lastSavedId: string | null
+  /** Fingerprint of the book as last written or loaded — differs from the
+   *  current book when there are edits not yet saved to the file. */
+  lastSavedFingerprint: string | null
+  /** Bumped whenever a different book (or a fresh copy from disk) is loaded,
+   *  so the editor reloads even when the active storylet id is unchanged. */
+  bookLoadNonce: number
   _contentUpdateTimer: ReturnType<typeof setTimeout> | null
-  _pendingContent: string | null
+  /** Latest editor text not yet written into `book`, tagged with the storylet
+   *  it was typed in so a switch can never send it to the wrong storylet. */
+  _pendingContent: PendingContent | null
 
   // Book CRUD
   createBook: (title: string) => Promise<void>
@@ -69,11 +80,20 @@ interface StoryletState {
   setStoryletPublishedMeta: (id: string, meta: { lastPublishedAt: string; lastPublishedSnapshotId: string }) => void
 
   // Content
-  updateStoryletContent: (content: string) => void
+  /** Debounced write of editor text. `storyletId` defaults to the active storylet. */
+  updateStoryletContent: (content: string, storyletId?: string) => void
+  /** Immediately replace a storylet's text (no debounce) and make an open
+   *  editor reload it. */
+  setStoryletContent: (id: string, content: string) => void
   _flushContentUpdate: () => void
 
   // Save tracking
-  setLastSaved: (counter: number, at: number) => void
+  setLastSaved: (counter: number, at: number, saved?: { saveId: string; book: Book }) => void
+  /** Record that a version of the file has been seen (its content was kept in
+   *  History) without loading it, so the next save may overwrite it. */
+  markFileVersionSeen: (counter: number, saveId: string | undefined) => void
+  /** True when the book has changed since it was last saved to or loaded from the file. */
+  hasUnsavedChanges: () => boolean
 
   // Global settings
   setGlobalSettings: (settings: GlobalSettings) => void
@@ -88,8 +108,47 @@ interface StoryletState {
   ) => { storyletsChanged: number; matchesReplaced: number }
 }
 
+interface PendingContent {
+  storyletId: string
+  content: string
+}
+
 function generateId(): string {
   return crypto.randomUUID()
+}
+
+const CONTENT_DEBOUNCE_MS = 1500
+
+/** Give each stat marker and note anchor in duplicated text a fresh id, with
+ *  a copy of its deltas / note, so the copy can be edited independently. */
+function remintMarkers(storylets: Storylet[]): Storylet[] {
+  const { markers, setMarker } = useCharacterStore.getState()
+  const { positionNotes, addPositionNote } = useNotesStore.getState()
+  const statIds = new Map<string, string>()
+  const noteIds = new Map<string, string>()
+  const result = storylets.map((storylet) => {
+    if (!storylet.content) return storylet
+    const content = storylet.content
+      .replace(/(<!--\s*stat:)([A-Za-z0-9-]+)(\s*-->)/g, (whole, open: string, id: string, close: string) => {
+        if (!markers[id]) return whole
+        if (!statIds.has(id)) statIds.set(id, generateId())
+        return `${open}${statIds.get(id)}${close}`
+      })
+      .replace(/(<!--\s*note:)([A-Za-z0-9-]+)(\s*-->)/g, (whole, open: string, id: string, close: string) => {
+        if (!positionNotes[id]) return whole
+        if (!noteIds.has(id)) noteIds.set(id, generateId())
+        return `${open}${noteIds.get(id)}${close}`
+      })
+    return content === storylet.content ? storylet : { ...storylet, content }
+  })
+  for (const [oldId, newId] of statIds) {
+    setMarker(newId, markers[oldId].map((d) => ({ ...structuredClone(d), id: generateId() })))
+  }
+  for (const [oldId, newId] of noteIds) {
+    const { body, color, tags } = positionNotes[oldId]
+    addPositionNote(newId, { body, tags: [...tags], ...(color !== undefined ? { color } : {}) })
+  }
+  return result
 }
 
 // Book edits require a tethered file. Returns true and shows a toast
@@ -163,6 +222,27 @@ function collectSubtree(storylets: Storylet[], id: string): Storylet[] {
   return storylets.filter((storylet) => ids.has(storylet.id))
 }
 
+/** Union of two per-storylet histories by entry id, newest first. */
+function mergeById<T extends { id: string }>(
+  fromFile: Record<string, T[]>,
+  local: Record<string, T[]>,
+  timeOf: (entry: T) => string,
+  cap?: number,
+): Record<string, T[]> {
+  const merged: Record<string, T[]> = { ...fromFile }
+  for (const [storyletId, localEntries] of Object.entries(local)) {
+    const fileEntries = merged[storyletId] ?? []
+    const known = new Set(fileEntries.map((e) => e.id))
+    const extra = localEntries.filter((e) => !known.has(e.id))
+    if (extra.length === 0) continue
+    const all = [...fileEntries, ...extra].sort(
+      (a, b) => new Date(timeOf(b)).getTime() - new Date(timeOf(a)).getTime()
+    )
+    merged[storyletId] = cap ? all.slice(0, cap) : all
+  }
+  return merged
+}
+
 function now(): string {
   return new Date().toISOString()
 }
@@ -199,11 +279,15 @@ export const useStoryletStore = create<StoryletState>()(
       hasHydrated: false,
       lastSavedCounter: 0,
       lastSavedAt: null,
+      lastSavedId: null,
+      lastSavedFingerprint: null,
+      bookLoadNonce: 0,
       _contentUpdateTimer: null,
       _pendingContent: null,
 
       createBook: async (title: string) => {
-        // Orphan-snapshot the current book before wiping state
+        // Orphan-snapshot the current book (including unsaved typing) before wiping state
+        get()._flushContentUpdate()
         const existingBook = get().book
         if (existingBook) {
           await snapshotBook(existingBook, 'orphan')
@@ -228,36 +312,38 @@ export const useStoryletStore = create<StoryletState>()(
           },
           activeStoryletId: storyletId,
           globalSettings: { documentStyles: createDefaultDocumentStyles() },
+          bookLoadNonce: get().bookLoadNonce + 1,
         })
       },
 
       loadFile: async (file: WritinatorFile) => {
+        // Save unsaved typing first so the orphan snapshot has the latest text.
+        get()._flushContentUpdate()
         const existingBook = get().book
         if (existingBook) {
           await snapshotBook(existingBook, 'orphan')
         }
-        // Merge current localforage snapshots (including orphans just created)
-        // into the file's snapshot data so nothing is lost during the wipe.
-        const localSnapshots = await getAllSnapshots()
-        const merged = { ...file.snapshots }
-        for (const [storyletId, local] of Object.entries(localSnapshots)) {
-          const fromFile = merged[storyletId] ?? []
-          const existingIds = new Set(fromFile.map((s) => s.id))
-          const newEntries = local.filter((s) => !existingIds.has(s.id))
-          if (newEntries.length > 0) {
-            merged[storyletId] = [...fromFile, ...newEntries]
-              .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-              .slice(0, 100)
-          }
-        }
-        get()._flushContentUpdate()
+        // Merge local history (including orphans just created) into the file's
+        // so nothing is lost when local storage is replaced.
+        const snapshots = mergeById(file.snapshots, await getAllSnapshots(), (s) => s.timestamp, 100)
+        const publishedSnapshots = mergeById(
+          file.publishedSnapshots ?? {},
+          await getAllPublishedSnapshots(),
+          (s) => s.publishedAt,
+        )
         set({
           book: file.book,
           globalSettings: file.globalSettings,
           activeStoryletId: file.book.storylets[0]?.id ?? null,
+          bookLoadNonce: get().bookLoadNonce + 1,
+          lastSavedCounter: file.saveCounter,
+          lastSavedAt: Date.now(),
+          lastSavedId: file.saveId ?? null,
+          lastSavedFingerprint: bookFingerprint(file.book),
+          _pendingContent: null,
         })
-        loadSnapshotsFromFile(merged)
-        loadPublishedSnapshotsFromFile(file.publishedSnapshots ?? {})
+        await loadSnapshotsFromFile(snapshots)
+        await loadPublishedSnapshotsFromFile(publishedSnapshots)
         useCharacterStore.getState().loadFromFile(
           file.characters ?? [],
           file.markers ?? {}
@@ -278,11 +364,11 @@ export const useStoryletStore = create<StoryletState>()(
       },
 
       closeBook: async () => {
+        get()._flushContentUpdate()
         const { book } = get()
         if (book) {
           await snapshotBook(book, 'closeBook')
         }
-        get()._flushContentUpdate()
         // Pause timed quest timer when closing the book
         const imageRevealState = useImageRevealStore.getState()
         if (imageRevealState.activeSessions.some((s) => s.timeMinutes !== undefined)) {
@@ -290,13 +376,15 @@ export const useStoryletStore = create<StoryletState>()(
         }
         clearFileHandle()
         useCharacterStore.getState().reset()
-        set({ book: null, activeStoryletId: null })
+        set({ book: null, activeStoryletId: null, bookLoadNonce: get().bookLoadNonce + 1 })
       },
 
       addStorylet: (name?: string, parentId?: string) => {
+        if (!get().book) return ''
+        if (bailIfLocked('add storylet')) return ''
+        get()._flushContentUpdate()
         const { book } = get()
         if (!book) return ''
-        if (bailIfLocked('add storylet')) return ''
         const id = generateId()
         const timestamp = now()
         const siblings = book.storylets.filter((s) => s.parentId === parentId)
@@ -335,9 +423,12 @@ export const useStoryletStore = create<StoryletState>()(
       },
 
       duplicateStorylet: (id: string) => {
+        if (!get().book) return ''
+        if (bailIfLocked('duplicate storylet')) return ''
+        // Copy the latest text, not the version from up to 1.5s ago.
+        get()._flushContentUpdate()
         const { book } = get()
         if (!book) return ''
-        if (bailIfLocked('duplicate storylet')) return ''
         const timestamp = now()
 
         // Collect the target storylet and all its descendants (in order)
@@ -353,8 +444,8 @@ export const useStoryletStore = create<StoryletState>()(
           idMap.set(storylet.id, generateId())
         }
 
-        // Create copies with remapped IDs
-        const copies: Storylet[] = toCopy.map((storylet, i) => ({
+        // Create copies with remapped IDs (stat markers and notes get their own copies too)
+        const copies: Storylet[] = remintMarkers(toCopy).map((storylet, i) => ({
           ...storylet,
           id: idMap.get(storylet.id)!,
           name: i === 0 ? `${storylet.name} (copy)` : storylet.name,
@@ -454,9 +545,11 @@ export const useStoryletStore = create<StoryletState>()(
       },
 
       deleteStorylet: (id: string) => {
+        if (!get().book) return
+        if (bailIfLocked('delete storylet')) return
+        get()._flushContentUpdate()
         const { book, activeStoryletId } = get()
         if (!book) return
-        if (bailIfLocked('delete storylet')) return
         // Collect all descendant ids
         const toDelete = new Set<string>([id])
         let changed = true
@@ -577,52 +670,56 @@ export const useStoryletStore = create<StoryletState>()(
         })
       },
 
-      updateStoryletContent: (content: string) => {
+      updateStoryletContent: (content: string, storyletId?: string) => {
         if (bailIfLocked('edit content')) return
+        const targetId = storyletId ?? get().activeStoryletId
+        if (!targetId) return
+        // Typing moved to another storylet: save the previous one's text now.
+        const pending = get()._pendingContent
+        if (pending && pending.storyletId !== targetId) get()._flushContentUpdate()
         const { _contentUpdateTimer } = get()
         if (_contentUpdateTimer) {
           clearTimeout(_contentUpdateTimer)
         }
-        const timer = setTimeout(() => {
-          const { book, activeStoryletId, _pendingContent } = get()
-          if (!book || !activeStoryletId || !_pendingContent) return
-          // Track word delta for quest progress
-          const oldContent = book.storylets.find((s) => s.id === activeStoryletId)?.content ?? null
-          const oldWords = countWords(oldContent)
-          const newWords = countWords(_pendingContent)
-          const delta = newWords - oldWords
-          if (delta > 0) {
-            useImageRevealStore.getState().addWords(delta)
-          }
-          useMetricsStore.getState().recordDelta(oldWords, newWords, Date.now())
-          set({
-            book: {
-              ...book,
-              storylets: book.storylets.map((storylet) =>
-                storylet.id === activeStoryletId
-                  ? { ...storylet, content: _pendingContent, updatedAt: now() }
-                  : storylet
-              ),
-              updatedAt: now(),
-            },
-            _contentUpdateTimer: null,
-            _pendingContent: null,
-          })
-          // Update writeathon progress with new total book word count
-          const updatedBook = get().book
-          if (updatedBook) {
-            const totalBookWords = updatedBook.storylets.reduce(
-              (sum, s) => sum + countWords(s.content),
-              0
-            )
-            useWriteathonStore.getState().updateProgress(totalBookWords)
-          }
-        }, 1500)
-        set({ _contentUpdateTimer: timer, _pendingContent: content })
+        const timer = setTimeout(() => get()._flushContentUpdate(), CONTENT_DEBOUNCE_MS)
+        set({ _contentUpdateTimer: timer, _pendingContent: { storyletId: targetId, content } })
       },
 
-      setLastSaved: (counter: number, at: number) => {
-        set({ lastSavedCounter: counter, lastSavedAt: at })
+      setStoryletContent: (id: string, content: string) => {
+        if (bailIfLocked('edit content')) return
+        get()._flushContentUpdate()
+        const { book } = get()
+        if (!book) return
+        set({
+          book: {
+            ...book,
+            storylets: book.storylets.map((storylet) =>
+              storylet.id === id
+                ? { ...storylet, content, updatedAt: now(), docVersion: (storylet.docVersion ?? 0) + 1 }
+                : storylet
+            ),
+            updatedAt: now(),
+          },
+        })
+      },
+
+      setLastSaved: (counter: number, at: number, saved?: { saveId: string; book: Book }) => {
+        set({
+          lastSavedCounter: counter,
+          lastSavedAt: at,
+          ...(saved ? { lastSavedId: saved.saveId, lastSavedFingerprint: bookFingerprint(saved.book) } : {}),
+        })
+      },
+
+      markFileVersionSeen: (counter: number, saveId: string | undefined) => {
+        set({ lastSavedCounter: counter, lastSavedId: saveId ?? null })
+      },
+
+      hasUnsavedChanges: () => {
+        get()._flushContentUpdate()
+        const { book, lastSavedFingerprint } = get()
+        if (!book || !lastSavedFingerprint) return false
+        return bookFingerprint(book) !== lastSavedFingerprint
       },
 
       setGlobalSettings: (settings: GlobalSettings) => {
@@ -704,43 +801,19 @@ export const useStoryletStore = create<StoryletState>()(
         const compiled = compileQuery(options)
         if ('error' in compiled) return { storyletsChanged: 0, matchesReplaced: 0 }
         const { regex } = compiled
-        const effectiveReplacement = interpretReplacementEscapes(replacement, options.regex)
         const timestamp = now()
         let storyletsChanged = 0
         let matchesReplaced = 0
         const nextStorylets = book.storylets.map((storylet) => {
           if (scope === 'storylet' && storylet.id !== targetStoryletId) return storylet
           if (!storylet.content) return storylet
-          // Build a fresh scanner so we don't mutate `regex.lastIndex` across storylets,
-          // and so we can cap the number of replacements per storylet.
-          const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
-          const scanner = new RegExp(regex.source, flags)
-          const original = storylet.content
-          let cursor = 0
-          let count = 0
-          let out = ''
-          let m: RegExpExecArray | null
-          while ((m = scanner.exec(original)) !== null) {
-            const start = m.index
-            const end = start + m[0].length
-            out += original.slice(cursor, start)
-            out += effectiveReplacement
-            cursor = end
-            count++
-            if (count >= MAX_MATCHES_PER_STORYLET) break
-            // Avoid infinite loops on zero-width matches.
-            if (m[0].length === 0) {
-              scanner.lastIndex = scanner.lastIndex + 1
-            }
-          }
-          if (count === 0) return storylet
-          out += original.slice(cursor)
-          if (out === original) return storylet
+          const { content, count } = replaceInContent(storylet.content, regex, replacement, options.regex)
+          if (count === 0 || content === storylet.content) return storylet
           storyletsChanged++
           matchesReplaced += count
           return {
             ...storylet,
-            content: out,
+            content,
             updatedAt: timestamp,
             docVersion: (storylet.docVersion ?? 0) + 1,
           }
@@ -755,27 +828,33 @@ export const useStoryletStore = create<StoryletState>()(
       },
 
       _flushContentUpdate: () => {
-        const { _contentUpdateTimer, _pendingContent, book, activeStoryletId } = get()
+        const { _contentUpdateTimer, _pendingContent: pending, book } = get()
         if (_contentUpdateTimer) {
           clearTimeout(_contentUpdateTimer)
         }
-        if (_pendingContent && book && activeStoryletId) {
-          set({
-            book: {
-              ...book,
-              storylets: book.storylets.map((storylet) =>
-                storylet.id === activeStoryletId
-                  ? { ...storylet, content: _pendingContent, updatedAt: now() }
-                  : storylet
-              ),
-              updatedAt: now(),
-            },
-            _contentUpdateTimer: null,
-            _pendingContent: null,
-          })
-        } else {
-          set({ _contentUpdateTimer: null, _pendingContent: null })
+        set({ _contentUpdateTimer: null, _pendingContent: null })
+        if (!pending || !book) return
+        const storylet = book.storylets.find((s) => s.id === pending.storyletId)
+        if (!storylet || storylet.content === pending.content) return
+        // Track word delta for quest progress and metrics
+        const oldWords = countWords(storylet.content)
+        const newWords = countWords(pending.content)
+        const delta = newWords - oldWords
+        if (delta > 0) {
+          useImageRevealStore.getState().addWords(delta)
         }
+        useMetricsStore.getState().recordDelta(oldWords, newWords, Date.now())
+        const updatedBook: Book = {
+          ...book,
+          storylets: book.storylets.map((s) =>
+            s.id === pending.storyletId ? { ...s, content: pending.content, updatedAt: now() } : s
+          ),
+          updatedAt: now(),
+        }
+        set({ book: updatedBook })
+        // Update writeathon progress with new total book word count
+        const totalBookWords = updatedBook.storylets.reduce((sum, s) => sum + countWords(s.content), 0)
+        useWriteathonStore.getState().updateProgress(totalBookWords)
       },
     }),
     {
@@ -789,6 +868,8 @@ export const useStoryletStore = create<StoryletState>()(
           globalSettings: state.globalSettings,
           lastSavedCounter: state.lastSavedCounter,
           lastSavedAt: state.lastSavedAt,
+          lastSavedId: state.lastSavedId,
+          lastSavedFingerprint: state.lastSavedFingerprint,
         }) as unknown as StoryletState,
       migrate: (persisted, version) => {
         if (version === 0) {
@@ -868,3 +949,30 @@ export const useStoryletStore = create<StoryletState>()(
     }
   )
 )
+
+/** Write any pending editor text into the book right now. */
+function flushPendingContent(): void {
+  useStoryletStore.getState()._flushContentUpdate()
+}
+
+/** Flush pending text and wait until the book is written to browser storage.
+ *  For shutdown paths that can await (the desktop app's close handler). */
+export async function flushAndPersistNow(): Promise<void> {
+  flushPendingContent()
+  const options = useStoryletStore.persist.getOptions()
+  if (!options.storage || !options.name || !options.partialize) return
+  await options.storage.setItem(options.name, {
+    state: options.partialize(useStoryletStore.getState()) as StoryletState,
+    version: options.version,
+  })
+}
+
+// Save typing that hasn't hit the 1.5s debounce yet when the page is hidden or
+// closed. visibilitychange fires earlier than pagehide (e.g. switching apps),
+// which gives the storage write a better chance to finish.
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushPendingContent)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPendingContent()
+  })
+}

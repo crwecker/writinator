@@ -13,7 +13,7 @@ import {
 } from '@codemirror/state'
 import { createRoot, type Root } from 'react-dom/client'
 import { createElement } from 'react'
-import { STATBLOCK_MARKER_REGEX } from '../../lib/markerUtils'
+import { STATBLOCK_MARKER_REGEX, parseStatblockOptions, statblockFields } from '../../lib/markerUtils'
 import StatBlockWidget from '../characters/StatBlockWidget'
 import { useStoryletStore } from '../../stores/storyletStore'
 import {
@@ -21,34 +21,6 @@ import {
   setRenderModeEffect,
   markerPresentation,
 } from './renderMode'
-
-function parseOptionsRaw(raw: string | undefined): Record<string, string> {
-  if (!raw) return {}
-  const out: Record<string, string> = {}
-  for (const pair of raw.split(',')) {
-    const trimmed = pair.trim()
-    if (!trimmed) continue
-    const eq = trimmed.indexOf('=')
-    if (eq === -1) {
-      out[trimmed] = ''
-    } else {
-      const key = trimmed.slice(0, eq).trim()
-      const value = trimmed.slice(eq + 1).trim()
-      if (key) out[key] = value
-    }
-  }
-  return out
-}
-
-function parseFields(options: Record<string, string>): string[] | undefined {
-  const raw = options.fields
-  if (!raw) return undefined
-  return raw
-    .split('|')
-    .flatMap((s) => s.split(','))
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
 
 class StatBlockWidgetType extends WidgetType {
   readonly characterId: string
@@ -165,8 +137,7 @@ function buildDecorations(state: EditorState): DecorationSet {
     const start = m.index
     const end = start + m[0].length
     const characterId = m[1]
-    const options = parseOptionsRaw(m[2])
-    const fields = parseFields(options)
+    const fields = statblockFields(parseStatblockOptions(m[2]))
     matches.push({ start, end, characterId, fields })
   }
   matches.sort((a, b) => a.start - b.start)

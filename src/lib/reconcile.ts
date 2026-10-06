@@ -1,5 +1,5 @@
 import type { WritinatorFile } from '../types'
-import { hasFileHandle, parseFileJSON, readStoredFile } from './fileSystem'
+import { fileChangedSinceLastSync, hasFileHandle, parseFileJSON, readStoredFile } from './fileSystem'
 import { createSnapshot } from '../stores/snapshotStore'
 import { useStoryletStore } from '../stores/storyletStore'
 import { showToast } from '../stores/genericToastStore'
@@ -11,14 +11,16 @@ export type ReconcileResult =
   | { kind: 'no-handle' }
 
 /**
- * Compares the on-disk file (via stored FileSystemFileHandle) against the
- * in-memory store's saveCounter and takes action:
+ * Compares the on-disk file (via stored handle or Tauri path) with what this
+ * app last saved or loaded, and takes action:
  *
- *  - no-handle   : no handle is available
- *  - in-sync     : counters match
- *  - hot-reload  : file is newer — load it into the store
- *  - diverged    : local is newer — snapshot each file storylet with
- *                  'fileOnReconnect' for later review
+ *  - no-handle   : no file is connected
+ *  - in-sync     : the file is the version we last saved/loaded
+ *  - hot-reload  : someone else saved a newer version and there are no local
+ *                  edits — load it
+ *  - diverged    : the file changed but we have unsaved edits (or the file is
+ *                  older than ours) — keep the local book, file each storylet
+ *                  from the disk version in History ('fileOnReconnect')
  */
 export async function reconcileWithFile(): Promise<ReconcileResult> {
   try {
@@ -36,27 +38,30 @@ export async function reconcileWithFile(): Promise<ReconcileResult> {
       return { kind: 'no-handle' }
     }
 
+    const store = useStoryletStore.getState()
     const fileCounter = file.saveCounter
-    const localCounter = useStoryletStore.getState().lastSavedCounter
+    const localCounter = store.lastSavedCounter
 
     let result: ReconcileResult
 
-    if (fileCounter === localCounter) {
+    if (!fileChangedSinceLastSync(file)) {
       result = { kind: 'in-sync' }
-    } else if (fileCounter > localCounter) {
-      // File is ahead — hot-reload
-      useStoryletStore.getState().loadFile(file)
-      useStoryletStore.getState().setLastSaved(file.saveCounter, Date.now())
+    } else if (fileCounter >= localCounter && !store.hasUnsavedChanges()) {
+      // Someone else saved, and we have nothing unsaved — take their version.
+      await store.loadFile(file)
       result = { kind: 'hot-reload', file }
     } else {
-      // Local is ahead (or incommensurable) — diverged
-      // Snapshot each storylet from the file version for later review
+      // Keep local edits; preserve the disk version in History.
       await Promise.all(
         file.book.storylets
           .filter((s) => s.content && s.content.trim() !== '')
           .map((s) => createSnapshot(s.id, s.content!, 'fileOnReconnect'))
       )
-      showToast('File on disk had different content — saved as snapshot', 'warning')
+      useStoryletStore.getState().markFileVersionSeen(Math.max(fileCounter, localCounter), file.saveId)
+      showToast(
+        'The file changed on disk while you had unsaved edits. Kept your version; the file’s version is in History. Save again to overwrite the file.',
+        'warning'
+      )
       result = { kind: 'diverged', file, localCounter, fileCounter }
     }
 

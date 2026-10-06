@@ -53,38 +53,57 @@ function escapeRegex(literal: string): string {
   return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** Ranges of `<!-- … -->` comments (stat, note and statblock markers). Their
+ *  ids and keywords are not prose, so search and replace never touch them. */
+function hiddenRanges(content: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = []
+  const re = /<!--[\s\S]*?-->/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content)) !== null) {
+    ranges.push([m.index, m.index + m[0].length])
+  }
+  return ranges
+}
+
 /**
- * Collect every match in `content` for the given regex, capped at
- * MAX_MATCHES_PER_STORYLET. Guards against zero-width matches by advancing
- * `lastIndex` manually when a match consumes no characters.
+ * Every match of `regex` in `content` that doesn't overlap a hidden marker,
+ * capped at MAX_MATCHES_PER_STORYLET. Search, preview and replace all use
+ * this, so their match counts always agree. Guards against zero-width
+ * matches by advancing `lastIndex` manually.
  */
+export function findMatches(content: string, regex: RegExp): RegExpExecArray[] {
+  // Clone the regex so callers can reuse it across storylets without stale
+  // `lastIndex` state and to ensure the global flag is set.
+  const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
+  const scanner = new RegExp(regex.source, flags)
+  const hidden = hiddenRanges(content)
+  let h = 0
+  const matches: RegExpExecArray[] = []
+  let m: RegExpExecArray | null
+  while ((m = scanner.exec(content)) !== null) {
+    const start = m.index
+    const end = start + m[0].length
+    // Avoid infinite loops on zero-width matches (e.g. /\b/g).
+    if (m[0].length === 0) scanner.lastIndex = scanner.lastIndex + 1
+    while (h < hidden.length && hidden[h][1] <= start) h++
+    const touchesMarker = h < hidden.length && hidden[h][0] < Math.max(end, start + 1)
+    if (touchesMarker) continue
+    matches.push(m)
+    if (matches.length >= MAX_MATCHES_PER_STORYLET) break
+  }
+  return matches
+}
+
 function collectMatchesInContent(
   storyletId: string,
   content: string,
   regex: RegExp,
 ): SearchMatch[] {
-  // Defensive: clone the regex so callers can reuse it across storylets without
-  // stale `lastIndex` state and to ensure the global flag is set.
-  const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
-  const scanner = new RegExp(regex.source, flags)
-  const matches: SearchMatch[] = []
-  let m: RegExpExecArray | null
-  while ((m = scanner.exec(content)) !== null) {
+  return findMatches(content, regex).map((m) => {
     const start = m.index
     const end = start + m[0].length
-    matches.push({
-      storyletId,
-      start,
-      end,
-      ...buildSnippet(content, start, end),
-    })
-    if (matches.length >= MAX_MATCHES_PER_STORYLET) break
-    // Avoid infinite loops on zero-width matches (e.g. /\b/g).
-    if (m[0].length === 0) {
-      scanner.lastIndex = scanner.lastIndex + 1
-    }
-  }
-  return matches
+    return { storyletId, start, end, ...buildSnippet(content, start, end) }
+  })
 }
 
 /**
@@ -157,9 +176,7 @@ export function interpretReplacementEscapes(
 
 /**
  * Expand a regex match's replacement string. Supports `$&` (whole match) and
- * `$1`-`$9` numbered backreferences — same subset replaceAll uses. We hand-roll
- * this so the preview's `after` snippet matches what String.replace would
- * produce when called with the same regex+replacement.
+ * `$1`-`$9` numbered backreferences — same subset replaceAll uses.
  */
 function expandReplacement(
   replacement: string,
@@ -176,6 +193,32 @@ function expandReplacement(
   })
 }
 
+/** The text that replaces one match. In regex mode `\n`-style escapes and
+ *  `$1` / `$&` references are expanded; in literal mode it is used as-is. */
+export function replacementFor(match: RegExpExecArray, replacement: string, regexMode: boolean): string {
+  if (!regexMode) return replacement
+  return expandReplacement(interpretReplacementEscapes(replacement, true), match)
+}
+
+/** Replace every replaceable match in `content`. Used by Replace All. */
+export function replaceInContent(
+  content: string,
+  regex: RegExp,
+  replacement: string,
+  regexMode: boolean,
+): { content: string; count: number } {
+  const matches = findMatches(content, regex)
+  if (matches.length === 0) return { content, count: 0 }
+  let out = ''
+  let cursor = 0
+  for (const m of matches) {
+    out += content.slice(cursor, m.index) + replacementFor(m, replacement, regexMode)
+    cursor = m.index + m[0].length
+  }
+  out += content.slice(cursor)
+  return { content: out, count: matches.length }
+}
+
 /**
  * Build a per-match before/after preview snippet.
  * Both snippets are drawn from the same enclosing line in the original content
@@ -185,6 +228,7 @@ function buildPreviewMatch(
   content: string,
   match: RegExpExecArray,
   replacement: string,
+  regexMode: boolean,
 ): ReplacePreviewMatch {
   const start = match.index
   const end = start + match[0].length
@@ -206,7 +250,7 @@ function buildPreviewMatch(
     end - snippetStart,
   ]
 
-  const replacementText = expandReplacement(replacement, match)
+  const replacementText = replacementFor(match, replacement, regexMode)
   const afterSnippet =
     content.slice(snippetStart, start) +
     replacementText +
@@ -245,18 +289,10 @@ export function computeReplacePreview(
   for (const storylet of getStoryletTreeOrder(book)) {
     if (scope === 'storylet' && storylet.id !== targetStoryletId) continue
     if (!storylet.content) continue
-    const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`
-    const scanner = new RegExp(regex.source, flags)
-    const matches: ReplacePreviewMatch[] = []
-    const effectiveReplacement = interpretReplacementEscapes(replacement, options.regex)
-    let m: RegExpExecArray | null
-    while ((m = scanner.exec(storylet.content)) !== null) {
-      matches.push(buildPreviewMatch(storylet.content, m, effectiveReplacement))
-      if (matches.length >= MAX_MATCHES_PER_STORYLET) break
-      if (m[0].length === 0) {
-        scanner.lastIndex = scanner.lastIndex + 1
-      }
-    }
+    const content = storylet.content
+    const matches = findMatches(content, regex).map((m) =>
+      buildPreviewMatch(content, m, replacement, options.regex)
+    )
     if (matches.length === 0) continue
     previews.push({
       storyletId: storylet.id,

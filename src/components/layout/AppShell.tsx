@@ -8,10 +8,10 @@ import VimStatusLine from '../editor/VimStatusLine'
 import type { VimMode } from '../editor/VimStatusLine'
 import { ExportDialog } from './ExportDialog'
 import { HamburgerMenu, type MenuAction } from './HamburgerMenu'
-import { useStoryletStore } from '../../stores/storyletStore'
+import { flushAndPersistNow, useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { quickSave, saveAsNewFile, getStoredFileHandle, getLastLocalWriteAt, hasFileTetherCapability } from '../../lib/fileSystem'
-import { isTauri } from '../../lib/tauri'
+import { isTauri, onTauriCloseRequested } from '../../lib/tauri'
 import { reconcileWithFile } from '../../lib/reconcile'
 import { showToast } from '../../stores/genericToastStore'
 import { createSnapshot } from '../../stores/snapshotStore'
@@ -380,6 +380,22 @@ export function AppShell() {
       }
     }, 5 * 60 * 1000)
     return () => clearInterval(interval)
+  }, [])
+
+  // Desktop app: save typing still inside the 1.5s debounce before the window
+  // closes (pagehide isn't reliable when the native window is torn down).
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    void onTauriCloseRequested(flushAndPersistNow).then((fn) => {
+      if (cancelled) fn()
+      else unlisten = fn
+    })
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
   }, [])
 
   // mtime poll — detect external edits to the connected file and reconcile.
