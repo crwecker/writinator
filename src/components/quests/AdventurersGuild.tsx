@@ -95,7 +95,7 @@ export function AdventurersGuild({ open, activeTab, onTabChange, onClose }: Adve
         <div
           className="flex-1 overflow-y-auto"
           style={{
-            backgroundImage: 'url(/questBoardBackground.png)',
+            backgroundImage: 'url(/questBoardBackground.webp)',
             backgroundRepeat: 'repeat',
             backgroundAttachment: 'local',
           }}
