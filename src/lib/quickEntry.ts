@@ -1,12 +1,24 @@
 import type {
+  CatalogItem,
   Character,
   CharacterState,
+  CurrencyConfig,
+  QuickMacro,
   StatDefinition,
   StatDeltaOp,
   StatType,
   StatValue,
 } from '../types'
-import { formatQty, parseQty } from './characterState'
+import { applyDeltaOpWithDefs, formatQty, parseQty } from './characterState'
+import {
+  DEFAULT_CURRENCY,
+  currencyStatOf,
+  findCatalogItem,
+  parseCoins,
+  resolveCatalogModifiers,
+  unitsToStatAmount,
+} from './itemCatalog'
+import { PARTY_NAME_RE, partyOf } from './party'
 import { defaultItemFields } from './listStatFields'
 import { previewOp, type OpPreview } from './statPreview'
 import { DEFAULT_RANK_TIERS, createDefaultCharacter } from '../stores/characterStore'
@@ -25,7 +37,10 @@ import { DEFAULT_RANK_TIERS, createDefaultCharacter } from '../stores/characterS
 //   learns [spell|skill] <name>                      forgets <name>
 //   equips|wields|wears|dons <item> [as|in|to|on <slot>]   unequips <slot|item>
 //   buff <name> [[for] N]    +buff <name>            lose|remove|end buff <name>, -buff <name>
-//   gives <character> [N] <item|number stat>
+//   gives <character> [N] <item|number stat|coins>
+//   takes [N] <item|coins> from <character|party>     stashes [N] <item|coins>
+//   ±<coins> (e.g. +2g 50s → the character's currency stat)
+//   <macro name>  (a user-defined shortcut, expanded as quick-entry text)
 //
 // The parser is pure: it reads the characters and their state at the
 // insertion point, and applies each clause's ops to a working copy so later
@@ -39,6 +54,12 @@ export interface QuickEntryContext {
   stateFor: (characterId: string) => CharacterState | undefined
   /** Character used by clauses that don't name one (e.g. "HP +5"). */
   defaultCharacterId?: string | null
+  /** Book item catalog: equip slots/modifiers, weights, completions. */
+  catalog?: CatalogItem[]
+  /** User-defined shortcuts ("level up"). */
+  macros?: QuickMacro[]
+  /** Coin denominations for "+2g 50s" (default 1g = 100s = 10000c). */
+  currency?: CurrencyConfig
 }
 
 export interface QuickEntryOp {
@@ -48,7 +69,8 @@ export interface QuickEntryOp {
 
 export type CreateSuggestion =
   | { kind: 'character'; name: string }
-  | { kind: 'stat'; characterId: string; name: string; type: StatType }
+  | { kind: 'party'; name: string }
+  | { kind: 'stat'; characterId: string; name: string; type: StatType; currency?: boolean }
 
 export interface ParsedClause {
   text: string
@@ -78,6 +100,11 @@ const ITEM_LIST_TYPES: StatType[] = ['inventory', 'list', 'spellList', 'skillLis
 interface Env {
   characters: Character[]
   stateOf: (c: Character) => CharacterState
+  catalog: CatalogItem[]
+  macros: QuickMacro[]
+  currency: CurrencyConfig
+  /** Macro nesting depth (guards self-referencing macros). */
+  depth: number
 }
 
 interface ResolvedStat {
@@ -305,28 +332,25 @@ const BODY_RULES: BodyRule[] = [
       }
       const receiver = target.character
       if (!target.rest) return fail(`What does ${giver.name} give ${receiver.name}?`)
-      const counted = target.rest.match(new RegExp(`^${NUM}\\s+(.+)$`))
-      const n = counted ? Number(counted[1]) : 1
-      const thing = counted ? counted[2] : target.rest
-      const stat = resolveStat(giver, thing)
-      if (stat && !stat.attributeKey && (stat.def.type === 'number' || stat.def.type === 'numberWithMax')) {
-        const theirs = resolveStat(receiver, thing)
-        if (!theirs || theirs.attributeKey || (theirs.def.type !== 'number' && theirs.def.type !== 'numberWithMax')) {
-          return noStat(receiver, stat.def.name, 'number')
-        }
-        return {
-          ops: [
-            { characterId: giver.id, op: { kind: 'adjust', statId: stat.def.id, delta: -n } },
-            { characterId: receiver.id, op: { kind: 'adjust', statId: theirs.def.id, delta: n } },
-          ],
-        }
-      }
-      const loss = loseItem(giver, env.stateOf(giver), thing, n)
-      if (loss.error) return loss
-      const itemName = findOwned(giver, env.stateOf(giver), thing)?.name ?? thing.trim()
-      const gain = gainItem(receiver, env.stateOf(receiver), itemName, n)
-      if (gain.error) return gain
-      return { ops: [...loss.ops, ...gain.ops], warnings: [...(loss.warnings ?? []), ...(gain.warnings ?? [])] }
+      return transfer(giver, receiver, target.rest, env)
+    },
+  },
+  {
+    re: /^(?:takes?|grabs?|withdraws?|retrieves?)\s+(.+?)\s+from\s+(.+)$/i,
+    run: (m, receiver, env) => {
+      const holder = findHolder(env, m[2])
+      if ('error' in holder) return holder.error
+      if (holder.character.id === receiver.id) return fail(`${receiver.name} can’t take from themself`)
+      return transfer(holder.character, receiver, m[1], env)
+    },
+  },
+  {
+    re: /^(?:stash(?:es)?|stows?|deposits?)\s+(.+?)(?:\s+(?:in|into|with)\s+(?:the\s+)?(?:party|stash)(?:\s+stash)?)?$/i,
+    run: (m, giver, env) => {
+      const party = partyOf(env.characters)
+      if (!party) return fail('No party stash yet', { kind: 'party', name: 'Party' })
+      if (party.id === giver.id) return fail(`${giver.name} is the stash`)
+      return transfer(giver, party, m[1], env)
     },
   },
   {
@@ -384,9 +408,16 @@ const BODY_RULES: BodyRule[] = [
           name = explicit[1].trim()
         }
       }
+      const cat = findCatalogItem(env.catalog, name)
+      if (cat) {
+        name = cat.name
+        const catSlot = cat.slot?.trim().toLowerCase()
+        if (!slot && catSlot) slot = c.equipmentSlots.find((x) => x.toLowerCase() === catSlot)
+      }
       slot ??= guessSlot(c, env.stateOf(c), name)
       if (!slot) return fail(`${c.name} has no equipment slots`)
-      return one(c, { kind: 'equip', slot, itemId: name, itemName: name, modifiers: [] })
+      const modifiers = cat ? resolveCatalogModifiers(cat, c) : []
+      return one(c, { kind: 'equip', slot, itemId: name, itemName: name, modifiers })
     },
   },
   {
@@ -433,6 +464,19 @@ const BODY_RULES: BodyRule[] = [
   {
     re: new RegExp(`^([+-])\\s*${NUM}\\s+max\\s+(.+)$`, 'i'),
     run: (m, c) => maxAdjust(c, m[3], (m[1] === '-' ? -1 : 1) * Number(m[2])),
+  },
+  {
+    // ±<coins> ("+2g 50s", "-30 copper") — unless the words name a stat ("+200 Gold")
+    re: /^([+-])\s*(\d.*)$/,
+    run: (m, c, env) => {
+      const named = m[2].match(new RegExp(`^${NUM}\\s+(.+)$`))
+      if (named && resolveStat(c, named[2])) return null
+      const units = parseCoins(m[2], env.currency)
+      if (units === null) return null
+      const def = currencyStatOf(c, env.currency)
+      if (!def) return noCoinHome(c)
+      return one(c, { kind: 'adjust', statId: def.id, delta: (m[1] === '-' ? -1 : 1) * unitsToStatAmount(units, def, env.currency) })
+    },
   },
   {
     // ±N <stat | attribute | item>
@@ -495,6 +539,135 @@ const BODY_RULES: BodyRule[] = [
   },
 ]
 
+function noCoinHome(c: Character): BodyResult {
+  return fail(`${c.name} has nowhere to keep coins`, {
+    kind: 'stat',
+    characterId: c.id,
+    name: 'Coins',
+    type: 'number',
+    currency: true,
+  })
+}
+
+/** Slot holding an item called `name` (case-insensitive), if equipped. */
+function equippedSlotOf(state: CharacterState, name: string): { slot: string; name: string } | null {
+  const n = lower(name)
+  for (const [slot, it] of Object.entries(state.equipped)) {
+    const label = it.itemName ?? it.itemId
+    if (label.toLowerCase() === n || it.itemId.toLowerCase() === n) return { slot, name: label }
+  }
+  return null
+}
+
+/** A character named exactly `name`, or the party stash for "party" / "stash". */
+function findHolder(env: Env, raw: string): { character: Character } | { error: BodyResult } {
+  const name = raw.trim()
+  const n = name.toLowerCase()
+  const exact = env.characters.find((c) => c.name.toLowerCase() === n)
+  if (exact) return { character: exact }
+  if (PARTY_NAME_RE.test(name)) {
+    const party = partyOf(env.characters)
+    if (party) return { character: party }
+    return { error: fail('No party stash yet', { kind: 'party', name: 'Party' }) }
+  }
+  return { error: fail(`Unknown character “${name}”`, { kind: 'character', name }) }
+}
+
+/**
+ * Move `[N] <thing>` from giver to receiver: a number stat, coins, or an
+ * item. Giving away the last of an equipped item unequips it first.
+ */
+function transfer(giver: Character, receiver: Character, rest: string, env: Env): BodyResult {
+  const counted = rest.match(new RegExp(`^${NUM}\\s+(.+)$`))
+  const n = counted ? Number(counted[1]) : 1
+  const thing = counted ? counted[2] : rest
+  const stat = resolveStat(giver, thing)
+  if (stat && !stat.attributeKey && (stat.def.type === 'number' || stat.def.type === 'numberWithMax')) {
+    const theirs = resolveStat(receiver, thing)
+    if (!theirs || theirs.attributeKey || (theirs.def.type !== 'number' && theirs.def.type !== 'numberWithMax')) {
+      return noStat(receiver, stat.def.name, 'number')
+    }
+    return {
+      ops: [
+        { characterId: giver.id, op: { kind: 'adjust', statId: stat.def.id, delta: -n } },
+        { characterId: receiver.id, op: { kind: 'adjust', statId: theirs.def.id, delta: n } },
+      ],
+    }
+  }
+  const units = stat ? null : parseCoins(rest, env.currency)
+  if (units !== null) {
+    const from = currencyStatOf(giver, env.currency)
+    if (!from) return noCoinHome(giver)
+    const to = currencyStatOf(receiver, env.currency)
+    if (!to) return noCoinHome(receiver)
+    return {
+      ops: [
+        { characterId: giver.id, op: { kind: 'adjust', statId: from.id, delta: -unitsToStatAmount(units, from, env.currency) } },
+        { characterId: receiver.id, op: { kind: 'adjust', statId: to.id, delta: unitsToStatAmount(units, to, env.currency) } },
+      ],
+    }
+  }
+  const state = env.stateOf(giver)
+  const owned = findOwned(giver, state, thing)
+  const equipped = equippedSlotOf(state, owned?.name ?? thing)
+  const itemName = owned?.name ?? equipped?.name ?? thing.trim()
+  const ops: QuickEntryOp[] = []
+  const warnings: Array<string | undefined> = []
+  if (equipped && (!owned || owned.qty <= n)) {
+    ops.push({ characterId: giver.id, op: { kind: 'unequip', slot: equipped.slot } })
+    warnings.push(undefined)
+  }
+  if (owned || !equipped) {
+    const loss = loseItem(giver, state, itemName, n)
+    if (loss.error) return loss
+    ops.push(...loss.ops)
+    warnings.push(...(loss.warnings ?? loss.ops.map(() => undefined)))
+  }
+  const gain = gainItem(receiver, env.stateOf(receiver), itemName, n)
+  if (gain.error) return gain
+  ops.push(...gain.ops)
+  warnings.push(...(gain.warnings ?? gain.ops.map(() => undefined)))
+  return { ops, warnings }
+}
+
+const MAX_MACRO_DEPTH = 4
+
+/** The macro `text` names for `c`: the character's own first, else a global one. */
+function findMacro(env: Env, c: Character, text: string): QuickMacro | undefined {
+  const n = lower(text)
+  const named = env.macros.filter((m) => lower(m.name) === n && m.body.trim())
+  return named.find((m) => m.characterId === c.id) ?? named.find((m) => !m.characterId)
+}
+
+/** Run a macro's clauses for `c`, each seeing the ones before it. */
+function expandMacro(macro: QuickMacro, c: Character, env: Env): BodyResult {
+  if (env.depth >= MAX_MACRO_DEPTH) return fail(`“${macro.name}” calls itself too many times`)
+  const overlay = new Map<string, CharacterState>()
+  const sub: Env = {
+    ...env,
+    depth: env.depth + 1,
+    stateOf: (ch) => overlay.get(ch.id) ?? env.stateOf(ch),
+  }
+  const ops: QuickEntryOp[] = []
+  const warnings: Array<string | undefined> = []
+  let current = c
+  for (const { text: raw } of splitClauses(normalizeDashes(macro.body))) {
+    const text = raw.replace(/\s+/g, ' ')
+    const named = matchCharacterPrefix(env.characters, text)
+    if (named) current = named.character
+    const res = parseBody(named ? named.rest : text, current, sub)
+    if (res.error) return fail(`In “${macro.name}”: ${res.error}`)
+    res.ops.forEach((entry, i) => {
+      const ch = env.characters.find((x) => x.id === entry.characterId)
+      if (ch) overlay.set(ch.id, applyDeltaOpWithDefs(sub.stateOf(ch), entry.op, ch.stats))
+      ops.push(entry)
+      warnings.push(res.warnings?.[i])
+    })
+  }
+  if (ops.length === 0) return fail(`“${macro.name}” is empty`)
+  return { ops, warnings }
+}
+
 function maxAdjust(c: Character, name: string, delta: number): BodyResult {
   const r = resolveStat(c, name)
   if (!r) return noStat(c, name.trim(), 'numberWithMax')
@@ -505,6 +678,8 @@ function maxAdjust(c: Character, name: string, delta: number): BodyResult {
 function parseBody(body: string, c: Character, env: Env): BodyResult {
   const text = body.replace(/\s+/g, ' ').trim()
   if (!text) return fail(`What happened to ${c.name}?`)
+  const macro = findMacro(env, c, text)
+  if (macro) return expandMacro(macro, c, env)
   for (const rule of BODY_RULES) {
     const m = text.match(rule.re)
     if (!m) continue
@@ -527,7 +702,7 @@ function unknownCharacterSplit(text: string, env: Env): string | null {
     const ghost = createDefaultCharacter(name)
     const ghostState: CharacterState = { base: ghost.baseValues, equipped: {}, activeBuffs: [] }
     const res = parseBody(words.slice(k).join(' '), ghost, {
-      characters: env.characters,
+      ...env,
       stateOf: (ch) => (ch.id === ghost.id ? ghostState : env.stateOf(ch)),
     })
     if (!res.error) return name
@@ -564,6 +739,10 @@ export function parseQuickEntry(input: string, ctx: QuickEntryContext): QuickEnt
   const empty: CharacterState = { base: {}, equipped: {}, activeBuffs: [] }
   const env: Env = {
     characters: ctx.characters,
+    catalog: ctx.catalog ?? [],
+    macros: ctx.macros ?? [],
+    currency: ctx.currency ?? DEFAULT_CURRENCY,
+    depth: 0,
     stateOf: (c) => {
       let s = working.get(c.id)
       if (!s) {
@@ -594,7 +773,8 @@ export function parseQuickEntry(input: string, ctx: QuickEntryContext): QuickEnt
         res = attempt
       } else {
         const unknown = unknownCharacterSplit(text, env)
-        if (unknown) res = fail(`Unknown character “${unknown}”`, { kind: 'character', name: unknown })
+        if (unknown && PARTY_NAME_RE.test(unknown)) res = fail('No party stash yet', { kind: 'party', name: unknown })
+        else if (unknown) res = fail(`Unknown character “${unknown}”`, { kind: 'character', name: unknown })
         else if (attempt) res = attempt
         else res = fail(`Start with a character name, e.g. “${ctx.characters[0]?.name ?? 'Kael'} ${text}”`)
       }
@@ -608,7 +788,10 @@ export function parseQuickEntry(input: string, ctx: QuickEntryContext): QuickEnt
     res.ops.forEach((entry, i) => {
       const character = byId.get(entry.characterId)
       if (!character) return
-      const { row, after } = previewOp(character, env.stateOf(character), entry.op)
+      const { row, after } = previewOp(character, env.stateOf(character), entry.op, {
+        catalog: env.catalog,
+        currency: env.currency,
+      })
       const extra = res.warnings?.[i]
       if (extra) row.warning = extra
       working.set(character.id, after)
@@ -636,7 +819,7 @@ export interface QuickEntryCompletion {
   options: string[]
 }
 
-const VERBS = ['learns', 'forgets', 'equips', 'unequips', 'buff', 'lose buff', 'gives', 'fill', 'rank up', 'rank down', 'max']
+const VERBS = ['learns', 'forgets', 'equips', 'unequips', 'buff', 'lose buff', 'gives', 'takes', 'stashes', 'fill', 'rank up', 'rank down', 'max']
 const MAX_OPTIONS = 8
 
 /**
@@ -680,6 +863,10 @@ export function quickEntryCompletions(
     for (const s of c.stats) {
       if (ITEM_LIST_TYPES.includes(s.type)) itemsOf(state.base[s.id]).forEach((it) => add(it.name))
     }
+  }
+  ;(ctx.catalog ?? []).forEach((it) => add(it.name))
+  for (const m of ctx.macros ?? []) {
+    if (!m.characterId || m.characterId === character?.id) add(m.name)
   }
   VERBS.forEach(add)
 
@@ -751,7 +938,12 @@ function sameFields(a: Record<string, number>, b: Record<string, number>): boole
  * state just before the op), or null when the op carries detail the grammar
  * can't express (modifiers, custom ids, whole attribute sets).
  */
-export function opToQuickEntry(op: StatDeltaOp, character: Character, state: CharacterState): string | null {
+export function opToQuickEntry(
+  op: StatDeltaOp,
+  character: Character,
+  state: CharacterState,
+  catalog?: CatalogItem[],
+): string | null {
   const who = character.name
   const def = (id: string) => character.stats.find((s) => s.id === id)
   const stat = (id: string) => def(id)?.name ?? id
@@ -815,9 +1007,15 @@ export function opToQuickEntry(op: StatDeltaOp, character: Character, state: Cha
       if (!owned || (op.delta < 0 && owned.qty <= -op.delta)) return null
       return text(`${stat(op.statId)} ${signedText(op.delta)} ${op.name}`)
     }
-    case 'equip':
-      if (op.modifiers.length > 0 || (op.itemName ?? op.itemId) !== op.itemId) return null
+    case 'equip': {
+      if ((op.itemName ?? op.itemId) !== op.itemId) return null
+      // Re-parsing pulls modifiers from the catalog, so they must match it exactly.
+      const cat = findCatalogItem(catalog, op.itemId)
+      if (cat && cat.name !== op.itemId) return null
+      const fromCatalog = cat ? resolveCatalogModifiers(cat, character) : []
+      if (JSON.stringify(op.modifiers) !== JSON.stringify(fromCatalog)) return null
       return text(`equips ${op.itemId} as ${op.slot}`)
+    }
     case 'unequip':
       return text(`unequips ${op.slot}`)
     case 'buffApply': {

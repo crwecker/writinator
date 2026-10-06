@@ -8,6 +8,7 @@ import type {
   MetricsFileData,
   NamedStyle,
   NotesFileData,
+  ItemCatalogFileData,
   PlayerFileData,
   PublishedSnapshot,
   Snapshot,
@@ -257,13 +258,15 @@ function migrateToV8(v7: V7File): WritinatorFile {
  * Extract cross-store sections from a raw parsed file object.
  * Returns undefined for each absent/invalid section to allow hydrate no-ops.
  */
-function extractExternalSections(data: Record<string, unknown>): Pick<WritinatorFile, 'player' | 'quests' | 'writeathon' | 'metrics' | 'notes'> {
+function extractExternalSections(data: Record<string, unknown>): Pick<WritinatorFile, 'player' | 'quests' | 'writeathon' | 'metrics' | 'notes' | 'itemCatalog'> {
   return {
     player: isRecord(data.player) ? (data.player as unknown as PlayerFileData) : undefined,
     quests: isRecord(data.quests) ? (data.quests as unknown as ImageRevealFileData) : undefined,
     writeathon: isRecord(data.writeathon) ? (data.writeathon as unknown as WriteathonFileData) : undefined,
     metrics: isRecord(data.metrics) ? (data.metrics as unknown as MetricsFileData) : undefined,
     notes: isRecord(data.notes) ? (data.notes as unknown as NotesFileData) : undefined,
+    // Optional item catalog / macros / currency; absent = this book starts with an empty catalog.
+    itemCatalog: isRecord(data.itemCatalog) ? (data.itemCatalog as unknown as ItemCatalogFileData) : undefined,
   }
 }
 

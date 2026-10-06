@@ -1,5 +1,7 @@
-import type { Character, StatDelta, StatDeltaOp, StatValue } from '../types'
+import type { Character, StatDefinition, StatDelta, StatDeltaOp, StatValue } from '../types'
 import { formatQty } from './characterState'
+import { currencyUnitValue, formatCoins, isCurrencyStat } from './itemCatalog'
+import { useItemCatalogStore } from '../stores/itemCatalogStore'
 
 // ---------------------------------------------------------------------------
 // Stat values
@@ -42,8 +44,18 @@ export const EXPORT_VALUE_FORMAT: StatValueFormat = {
 }
 
 /** One-line text for a stat value. Missing values and empty text read "—". */
-export function formatStatValue(v: StatValue | undefined, format: StatValueFormat): string {
+/** A number stat that is currency, as coins ("2g 50s"); null for anything else. */
+function asCoins(v: StatValue, def: StatDefinition | undefined): string | null {
+  if (v.kind !== 'number' || !def) return null
+  const cfg = useItemCatalogStore.getState().currency
+  if (!isCurrencyStat(def, cfg)) return null
+  return formatCoins(v.value * currencyUnitValue(def, cfg), cfg)
+}
+
+export function formatStatValue(v: StatValue | undefined, format: StatValueFormat, def?: StatDefinition): string {
   if (!v) return '—'
+  const coins = asCoins(v, def)
+  if (coins !== null) return coins
   switch (v.kind) {
     case 'number':
       return String(v.value)
@@ -86,7 +98,12 @@ export function formatStatValue(v: StatValue | undefined, format: StatValueForma
 export function formatStatValueInline(
   v: StatValue,
   subkey: string | null = null,
+  def?: StatDefinition,
 ): string {
+  if (!subkey) {
+    const coins = asCoins(v, def)
+    if (coins !== null) return coins
+  }
   const key = subkey ? subkey.toLowerCase() : null
   switch (v.kind) {
     case 'number':
@@ -279,8 +296,16 @@ export function formatOpChip(
     return t === 'spellList' || t === 'skillList'
   }
   switch (op.kind) {
-    case 'adjust':
+    case 'adjust': {
+      // Currency stats read as coins: "Gold +2g 50s".
+      const def = character?.stats.find((s) => s.id === op.statId)
+      const cfg = useItemCatalogStore.getState().currency
+      if (def && !op.attributeKey && isCurrencyStat(def, cfg)) {
+        const coins = formatCoins(Math.abs(op.delta) * currencyUnitValue(def, cfg), cfg)
+        return `${statName(op.statId)} ${op.delta < 0 ? MINUS : '+'}${coins}`
+      }
       return `${op.attributeKey ?? statName(op.statId)} ${signedChip(op.delta)}`
+    }
     case 'maxAdjust':
       return `max ${statName(op.statId)} ${signedChip(op.delta)}`
     case 'set':

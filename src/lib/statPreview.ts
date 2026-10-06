@@ -1,5 +1,7 @@
 import type {
+  CatalogItem,
   Character,
+  CurrencyConfig,
   CharacterState,
   StatDefinition,
   StatDelta,
@@ -9,6 +11,13 @@ import type {
 import { applyDeltaOpWithDefs, computeEffective, parseQty } from './characterState'
 import { LIST_STAT_FIELDS } from './listStatFields'
 import { PANEL_VALUE_FORMAT, formatStatValue } from './statFormat'
+import { capacityOf, carriedWeight, formatStatValueWithCurrency, overCapacityWarning } from './itemCatalog'
+
+/** Book-level extras a preview can use: catalog weights, coin formatting. */
+export interface PreviewOptions {
+  catalog?: CatalogItem[]
+  currency?: CurrencyConfig
+}
 
 /** One before → after row describing what an op does to a character. */
 export interface OpPreview {
@@ -46,8 +55,12 @@ function plainListQty(v: StatValue | undefined, name: string): number {
 }
 
 /** Value text for one stat in a preview: numberWithMax reads as its value unless the max moved. */
-function scalar(v: StatValue | undefined, showMax: boolean): string {
+function scalar(v: StatValue | undefined, showMax: boolean, def?: StatDefinition, opts?: PreviewOptions): string {
   if (!v) return '—'
+  if (opts?.currency) {
+    const coins = formatStatValueWithCurrency(v, def, opts.currency)
+    if (coins !== null) return coins
+  }
   if (v.kind === 'numberWithMax') return showMax ? `${v.value}/${v.max}` : String(v.value)
   return formatStatValue(v, PANEL_VALUE_FORMAT)
 }
@@ -69,6 +82,7 @@ export function previewOp(
   character: Character,
   before: CharacterState,
   op: StatDeltaOp,
+  opts?: PreviewOptions,
 ): { row: OpPreview; after: CharacterState } {
   const after = applyDeltaOpWithDefs(before, op, character.stats)
   const effB = computeEffective(before, character.stats)
@@ -85,7 +99,7 @@ export function previewOp(
       if (op.attributeKey && b?.kind === 'attributeSet' && a?.kind === 'attributeSet') {
         row.text = `${op.attributeKey} ${b.values[op.attributeKey] ?? 0} → ${a.values[op.attributeKey] ?? 0}`
       } else {
-        row.text = `${nameOf(op.statId)} ${scalar(b, false)} → ${scalar(a, false)}`
+        row.text = `${nameOf(op.statId)} ${scalar(b, false, defOf(op.statId), opts)} → ${scalar(a, false, defOf(op.statId), opts)}`
         row.warning = boundsWarning(defOf(op.statId), a)
       }
       break
@@ -101,7 +115,7 @@ export function previewOp(
             : `${nameOf(op.statId)} unchanged`
       } else {
         const showMax = b?.kind === 'numberWithMax' && a?.kind === 'numberWithMax' && b.max !== a.max
-        row.text = `${nameOf(op.statId)} ${scalar(b, showMax)} → ${scalar(a, showMax)}`
+        row.text = `${nameOf(op.statId)} ${scalar(b, showMax, defOf(op.statId), opts)} → ${scalar(a, showMax, defOf(op.statId), opts)}`
         row.warning = boundsWarning(defOf(op.statId), a)
       }
       break
@@ -183,6 +197,8 @@ export function previewOp(
     case 'equip': {
       const cur = before.equipped[op.slot]
       row.text = `${op.slot}: ${cur ? cur.itemName ?? cur.itemId : '—'} → ${op.itemName ?? op.itemId}`
+      const effects = modifierEffects(character, effB, effA)
+      if (effects) row.text += ` (${effects})`
       if (!character.equipmentSlots.includes(op.slot)) row.warning = `${who} has no ${op.slot} slot`
       break
     }
@@ -203,7 +219,41 @@ export function previewOp(
     }
   }
 
+  if (!row.warning && opts?.catalog && opts.catalog.length > 0) {
+    const cap = capacityOf(character, effA)
+    if (cap !== null) {
+      const wb = carriedWeight(character, before.base, opts.catalog)
+      const wa = carriedWeight(character, after.base, opts.catalog)
+      if (wa > wb) row.warning = overCapacityWarning(wa, cap)
+    }
+  }
+
   return { row, after }
+}
+
+/** "HP max 40 → 50, STR 10 → 12" for every numeric stat whose effective value changed. */
+function modifierEffects(
+  character: Character,
+  effB: Record<string, StatValue>,
+  effA: Record<string, StatValue>,
+): string {
+  const parts: string[] = []
+  for (const def of character.stats) {
+    const b = effB[def.id]
+    const a = effA[def.id]
+    if (!b || !a) continue
+    if (b.kind === 'number' && a.kind === 'number' && b.value !== a.value) {
+      parts.push(`${def.name} ${b.value} → ${a.value}`)
+    } else if (b.kind === 'numberWithMax' && a.kind === 'numberWithMax') {
+      if (b.value !== a.value) parts.push(`${def.name} ${b.value} → ${a.value}`)
+      if (b.max !== a.max) parts.push(`${def.name} max ${b.max} → ${a.max}`)
+    } else if (b.kind === 'attributeSet' && a.kind === 'attributeSet') {
+      for (const k of Object.keys(a.values)) {
+        if (a.values[k] !== b.values[k]) parts.push(`${k} ${b.values[k] ?? 0} → ${a.values[k]}`)
+      }
+    }
+  }
+  return parts.join(', ')
 }
 
 /**
@@ -215,6 +265,7 @@ export function previewDeltas(
   deltas: StatDelta[],
   characters: Character[],
   stateFor: (characterId: string) => CharacterState | undefined,
+  opts?: PreviewOptions,
 ): Array<OpPreview | null> {
   const working = new Map<string, CharacterState>()
   return deltas.map((d) => {
@@ -222,7 +273,7 @@ export function previewDeltas(
     if (!character) return null
     const before = working.get(character.id) ?? stateFor(character.id)
     if (!before) return null
-    const { row, after } = previewOp(character, before, d.op)
+    const { row, after } = previewOp(character, before, d.op, opts)
     working.set(character.id, after)
     return row
   })

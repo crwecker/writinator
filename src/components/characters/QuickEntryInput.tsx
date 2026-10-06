@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useCharacterStore } from '../../stores/characterStore'
+import { useItemCatalogStore } from '../../stores/itemCatalogStore'
+import { createPartyCharacter } from '../../lib/party'
 import {
   parseQuickEntry,
   quickEntryCompletions,
@@ -23,7 +25,9 @@ interface Props {
 }
 
 function createLabel(s: CreateSuggestion, characterName: (id: string) => string): string {
-  return s.kind === 'character' ? `Create ${s.name}` : `Add “${s.name}” to ${characterName(s.characterId)}`
+  if (s.kind === 'character') return `Create ${s.name}`
+  if (s.kind === 'party') return 'Create party stash'
+  return `Add ${s.currency ? 'coins' : `“${s.name}”`} to ${characterName(s.characterId)}`
 }
 
 /** Apply a "Create …" suggestion: a default-template character, or a stat of the guessed type. */
@@ -33,10 +37,14 @@ function applyCreate(s: CreateSuggestion): void {
     store.createCharacter(s.name)
     return
   }
+  if (s.kind === 'party') {
+    store.addCharacter(createPartyCharacter(s.name))
+    return
+  }
   const character = store.characters.find((c) => c.id === s.characterId)
   if (!character) return
   const { def, value } = statForSuggestion(s.name, s.type, character.stats.map((st) => st.id))
-  store.addStat(character.id, def, value)
+  store.addStat(character.id, s.currency ? { ...def, currency: true } : def, value)
 }
 
 /**
@@ -57,9 +65,17 @@ export function QuickEntryInput({
   const [caret, setCaret] = useState(initialValue.length)
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const catalog = useItemCatalogStore((s) => s.items)
+  const macros = useItemCatalogStore((s) => s.macros)
+  const currency = useItemCatalogStore((s) => s.currency)
+  // Book-level extras come from the catalog store unless the caller supplies them.
+  const fullContext = useMemo<QuickEntryContext>(
+    () => ({ catalog, macros, currency, ...context }),
+    [catalog, macros, currency, context],
+  )
 
-  const result = useMemo(() => parseQuickEntry(value, context), [value, context])
-  const completion = useMemo(() => quickEntryCompletions(value, caret, context), [value, caret, context])
+  const result = useMemo(() => parseQuickEntry(value, fullContext), [value, fullContext])
+  const completion = useMemo(() => quickEntryCompletions(value, caret, fullContext), [value, caret, fullContext])
   const options = completion?.options ?? []
   const colorOf = (id: string) => context.characters.find((c) => c.id === id)?.color ?? CHIP_NEUTRAL_COLOR
   const nameOf = (id: string) => context.characters.find((c) => c.id === id)?.name ?? 'Unknown'

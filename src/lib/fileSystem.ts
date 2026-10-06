@@ -11,6 +11,7 @@ import { serializeImageReveal, hydrateImageReveal } from '../stores/imageRevealS
 import { serializeWriteathon, hydrateWriteathon } from '../stores/writeathonStore'
 import { serializeMetrics, hydrateMetrics } from '../stores/metricsStore'
 import { serializeNotes, hydrateNotes } from '../stores/notesStore'
+import { serializeItemCatalog, hydrateItemCatalog } from '../stores/itemCatalogStore'
 import {
   isTauri,
   readTauriTextFile,
@@ -40,12 +41,14 @@ const EXTERNAL_SECTIONS: [
   FileSection<'writeathon'>,
   FileSection<'metrics'>,
   FileSection<'notes'>,
+  FileSection<'itemCatalog'>,
 ] = [
   { key: 'player',     serialize: serializePlayer,     hydrate: hydratePlayer },
   { key: 'quests',     serialize: serializeImageReveal, hydrate: hydrateImageReveal },
   { key: 'writeathon', serialize: serializeWriteathon,  hydrate: hydrateWriteathon },
   { key: 'metrics',    serialize: serializeMetrics,     hydrate: hydrateMetrics },
   { key: 'notes',      serialize: serializeNotes,       hydrate: hydrateNotes },
+  { key: 'itemCatalog', serialize: serializeItemCatalog, hydrate: hydrateItemCatalog },
 ]
 
 // queryPermission is not yet in TypeScript lib types for File System Access API

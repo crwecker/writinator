@@ -1,5 +1,12 @@
 import { useMemo } from 'react'
 import { useCharacterStore } from '../../stores/characterStore'
+import { useItemCatalogStore } from '../../stores/itemCatalogStore'
+import {
+  capacityOf,
+  carriedWeight,
+  findCatalogItem,
+  formatStatValueWithCurrency,
+} from '../../lib/itemCatalog'
 import { useStoryletStore } from '../../stores/storyletStore'
 import { computeStateAt } from '../../lib/characterState'
 import { resolveStatblockDefinitions } from '../../lib/markerUtils'
@@ -7,7 +14,9 @@ import { STATBLOCK_VALUE_FORMAT, formatStatValue } from '../../lib/statFormat'
 import type {
   ActiveBuff,
   Book,
+  CatalogItem,
   Character,
+  CurrencyConfig,
   EquippedItem,
   StatDefinition,
   StatValue,
@@ -25,12 +34,21 @@ interface StatBlockWidgetProps {
   book?: Book | null
 }
 
+/** Catalog description for an item name (shown on hover), if any. */
+function describeItem(catalog: CatalogItem[], name: string): string | undefined {
+  return findCatalogItem(catalog, name)?.description
+}
+
 function StatRow({
   def,
   value,
+  catalog,
+  currency,
 }: {
   def: StatDefinition
   value: StatValue | undefined
+  catalog: CatalogItem[]
+  currency: CurrencyConfig
 }) {
   if (!value) return null
   if (value.kind === 'list') {
@@ -101,6 +119,7 @@ function StatRow({
             {value.items.map((it, i) => (
               <span
                 key={`${it.name}-${i}`}
+                title={describeItem(catalog, it.name)}
                 className="rounded bg-gray-700/70 px-1.5 py-0.5 text-[11px] text-gray-200"
               >
                 {it.name} ×{it.fields.qty ?? 0}
@@ -163,7 +182,7 @@ function StatRow({
         {def.name}
       </span>
       <span className="font-mono text-sm text-gray-100">
-        {formatStatValue(value, STATBLOCK_VALUE_FORMAT)}
+        {formatStatValueWithCurrency(value, def, currency) ?? formatStatValue(value, STATBLOCK_VALUE_FORMAT)}
       </span>
     </div>
   )
@@ -172,9 +191,11 @@ function StatRow({
 function EquipmentSection({
   equipped,
   slots,
+  catalog,
 }: {
   equipped: Record<string, EquippedItem>
   slots: string[]
+  catalog: CatalogItem[]
 }) {
   const entries = Object.entries(equipped)
   if (entries.length === 0) return null
@@ -197,12 +218,43 @@ function EquipmentSection({
             className="flex items-baseline justify-between text-xs"
           >
             <span className="text-gray-400">{slot}</span>
-            <span className="font-mono text-gray-200">
+            <span
+              className="font-mono text-gray-200"
+              title={describeItem(catalog, item.itemName ?? item.itemId)}
+            >
               {item.itemName ?? item.itemId}
             </span>
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+/** "Load 32 / 50" — only for characters with a capacity stat. */
+function LoadLine({
+  character,
+  computed,
+  catalog,
+}: {
+  character: Character
+  computed: { state: { base: Record<string, StatValue> }; effective: Record<string, StatValue> }
+  catalog: CatalogItem[]
+}) {
+  const cap = capacityOf(character, computed.effective)
+  if (cap === null) return null
+  const weight = carriedWeight(character, computed.state.base, catalog)
+  const over = weight > cap
+  return (
+    <div
+      data-testid="statblock-load"
+      className="flex items-baseline justify-between py-0.5"
+    >
+      <span className="text-[11px] uppercase tracking-wider text-gray-400">Load</span>
+      <span className={`font-mono text-xs ${over ? 'text-amber-300' : 'text-gray-200'}`}>
+        {weight} / {cap}
+        {over ? ' (over)' : ''}
+      </span>
     </div>
   )
 }
@@ -243,6 +295,8 @@ export default function StatBlockWidget({
   const characters = useCharacterStore((s) => s.characters)
   const markers = useCharacterStore((s) => s.markers)
   const storeBook = useStoryletStore((s) => s.book)
+  const catalog = useItemCatalogStore((s) => s.items)
+  const currency = useItemCatalogStore((s) => s.currency)
   const book = liveBook ?? storeBook
 
   const character: Character | undefined = useMemo(
@@ -303,13 +357,18 @@ export default function StatBlockWidget({
             key={def.id}
             def={def}
             value={computed.effective[def.id]}
+            catalog={catalog}
+            currency={currency}
           />
         ))}
       </div>
 
+      <LoadLine character={character} computed={computed} catalog={catalog} />
+
       <EquipmentSection
         equipped={computed.state.equipped}
         slots={character.equipmentSlots}
+        catalog={catalog}
       />
       <BuffsSection buffs={computed.state.activeBuffs} />
     </div>

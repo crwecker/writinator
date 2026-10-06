@@ -84,6 +84,9 @@ export interface ImageRevealSession {
   boardCoins?: number
   /** Words written while Word Burst was active (they earn double coins). */
   burstWords?: number
+  /** Set for quests that don't progress on general typing: a storylet's word
+   *  count (chapter quests) or revised words (revision quests). */
+  progressSource?: 'storylet' | 'revision'
 }
 
 export interface Snapshot {
@@ -183,7 +186,12 @@ export interface GlobalSettings {
    * snippets can compose other snippets.
    */
   snippets?: Record<string, string>
+  /** How status blocks look in the editor and in exports (absent = 'classic'). */
+  statblockTheme?: StatblockTheme
 }
+
+/** Status-window look: bordered box, LitRPG "system message" window, or one line. */
+export type StatblockTheme = 'classic' | 'system' | 'minimal'
 
 // ---------------------------------------------------------------------------
 // Cross-store file sections (version 7+)
@@ -266,6 +274,8 @@ export interface WritinatorFile {
   writeathon?: WriteathonFileData
   metrics?: MetricsFileData
   notes?: NotesFileData
+  /** Book-level item catalog, quick-entry macros and currency (optional; absent = empty). */
+  itemCatalog?: ItemCatalogFileData
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +301,8 @@ export interface StatDefinition {
   attributeKeys?: string[]   // for attributeSet — ordered keys (e.g., ['STR','DEX',...])
   rankTiers?: string[]       // for rank — ordered tiers (e.g., ['F','E','D','C','B','A','S'])
   manaStatId?: string        // for spellList — points at the mana/MP stat id
+  /** number stats: display as coins (e.g. "2g 50s"); counted in the denomination its name matches, else the largest. */
+  currency?: boolean
 }
 
 // Value shapes, one per StatType
@@ -381,6 +393,15 @@ export interface StatDelta {
   characterId: string
   op: StatDeltaOp
   note?: string
+  /** Where the marker was last seen — lets a lost change be re-attached. */
+  anchor?: MarkerAnchor
+}
+
+/** A marker's last known place: its storylet and the prose just before it. */
+export interface MarkerAnchor {
+  storyletId: string
+  /** Up to ~60 chars of text preceding the marker (comments stripped, whitespace collapsed). */
+  excerpt: string
 }
 
 export interface Character {
@@ -390,6 +411,8 @@ export interface Character {
   stats: StatDefinition[]     // ordered; defines what this character tracks
   baseValues: Record<string, StatValue>   // keyed by StatDefinition.id
   equipmentSlots: string[]    // named slots (e.g., 'Weapon', 'Armor', 'Accessory')
+  /** 'party' marks the shared party stash holder (absent = a regular character). */
+  kind?: 'party'
   createdAt: string
   updatedAt: string
 }
@@ -569,7 +592,7 @@ export interface PlayerStats {
 }
 
 // Writeathon types
-export type BoardQuestType = 'permanent' | 'daily' | 'villager'
+export type BoardQuestType = 'permanent' | 'daily' | 'villager' | 'chapter' | 'revision'
 export type MilestoneTier = 'apprentice' | 'journeyman' | 'master' | 'legendary'
 
 export interface WriteathonConfig {
@@ -653,4 +676,59 @@ export interface MetricsState {
   resetSession: () => void
   togglePin: (key: MetricKey) => void
   isPinned: (key: MetricKey) => boolean
+}
+
+// ---------------------------------------------------------------------------
+// Item catalog, quick-entry macros, currency (book-level, saved in the file)
+// ---------------------------------------------------------------------------
+
+/** A stat bonus an item grants while equipped. `stat` is a stat name or attribute key, resolved per character. */
+export interface CatalogModifier {
+  stat: string
+  amount: number
+  /** Raise the stat's max instead of its value (numberWithMax only). */
+  max?: boolean
+}
+
+/** One item defined once for the whole book. Everything but the name is optional. */
+export interface CatalogItem {
+  id: string
+  name: string
+  description?: string
+  rarity?: ItemRarity
+  /** Price in the smallest currency unit (e.g. copper). */
+  value?: number
+  /** Weight of one item, in whatever unit the book uses. */
+  weight?: number
+  category?: string
+  /** Equipment slot it goes in when equipped (e.g. "Weapon"). */
+  slot?: string
+  modifiers?: CatalogModifier[]
+}
+
+/** A named quick-entry shortcut: "Kael level up" runs `body` for Kael. */
+export interface QuickMacro {
+  id: string
+  name: string
+  /** Quick-entry text, e.g. "+1 Level, max HP +10, fill HP". */
+  body: string
+  /** Only for this character; absent = any character. */
+  characterId?: string
+}
+
+export interface CurrencyDenomination {
+  name: string     // "gold"
+  abbr: string     // "g"
+  /** Worth in the smallest unit (gold = 10000 when 1g = 100s = 10000c). */
+  value: number
+}
+
+export interface CurrencyConfig {
+  denominations: CurrencyDenomination[]
+}
+
+export interface ItemCatalogFileData {
+  items: CatalogItem[]
+  macros: QuickMacro[]
+  currency?: CurrencyConfig
 }
