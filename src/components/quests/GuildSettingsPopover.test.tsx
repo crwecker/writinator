@@ -2,6 +2,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GuildSettingsPopover } from './GuildSettingsPopover'
 import { useGameSettingsStore } from '../../stores/gameSettingsStore'
+import { useCosmeticsStore } from '../../stores/cosmeticsStore'
 import { render, type Rendered } from '../../test/render'
 
 let view: Rendered | null = null
@@ -9,6 +10,7 @@ const settings = () => useGameSettingsStore.getState()
 
 beforeEach(() => {
   useGameSettingsStore.setState(useGameSettingsStore.getInitialState(), true)
+  useCosmeticsStore.setState(useCosmeticsStore.getInitialState(), true)
 })
 
 afterEach(() => {
@@ -48,6 +50,23 @@ describe('GuildSettingsPopover', () => {
     expect(settings().quietMode).toBe(true)
     act(() => setValue(byLabel<HTMLSelectElement>('Picture theme'), 'ocean'))
     expect(settings().imageTheme).toBe('ocean')
+  })
+
+  it('sets difficulty, word counting and sounds', () => {
+    useCosmeticsStore.setState({ owned: ['sound-typewriter', 'sound-rain'] })
+    view = render(<GuildSettingsPopover open onClose={() => {}} />)
+    act(() => byLabel<HTMLButtonElement>('Difficulty Hardcore').click())
+    expect(settings().difficulty).toBe('hardcore')
+    expect(settings().autoQuest.wordGoal).toBe(1000)
+    expect(byLabel<HTMLButtonElement>('Default timer 20 minutes').getAttribute('aria-checked')).toBe('true')
+    act(() => byLabel<HTMLButtonElement>('Count words as Net growth').click())
+    expect(settings().wordCountMode).toBe('net')
+    act(() => byLabel<HTMLInputElement>('Typewriter key sounds').click())
+    expect(settings().sound.keySounds).toBe(true)
+    act(() => setValue(byLabel<HTMLSelectElement>('Soundscape'), 'rain'))
+    expect(settings().sound.ambient).toBe('rain')
+    act(() => setValue(byLabel<HTMLInputElement>('Sound volume'), '80'))
+    expect(settings().sound.volume).toBe(0.8)
   })
 
   it('closes on Escape', () => {

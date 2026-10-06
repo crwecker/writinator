@@ -29,6 +29,7 @@ import { useImageRevealStore } from '../../stores/imageRevealStore'
 import { usePublishSyncStore } from '../../stores/publishSyncStore'
 import { getPublishedSnapshots } from '../../stores/publishedSnapshotStore'
 import { SubStoryletLinks } from '../editor/SubStoryletLinks'
+import { ChapterSummaryStrip } from '../editor/ChapterSummaryStrip'
 import { LandingPage } from './LandingPage'
 import { RewardToast } from '../quests/RewardToast'
 import { GenericToast } from './GenericToast'
@@ -46,6 +47,7 @@ import { MilestoneFlash } from './MilestoneFlash'
 import { WriteathonCompleteCelebration } from '../quests/WriteathonCompleteCelebration'
 import { MetricsBar } from './MetricsBar'
 import { StreakFlame } from './StreakFlame'
+import { useMechanicsPrefsStore } from '../editor/mechanicsPrefsStore'
 
 // Heavy panels/modals that are only shown on demand — split out of the main chunk.
 const ExportDialog = lazy(() => import('./ExportDialog').then((m) => ({ default: m.ExportDialog })))
@@ -156,6 +158,8 @@ export function AppShell() {
   const toggleSidebar = useEditorStore((s) => s.toggleSidebar)
   const vimEnabled = useEditorStore((s) => s.vimMode)
   const statChipMode = useEditorStore((s) => s.statChipMode)
+  const statSuggestions = useEditorStore((s) => s.statSuggestions)
+  const showChapterSummary = useMechanicsPrefsStore((s) => s.showChapterSummary)
   const toggleVimMode = useEditorStore((s) => s.toggleVimMode)
   const quietMode = useGameSettingsStore((s) => s.quietMode)
   const keymap = useKeybindingStore((s) => s.keymap)
@@ -404,6 +408,17 @@ export function AppShell() {
         useEditorStore.getState().cycleStatChipMode()
         return
       }
+      if (km.toggleChapterSummary && matchesEvent(km.toggleChapterSummary, e)) {
+        e.preventDefault()
+        const prefs = useMechanicsPrefsStore.getState()
+        prefs.setShowChapterSummary(!prefs.showChapterSummary)
+        return
+      }
+      if (km.toggleStatSuggestions && matchesEvent(km.toggleStatSuggestions, e)) {
+        e.preventDefault()
+        useEditorStore.getState().toggleStatSuggestions()
+        return
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
@@ -570,6 +585,12 @@ export function AppShell() {
     { action: 'toggleNotesPanel', label: 'Notes', onSelect: toggleNotesPanel },
     { action: 'insertStatMarker', label: 'Insert stat change', onSelect: handleInsertStatMarker },
     { action: 'cycleStatChips', label: `Stat changes: ${statChipMode} (cycle)`, onSelect: () => useEditorStore.getState().cycleStatChipMode() },
+    { action: 'toggleStatSuggestions', label: `Stat suggestions: ${statSuggestions ? 'on' : 'off'}`, onSelect: () => useEditorStore.getState().toggleStatSuggestions() },
+    {
+      action: 'toggleChapterSummary',
+      label: `Chapter summary: ${showChapterSummary ? 'on' : 'off'}`,
+      onSelect: () => useMechanicsPrefsStore.getState().setShowChapterSummary(!showChapterSummary),
+    },
     { action: 'closeBook', label: 'Open new book', onSelect: () => { void useStoryletStore.getState().closeBook() } },
   ]
 
@@ -698,6 +719,7 @@ export function AppShell() {
 
         {/* Editor area */}
         <div className="flex flex-col flex-1 min-w-0">
+          <ChapterSummaryStrip />
           <Editor
             onWordCountChange={handleWordCountChange}
             onVimModeChange={handleVimModeChange}

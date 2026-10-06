@@ -14,6 +14,7 @@ import {
 import { todayKey } from '../lib/metrics'
 import { parseDayKey } from '../lib/days'
 import { usePlayerStore } from './playerStore'
+import { scaleCoins } from '../lib/questRewards'
 import { useImageRevealStore } from './imageRevealStore'
 import { addToast } from '../components/quests/rewardToastStore'
 
@@ -186,7 +187,7 @@ export const useWriteathonStore = create<WriteathonState>()(
           activeBoardQuests: state.activeBoardQuests.filter((q) => q.id !== questId),
         }))
 
-        const reward = quest.coinReward + (quest.bonusCoins ?? 0)
+        const reward = scaleCoins(quest.coinReward + (quest.bonusCoins ?? 0))
         usePlayerStore.getState().addCoins(reward)
         console.info(`[writeathonStore] Board quest completed: "${quest.title}" (+${reward} coins)`)
 

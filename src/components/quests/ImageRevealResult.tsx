@@ -7,6 +7,7 @@ import { PhotographerCredit } from './ImageRevealWidgets'
 import { CoinAmount, GuildButton } from './QuestUi'
 import { formatMinutes } from './questStyles'
 import { chosenMinutes, startChainQuest } from './useAcceptQuest'
+import { scaleCoins } from '../../lib/questRewards'
 
 interface ImageRevealResultProps {
   session: ImageRevealSession
@@ -83,7 +84,8 @@ interface BodyProps {
 
 /** Everything a successful quest paid: the session's coins plus its board reward. */
 function totalPaid(session: ImageRevealSession): number {
-  return (session.coinsEarned ?? 0) + (session.result === 'success' ? (session.boardCoins ?? 0) : 0)
+  // The board pays its reward scaled by the difficulty preset (scaleCoins).
+  return (session.coinsEarned ?? 0) + (session.result === 'success' ? scaleCoins(session.boardCoins ?? 0) : 0)
 }
 
 function Heading({ title, tone, session }: { title: string; tone: string; session: ImageRevealSession }) {

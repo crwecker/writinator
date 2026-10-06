@@ -14,7 +14,9 @@ import { useMetricsStore, hydrateMetrics, resetMetrics } from './metricsStore'
 import { useCharacterStore } from './characterStore'
 import { hydratePlayer } from './playerStore'
 import { hydrateNotes, useNotesStore } from './notesStore'
+import { hydrateItemCatalog, useItemCatalogStore } from './itemCatalogStore'
 import { countWords } from '../lib/words'
+import { countedQuestWords } from '../lib/wordAccounting'
 import { localforageJSONStorage } from './localforageStorage'
 import { bookFingerprint } from '../lib/fingerprint'
 
@@ -346,6 +348,7 @@ export const useStoryletStore = create<StoryletState>()(
         hydrateWriteathon(file.writeathon)
         hydrateMetrics(file.metrics)
         hydrateNotes(file.notes)
+        hydrateItemCatalog(file.itemCatalog)
       },
 
       renameBook: (title: string) => {
@@ -368,6 +371,7 @@ export const useStoryletStore = create<StoryletState>()(
         }
         clearFileHandle()
         useCharacterStore.getState().reset()
+        useItemCatalogStore.getState().reset()
         set({ book: null, activeStoryletId: null, bookLoadNonce: get().bookLoadNonce + 1 })
       },
 
@@ -838,8 +842,10 @@ export const useStoryletStore = create<StoryletState>()(
         // changes that weren't typed (undo, snapshot restore).
         const oldWords = countWords(storylet.content)
         const delta = countWords(pending.content) - oldWords - pending.uncountedWords
-        if (delta > 0) {
-          useImageRevealStore.getState().addWords(delta)
+        // Quests take gross or net words per the "count words as" setting.
+        const questWords = countedQuestWords(delta, Date.now())
+        if (questWords > 0) {
+          useImageRevealStore.getState().addWords(questWords)
         }
         useMetricsStore.getState().recordDelta(oldWords, oldWords + delta, Date.now())
         const updatedBook: Book = {

@@ -1,4 +1,5 @@
 import type { QuestDifficulty } from '../types';
+import { currentPayoutMultiplier } from '../stores/gameSettingsStore';
 
 export function calculateDifficulty(wordGoal: number, timeMinutes: number): QuestDifficulty {
   const wpm = wordGoal / timeMinutes;
@@ -39,6 +40,17 @@ function timedTotal(untimedTotal: number, difficulty: QuestDifficulty, speedBonu
   return Math.floor(untimedTotal * TIMED_REWARD_MULTIPLIER[difficulty] * (1 + speedBonus))
 }
 
+/**
+ * Coins after the difficulty preset's payout multiplier (Relaxed 0.8×,
+ * Hardcore 1.3×). Board rewards and session rewards are scaled separately with
+ * this same function, so estimates always add up to what's paid.
+ */
+export function scaleCoins(coins: number, payoutMultiplier: number = currentPayoutMultiplier()): number {
+  if (payoutMultiplier === 1) return coins
+  // Epsilon guards against float noise like 39.99999 → 39.
+  return Math.floor(coins * payoutMultiplier + 1e-9)
+}
+
 /** The image-reveal session's own reward. Gear raises coins, never word progress. */
 export function calculateBaseReward(wordGoal: number, weaponMultiplier: number): number {
   return Math.floor(wordGoal * 0.1 * weaponMultiplier)
@@ -70,15 +82,19 @@ export function calculateQuestReward(opts: {
   timeUsedSeconds?: number
   difficulty?: QuestDifficulty
   boardCoins?: number
+  /** Difficulty preset multiplier; defaults to the current setting. */
+  payoutMultiplier?: number
 }): number {
-  const base = calculateBaseReward(opts.wordGoal, opts.weaponMultiplier)
+  const m = opts.payoutMultiplier ?? currentPayoutMultiplier()
+  const base = scaleCoins(calculateBaseReward(opts.wordGoal, opts.weaponMultiplier), m)
   if (
     opts.timeMinutes !== undefined &&
     opts.timeUsedSeconds !== undefined &&
     opts.difficulty !== undefined &&
     opts.wordsWritten >= opts.wordGoal
   ) {
-    const board = opts.boardCoins ?? 0
+    // The board pays its (scaled) reward itself; the session pays the rest.
+    const board = scaleCoins(opts.boardCoins ?? 0, m)
     return base + calculateTimedBonus(base + board, opts.difficulty, opts.timeMinutes, opts.timeUsedSeconds)
   }
   return base
@@ -115,8 +131,13 @@ export function estimateQuestCoins(opts: {
   bonusCoins?: number
   weaponMultiplier: number
   timeMinutes?: number
+  /** Difficulty preset multiplier; defaults to the current setting. */
+  payoutMultiplier?: number
 }): { min: number; max: number } {
-  const untimed = opts.questCoins + (opts.bonusCoins ?? 0) + calculateBaseReward(opts.wordGoal, opts.weaponMultiplier)
+  const m = opts.payoutMultiplier ?? currentPayoutMultiplier()
+  const untimed =
+    scaleCoins(opts.questCoins + (opts.bonusCoins ?? 0), m) +
+    scaleCoins(calculateBaseReward(opts.wordGoal, opts.weaponMultiplier), m)
   if (opts.timeMinutes === undefined) return { min: untimed, max: untimed }
   const difficulty = calculateDifficulty(opts.wordGoal, opts.timeMinutes)
   return {

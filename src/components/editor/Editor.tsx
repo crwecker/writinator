@@ -8,7 +8,6 @@ import {
   type CompletionResult,
 } from '@codemirror/autocomplete'
 import { markdown } from '@codemirror/lang-markdown'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { vim, getCM as getVimCM, Vim } from '@replit/codemirror-vim'
 import { searchEmojis } from '../../lib/emoji'
 import { useStoryletStore } from '../../stores/storyletStore'
@@ -22,6 +21,7 @@ import {
   statMarkerExtension,
   dispatchCharacterSnapshot,
 } from './statMarkerExtension'
+import { proseSuggestions } from './proseSuggestions'
 import {
   statRefExtension,
   dispatchStatRefStoryletContext,
@@ -30,6 +30,8 @@ import {
   statblockMarkerExtension,
   dispatchStatblockActiveStorylet,
 } from './statblockMarkerExtension'
+import { statWarningExtension } from './statWarningExtension'
+import { markerAnchorExtension } from './markerAnchorExtension'
 import {
   noteMarkerExtension,
   dispatchNotesSnapshot,
@@ -41,6 +43,7 @@ import { markdownDecorationPlugin, docStylesChangedEffect } from './markdownDeco
 import { countWords } from '../../lib/words'
 import { isWritingUpdate, wordCountDelta } from './wordCount'
 import { isLargePaste } from '../../lib/pasteRule'
+import { recordRevisionEdits } from '../../stores/progressionStore'
 import {
   editorHistory,
   isProgrammaticLoad,
@@ -49,6 +52,8 @@ import {
   needsEditorReload,
   type LoadedDoc,
 } from './docLoad'
+import { editorCosmeticsExtension } from '../../lib/editorCosmetics'
+import { useEditorCosmetics } from '../cosmetics/useEditorCosmetics'
 import './editor.css'
 
 // Map j/k to gj/gk so vim navigation respects visual (wrapped) lines
@@ -332,6 +337,7 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
 
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  useEditorCosmetics(viewRef)
   // Tracks which storylet (id + docVersion) is currently loaded into the EditorView.
   // docVersion lets external bulk mutations (e.g. Find-in-Book replace) force a reload
   // even when the active id is unchanged.
@@ -395,7 +401,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
           activateOnTyping: true,
         }),
         markdown(),
-        oneDark,
+        // Armory cosmetics (in place of oneDark): base theme, colors, caret, bought font, key sounds.
+        editorCosmeticsExtension(),
         renderModeField,
         markdownDecorationPlugin,
         atomicCursorSnap,
@@ -403,6 +410,9 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
         statRefExtension(),
         noteMarkerExtension(),
         statblockMarkerExtension(),
+        statWarningExtension(),
+        markerAnchorExtension(),
+        proseSuggestions(),
         placeholder('Start writing...'),
         fontComp.of(makeFontTheme(useEditorStore.getState().fontFamily)),
         fontSizeComp.of(makeFontSizeTheme(useEditorStore.getState().fontSize)),
@@ -521,6 +531,8 @@ export default function Editor({ onWordCountChange, onVimModeChange, onEditorVie
             if (countAsWriting && delta > 0) {
               useMetricsStore.getState().recordWpmSample(delta, Date.now())
             }
+            // Words revised in existing text (revision quests, achievements).
+            if (countAsWriting) recordRevisionEdits(update.transactions)
             // Defer React state updates out of CM6's synchronous update cycle
             // to prevent React re-renders from interfering with CM6 DOM updates
             // Tag the text with the storylet it was typed in, captured now —

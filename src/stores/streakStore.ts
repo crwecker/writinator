@@ -16,6 +16,7 @@ import { usePlayerStore } from './playerStore'
 import { addToast } from '../components/quests/rewardToastStore'
 import { showToast } from './genericToastStore'
 import { useGameSettingsStore } from './gameSettingsStore'
+import { netDayIncrement, type DayNetLedger } from '../lib/wordAccounting'
 
 /**
  * Per-writer writing habits: a day-by-day log of counted words (all books),
@@ -46,6 +47,8 @@ interface StreakState {
   weeklyGoal: number | null
   nudge: NudgeSettings
   lastNudgedDay: string | null
+  /** Today's signed word sum, for "count words as: net growth". */
+  netLedger: DayNetLedger | null
   /** Derived from the ledger; cached so components can subscribe to primitives. */
   currentStreak: number
   todayQualified: boolean
@@ -152,21 +155,31 @@ export const useStreakStore = create<StreakState>()(
         weeklyGoal: null,
         nudge: { enabled: false, time: '20:00' },
         lastNudgedDay: null,
+        netLedger: null,
         currentStreak: 0,
         todayQualified: false,
         _hasHydrated: false,
 
         recordWords: (delta, timestamp) => {
-          if (delta <= 0) return
+          const net = useGameSettingsStore.getState().wordCountMode === 'net'
+          if (delta <= 0 && !net) return
           if (!get()._hasHydrated) {
             pending.push(() => get().recordWords(delta, timestamp))
             return
           }
           const day = todayKey(timestamp)
           const { dailyWords } = get()
-          set({ dailyWords: { ...dailyWords, [day]: (dailyWords[day] ?? 0) + delta } })
+          let change = delta
+          if (net) {
+            // Net growth: the day counts max(0, its signed sum).
+            const r = netDayIncrement(get().netLedger, day, delta)
+            change = r.increment
+            set({ netLedger: r.ledger })
+            if (change === 0) return
+          }
+          set({ dailyWords: { ...dailyWords, [day]: Math.max(0, (dailyWords[day] ?? 0) + change) } })
           refresh(timestamp, true)
-          for (const listener of writeListeners) listener({ day, timestamp })
+          if (change > 0) for (const listener of writeListeners) listener({ day, timestamp })
         },
 
         evaluate: (now = Date.now()) => {
@@ -180,9 +193,10 @@ export const useStreakStore = create<StreakState>()(
             return
           }
           const { dailyWords } = get()
+          const net = useGameSettingsStore.getState().wordCountMode === 'net'
           let next: Record<string, number> | null = null
           for (const [day, bucket] of Object.entries(dayBuckets)) {
-            const gross = Math.max(0, bucket.gross)
+            const gross = Math.max(0, net ? bucket.net : bucket.gross)
             if (gross > (dailyWords[day] ?? 0)) {
               next ??= { ...dailyWords }
               next[day] = gross
@@ -214,6 +228,7 @@ export const useStreakStore = create<StreakState>()(
           weeklyGoal: s.weeklyGoal,
           nudge: s.nudge,
           lastNudgedDay: s.lastNudgedDay,
+          netLedger: s.netLedger,
         }) as unknown as StreakState,
       onRehydrateStorage: () => (_state, error) => {
         if (error) console.error('[streakStore] rehydration error:', error)

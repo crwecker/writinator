@@ -5,13 +5,16 @@ import { ARMORS, CONSUMABLES, WEAPONS, getArmorTimeBonus, getItemById, getWeapon
 import type { ArmorItem, ConsumableItem, Item, WeaponItem } from '../../types'
 import { CoinAmount, GuildButton, RarityBadge, SectionHeading } from './QuestUi'
 import { RARITY_STYLES } from './questStyles'
+import { dealPrice } from '../../lib/dailyDeal'
+import { CosmeticsLoadout, CosmeticsShelf, DailyDealBanner, PriceTag } from './CosmeticsShelf'
 
-type Shelf = 'weapon' | 'armor' | 'consumable'
+type Shelf = 'weapon' | 'armor' | 'consumable' | 'cosmetic'
 
 const SHELVES: { id: Shelf; label: string }[] = [
   { id: 'weapon', label: 'Quills & pens' },
   { id: 'armor', label: 'Armor' },
   { id: 'consumable', label: 'Supplies' },
+  { id: 'cosmetic', label: 'Cosmetics' },
 ]
 
 /** Plain-language effect of an item. */
@@ -124,7 +127,7 @@ function StoreItem({ item }: { item: Item }) {
   const isConsumable = item.category === 'consumable'
   const owned = !isConsumable && (item.price === 0 || ownedItems.includes(item.id))
   const equipped = item.id === equippedWeapon || item.id === equippedArmor
-  const total = item.price * (isConsumable ? qty : 1)
+  const total = dealPrice(item.id, item.price) * (isConsumable ? qty : 1)
   const shortBy = Math.max(0, total - coins)
   const upgrade = !owned ? upgradeText(item, equippedWeapon, equippedArmor) : null
   const style = RARITY_STYLES[item.rarity]
@@ -204,7 +207,7 @@ function StoreItem({ item }: { item: Item }) {
         ) : (
           <>
             <div className="flex items-center gap-2">
-              <CoinAmount amount={total.toLocaleString()} className={`text-sm font-semibold ${shortBy > 0 ? 'text-red-300' : ''}`} />
+              <PriceTag id={item.id} price={item.price} quantity={isConsumable ? qty : 1} short={shortBy > 0} />
               {isConsumable && (
                 <div className="flex items-center rounded-md border border-stone-700">
                   <button type="button" aria-label="Fewer" onClick={() => setQty((q) => Math.max(1, q - 1))} className="px-1.5 py-0.5 text-stone-400 hover:text-stone-100">
@@ -236,7 +239,7 @@ function StoreItem({ item }: { item: Item }) {
 export function ArmoryPanel() {
   const [shelf, setShelf] = useState<Shelf>('weapon')
   const consumableInventory = usePlayerStore((s) => s.consumableInventory)
-  const items: Item[] = shelf === 'weapon' ? WEAPONS : shelf === 'armor' ? ARMORS : CONSUMABLES
+  const items: Item[] = shelf === 'weapon' ? WEAPONS : shelf === 'armor' ? ARMORS : shelf === 'consumable' ? CONSUMABLES : []
   const pack = CONSUMABLES.filter((c) => (consumableInventory[c.id] ?? 0) > 0)
 
   return (
@@ -246,6 +249,7 @@ export function ArmoryPanel() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <LoadoutSlot slot="weapon" />
           <LoadoutSlot slot="armor" />
+          <CosmeticsLoadout />
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-stone-800 bg-stone-950/50 px-4 py-2.5 text-sm">
           <span className="text-stone-400">Pack:</span>
@@ -283,11 +287,16 @@ export function ArmoryPanel() {
             </div>
           }
         />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => (
-            <StoreItem key={item.id} item={item} />
-          ))}
-        </div>
+        <DailyDealBanner renderItem={(item) => <StoreItem item={item} />} />
+        {shelf === 'cosmetic' ? (
+          <CosmeticsShelf />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {items.map((item) => (
+              <StoreItem key={item.id} item={item} />
+            ))}
+          </div>
+        )}
       </section>
     </div>
   )

@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { localforageJSONStorage } from './localforageStorage'
 import type { PlayerFileData, PlayerStats } from '../types'
 import { getItemById } from '../lib/items'
+import { dealPrice } from '../lib/dailyDeal'
 
 interface PlayerState {
   coins: number
@@ -15,7 +16,7 @@ interface PlayerState {
 
   addCoins: (amount: number) => void
   spendCoins: (amount: number) => boolean
-  purchaseItem: (itemId: string) => boolean
+  purchaseItem: (itemId: string, now?: number) => boolean
   equipItem: (itemId: string, slot: 'weapon' | 'armor') => void
   unequipItem: (slot: 'weapon' | 'armor') => void
   useConsumable: (itemId: string) => boolean
@@ -47,15 +48,16 @@ export const usePlayerStore = create<PlayerState>()(
         return true
       },
 
-      purchaseItem: (itemId: string) => {
+      purchaseItem: (itemId: string, now: number = Date.now()) => {
         const { coins, ownedItems } = get()
         const item = getItemById(itemId)
         if (!item) return false
-        if (coins < item.price) return false
+        const price = dealPrice(item.id, item.price, now)
+        if (coins < price) return false
 
         if (item.category === 'consumable') {
           set((state) => ({
-            coins: state.coins - item.price,
+            coins: state.coins - price,
             consumableInventory: {
               ...state.consumableInventory,
               [itemId]: (state.consumableInventory[itemId] ?? 0) + 1,
@@ -68,7 +70,7 @@ export const usePlayerStore = create<PlayerState>()(
         if (ownedItems.includes(itemId)) return false
 
         set((state) => ({
-          coins: state.coins - item.price,
+          coins: state.coins - price,
           ownedItems: [...state.ownedItems, itemId],
         }))
         return true
