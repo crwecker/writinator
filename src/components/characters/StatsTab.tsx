@@ -24,6 +24,8 @@ interface StatsTabProps {
   computedPerCharacter: Map<string, ComputedCharacterView>
   /** False when no book or storylet is open — there is no cursor to compute at. */
   hasStorylet: boolean
+  /** Where the values are computed, e.g. "At cursor · Chapter 3, after “staggered back”". */
+  positionLabel?: string | null
   canEdit: boolean
   editorView: EditorView | null
   onOpenCharacterSheet?: () => void
@@ -34,12 +36,22 @@ export function StatsTab({
   characters,
   computedPerCharacter,
   hasStorylet,
+  positionLabel,
   canEdit,
   editorView,
   onOpenCharacterSheet,
 }: StatsTabProps) {
   return (
     <>
+      {hasStorylet && positionLabel && (
+        <div
+          data-testid="character-panel-position"
+          title={positionLabel}
+          className="truncate text-[11px] italic text-gray-500 pb-1"
+        >
+          {positionLabel}
+        </div>
+      )}
       {!hasStorylet ? (
         <div className="text-center text-xs text-gray-500 py-8">
           Open a storylet to see live-computed state.

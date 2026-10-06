@@ -1,4 +1,4 @@
-import type { Character, StatDeltaOp, StatValue } from '../types'
+import type { Character, StatDelta, StatDeltaOp, StatValue } from '../types'
 import { formatQty } from './characterState'
 
 // ---------------------------------------------------------------------------
@@ -231,4 +231,123 @@ export function formatOpSummary(op: StatDeltaOp, statName: (id: string) => strin
     case 'itemFieldAdjust':
       return `${op.name} ${op.field} ${signed(op.delta)}`
   }
+}
+
+// ---------------------------------------------------------------------------
+// Inline change chips
+// ---------------------------------------------------------------------------
+
+/** One character's slice of a chip: "Kael · HP −15 · +Wolf Pelt". */
+export interface MarkerChipGroup {
+  characterId: string
+  name: string
+  color: string
+  parts: string[]
+}
+
+export interface MarkerChip {
+  groups: MarkerChipGroup[]
+  /** Ops left out of `groups` to keep the chip short. */
+  more: number
+  /** Plain-text rendering of the whole chip. */
+  text: string
+}
+
+export const CHIP_NEUTRAL_COLOR = '#6b7280'
+
+/** Compact wording for one op inside a chip ("HP −15", "+3 Arrows", "Rank ↑"). */
+const MINUS = '\u2212'
+
+function signedChip(n: number): string {
+  return n < 0 ? `${MINUS}${Math.abs(n)}` : `+${n}`
+}
+
+function chipValue(v: StatValue): string {
+  return v.kind === 'attributeSet'
+    ? Object.entries(v.values).map(([k, n]) => `${k} ${n}`).join(' ')
+    : formatStatValue(v, PANEL_VALUE_FORMAT)
+}
+
+export function formatOpChip(
+  op: StatDeltaOp,
+  statName: (id: string) => string,
+  character?: Character,
+): string {
+  const typeOf = (id: string) => character?.stats.find((s) => s.id === id)?.type
+  const isAbility = (id: string) => {
+    const t = typeOf(id)
+    return t === 'spellList' || t === 'skillList'
+  }
+  switch (op.kind) {
+    case 'adjust':
+      return `${op.attributeKey ?? statName(op.statId)} ${signedChip(op.delta)}`
+    case 'maxAdjust':
+      return `max ${statName(op.statId)} ${signedChip(op.delta)}`
+    case 'set':
+      return `${statName(op.statId)} = ${chipValue(op.value)}`
+    case 'fill':
+      return `${statName(op.statId)} full`
+    case 'listAdd':
+      return `+${op.items.join(', ')}`
+    case 'listRemove':
+      return `${MINUS}${op.items.join(', ')}`
+    case 'itemAdd': {
+      if (isAbility(op.statId)) return `learns ${op.name}`
+      const qty = op.fields.qty ?? 1
+      return qty > 1 ? `+${qty} ${op.name}` : `+${op.name}`
+    }
+    case 'itemRemove':
+      return isAbility(op.statId) ? `forgets ${op.name}` : `${MINUS}${op.name}`
+    case 'itemFieldAdjust':
+      return op.field === 'qty'
+        ? `${signedChip(op.delta)} ${op.name}`
+        : `${op.name} ${op.field} ${signedChip(op.delta)}`
+    case 'equip':
+      return `equips ${op.itemName || op.itemId}`
+    case 'unequip':
+      return `unequips ${op.slot}`
+    case 'buffApply':
+      return `+${op.buffName || op.buffId}${op.expiresAfter ? ` (${op.expiresAfter})` : ''}`
+    case 'buffRemove':
+      return `${MINUS}${op.buffId}`
+    case 'rankChange':
+      if (op.direction === 'set') return `${statName(op.statId)} = ${op.value ?? '?'}`
+      return `${statName(op.statId)} ${op.direction === 'up' ? '\u2191' : '\u2193'}`
+  }
+}
+
+/**
+ * The chip for a marker: ops grouped by character (first-appearance order),
+ * at most `maxParts` ops shown, the rest counted in `more`.
+ */
+export function buildMarkerChip(
+  deltas: StatDelta[],
+  charactersById: Map<string, Character>,
+  maxParts = 3,
+): MarkerChip {
+  const groups: MarkerChipGroup[] = []
+  let shown = 0
+  let more = 0
+  for (const d of deltas) {
+    if (shown >= maxParts) {
+      more++
+      continue
+    }
+    const character = charactersById.get(d.characterId)
+    let group = groups.find((g) => g.characterId === d.characterId)
+    if (!group) {
+      group = {
+        characterId: d.characterId,
+        name: character?.name ?? 'Unknown',
+        color: character?.color ?? CHIP_NEUTRAL_COLOR,
+        parts: [],
+      }
+      groups.push(group)
+    }
+    group.parts.push(formatOpChip(d.op, statNameLookup(character), character))
+    shown++
+  }
+  const text =
+    groups.map((g) => [g.name, ...g.parts].join(' · ')).join('  ') + (more > 0 ? ` · +${more} more` : '')
+  return { groups, more, text }
 }

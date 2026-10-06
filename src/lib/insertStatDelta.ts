@@ -171,3 +171,108 @@ export function insertStatDelta(
   })
   setMarker(markerId, [{ id: newDeltaId, characterId, op }])
 }
+
+// ---------------------------------------------------------------------------
+// Batch insert (quick entry: several ops, possibly several characters).
+// ---------------------------------------------------------------------------
+
+export interface StatDeltaEntry {
+  characterId: string
+  op: StatDeltaOp
+}
+
+export type StatDeltasMergeDecision =
+  | { kind: 'merge'; markerId: string; deltas: StatDelta[] }
+  | { kind: 'create'; deltas: StatDelta[] }
+
+/** Fold `entries` into `deltas`, summing combinable numeric ops (see `decideStatDeltaMerge`). */
+export function mergeEntriesIntoDeltas(
+  deltas: StatDelta[],
+  entries: StatDeltaEntry[],
+  newDeltaId: () => string,
+): StatDelta[] {
+  let out = deltas
+  for (const { characterId, op } of entries) {
+    const idx = out.findIndex((d) => d.characterId === characterId && isCombinableTarget(d.op, op))
+    out =
+      idx >= 0
+        ? out.map((d, i) => (i === idx ? { ...d, op: combineOps(d.op, op) } : d))
+        : [...out, { id: newDeltaId(), characterId, op }]
+  }
+  return out
+}
+
+/** The stored marker an insert at `cursor` merges into: ending there first, then beginning there. */
+function abuttingMarker(
+  cursor: number,
+  docMarkers: DocStatMarker[],
+  markers: Record<string, StatDelta[]>,
+): DocStatMarker | undefined {
+  return [
+    ...docMarkers.filter((m) => m.to === cursor),
+    ...docMarkers.filter((m) => m.from === cursor),
+  ].find((m) => markers[m.id])
+}
+
+/** Same merge rule as `decideStatDeltaMerge`, for a batch of entries landing in one marker. */
+export function decideStatDeltasMerge(args: {
+  cursor: number
+  docMarkers: DocStatMarker[]
+  markers: Record<string, StatDelta[]>
+  entries: StatDeltaEntry[]
+  newDeltaId: () => string
+}): StatDeltasMergeDecision {
+  const target = abuttingMarker(args.cursor, args.docMarkers, args.markers)
+  if (target) {
+    return {
+      kind: 'merge',
+      markerId: target.id,
+      deltas: mergeEntriesIntoDeltas(args.markers[target.id], args.entries, args.newDeltaId),
+    }
+  }
+  return { kind: 'create', deltas: mergeEntriesIntoDeltas([], args.entries, args.newDeltaId) }
+}
+
+/**
+ * Offset to compute "before" state at for an insert at `cursor`: past the
+ * marker the insert would merge into, so its existing ops count as before.
+ * (`computeStateAt` counts markers strictly before the offset.)
+ */
+export function insertionStopOffset(
+  cursor: number,
+  docMarkers: DocStatMarker[],
+  markers: Record<string, StatDelta[]>,
+): number {
+  const target = abuttingMarker(cursor, docMarkers, markers)
+  return target && target.from === cursor ? cursor + 1 : cursor
+}
+
+/**
+ * Insert all `entries` at `at` (default: the cursor) as one marker, or merge
+ * them into the abutting marker. One dispatch, one store write. Returns the
+ * marker id, or null for an empty batch.
+ */
+export function insertStatDeltas(view: EditorView, entries: StatDeltaEntry[], at?: number): string | null {
+  if (entries.length === 0) return null
+  const cursor = Math.min(at ?? view.state.selection.main.head, view.state.doc.length)
+  const { markers, setMarker } = useCharacterStore.getState()
+  const decision = decideStatDeltasMerge({
+    cursor,
+    docMarkers: findDocStatMarkers(view.state.doc.toString()),
+    markers,
+    entries,
+    newDeltaId: () => crypto.randomUUID(),
+  })
+  if (decision.kind === 'merge') {
+    setMarker(decision.markerId, decision.deltas)
+    return decision.markerId
+  }
+  const markerId = crypto.randomUUID()
+  const insert = `<!-- stat:${markerId} -->`
+  view.dispatch({
+    changes: { from: cursor, to: cursor, insert },
+    selection: { anchor: cursor + insert.length },
+  })
+  setMarker(markerId, decision.deltas)
+  return markerId
+}

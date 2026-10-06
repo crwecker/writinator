@@ -317,7 +317,7 @@ export function applyDeltaOp(
 }
 
 /** Variant that knows the character's stat definitions, so `rankChange: up/down` can traverse tiers. */
-function applyDeltaOpWithDefs(
+export function applyDeltaOpWithDefs(
   state: CharacterState,
   op: StatDeltaOp,
   definitions: StatDefinition[]

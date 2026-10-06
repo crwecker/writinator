@@ -5,6 +5,7 @@ import { useStoryletStore } from '../../stores/storyletStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { checkConsistency, computeStateAt, withLiveStorylet } from '../../lib/characterState'
 import { markerCommentRegex, removeMarkerFromStorylet } from '../../lib/removeMarker'
+import { describeCursorPosition } from '../../lib/cursorLabel'
 import { getLiveBook } from '../editor/statRefExtension'
 import { StatsTab, type ComputedCharacterView } from './StatsTab'
 import { SnippetsTab } from './SnippetsTab'
@@ -72,6 +73,20 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
   }, [characters, markers, liveBook, activeStoryletId, cursorOffset])
 
   const canEdit = !!activeStoryletId && !!editorView
+
+  // Why these values differ from a statblock further down: they're computed here.
+  const activeStorylet = book?.storylets.find((s) => s.id === activeStoryletId)
+  // Only the prose just before the cursor matters; don't stringify the whole chapter per keystroke.
+  const windowStart = Math.max(0, cursorOffset - 600)
+  const positionLabel = activeStorylet
+    ? describeCursorPosition(
+        activeStorylet.name,
+        editorView
+          ? editorView.state.doc.sliceString(windowStart, Math.min(cursorOffset, editorView.state.doc.length))
+          : (activeStorylet.content ?? '').slice(windowStart, cursorOffset),
+        cursorOffset - windowStart,
+      )
+    : null
 
   const jumpToMarker = (docId: string, offset: number) => {
     if (!editorView) return
@@ -147,6 +162,7 @@ export function CharacterPanel({ open, onClose, onOpenCharacterSheet, editorView
             characters={characters}
             computedPerCharacter={computedPerCharacter}
             hasStorylet={!!book && !!activeStoryletId}
+            positionLabel={positionLabel}
             canEdit={canEdit}
             editorView={editorView}
             onOpenCharacterSheet={onOpenCharacterSheet}

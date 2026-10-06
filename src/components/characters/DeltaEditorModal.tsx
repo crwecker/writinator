@@ -1,53 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { EditorView } from '@codemirror/view'
 import { useCharacterStore } from '../../stores/characterStore'
+import { useStoryletStore } from '../../stores/storyletStore'
 import { StatFieldEditor } from './StatFieldEditor'
 import type {
   Character,
-  StatDefinition,
   StatDelta,
   StatDeltaOp,
   StatModifier,
-  StatValue,
 } from '../../types'
 import { STAT_MARKER_REGEX } from '../../lib/markerUtils'
-import { LIST_STAT_FIELDS, defaultItemFields } from '../../lib/listStatFields'
-
-type OpKind = StatDeltaOp['kind']
-
-const OP_KINDS: OpKind[] = [
-  'adjust',
-  'maxAdjust',
-  'fill',
-  'set',
-  'listAdd',
-  'listRemove',
-  'itemAdd',
-  'itemRemove',
-  'itemFieldAdjust',
-  'equip',
-  'unequip',
-  'buffApply',
-  'buffRemove',
-  'rankChange',
-]
-
-const OP_KIND_LABELS: Record<OpKind, string> = {
-  adjust: 'adjust',
-  maxAdjust: 'adjust max',
-  fill: 'set to max',
-  set: 'set',
-  listAdd: 'list add',
-  listRemove: 'list remove',
-  equip: 'equip',
-  unequip: 'unequip',
-  buffApply: 'apply buff',
-  buffRemove: 'remove buff',
-  rankChange: 'rank change',
-  itemAdd: 'item add',
-  itemRemove: 'item remove',
-  itemFieldAdjust: 'item adjust',
-}
+import { LIST_STAT_FIELDS } from '../../lib/listStatFields'
+import { findDocStatMarkers } from '../../lib/insertStatDelta'
+import { previewDeltas, type OpPreview } from '../../lib/statPreview'
+import {
+  VERB_LABELS,
+  amountForVerb,
+  opForVerb,
+  signedForVerb,
+  targetForOp,
+  targetKey,
+  verbForOp,
+  verbsForTarget,
+  type DeltaTarget,
+  type DeltaVerb,
+} from '../../lib/deltaVerbs'
+import { liveBookFor, stateLookupAt } from './statEntryContext'
 
 interface Props {
   open: boolean
@@ -64,115 +42,26 @@ function newDeltaId(): string {
   return crypto.randomUUID()
 }
 
-function defaultValueFor(def: StatDefinition): StatValue {
-  switch (def.type) {
-    case 'number':
-      return { kind: 'number', value: 0 }
-    case 'numberWithMax':
-      return { kind: 'numberWithMax', value: 0, max: 0 }
-    case 'list':
-      return { kind: 'list', items: [] }
-    case 'text':
-      return { kind: 'text', value: '' }
-    case 'attributeSet':
-      return {
-        kind: 'attributeSet',
-        values: Object.fromEntries((def.attributeKeys ?? []).map((k) => [k, 0])),
-      }
-    case 'rank': {
-      const tiers = def.rankTiers ?? []
-      return { kind: 'rank', tier: tiers[0] ?? '' }
-    }
-    case 'inventory':
-      return { kind: 'inventory', items: [] }
-    case 'spellList':
-      return { kind: 'spellList', items: [] }
-    case 'skillList':
-      return { kind: 'skillList', items: [] }
-  }
+/** Targets a row can point at, in menu order: the character's stats, then equipment and buffs. */
+function targetsFor(character: Character | undefined): DeltaTarget[] {
+  return [
+    ...(character?.stats ?? []).map((s): DeltaTarget => ({ kind: 'stat', statId: s.id })),
+    { kind: 'equipment' },
+    { kind: 'buffs' },
+  ]
 }
 
-function firstStatOfType(
-  character: Character | undefined,
-  types: StatDefinition['type'][]
-): StatDefinition | undefined {
-  return character?.stats.find((s) => types.includes(s.type))
+function targetLabel(t: DeltaTarget, character: Character | undefined): string {
+  if (t.kind === 'equipment') return 'Equipment'
+  if (t.kind === 'buffs') return 'Buffs'
+  return character?.stats.find((s) => s.id === t.statId)?.name ?? `(missing: ${t.statId})`
 }
 
-function firstSlot(character: Character | undefined): string {
-  return character?.equipmentSlots[0] ?? ''
-}
-
-function defaultOpFor(kind: OpKind, character: Character | undefined): StatDeltaOp {
-  switch (kind) {
-    case 'adjust': {
-      const s = firstStatOfType(character, ['number', 'numberWithMax', 'attributeSet'])
-      const attributeKey =
-        s?.type === 'attributeSet' ? s.attributeKeys?.[0] : undefined
-      return { kind: 'adjust', statId: s?.id ?? '', delta: 0, attributeKey }
-    }
-    case 'set': {
-      const s = character?.stats[0]
-      return {
-        kind: 'set',
-        statId: s?.id ?? '',
-        value: s ? defaultValueFor(s) : { kind: 'number', value: 0 },
-      }
-    }
-    case 'maxAdjust': {
-      const s = firstStatOfType(character, ['numberWithMax'])
-      return { kind: 'maxAdjust', statId: s?.id ?? '', delta: 0 }
-    }
-    case 'listAdd': {
-      const s = firstStatOfType(character, ['list'])
-      return { kind: 'listAdd', statId: s?.id ?? '', items: [] }
-    }
-    case 'listRemove': {
-      const s = firstStatOfType(character, ['list'])
-      return { kind: 'listRemove', statId: s?.id ?? '', items: [] }
-    }
-    case 'equip':
-      return {
-        kind: 'equip',
-        slot: firstSlot(character),
-        itemId: '',
-        modifiers: [],
-      }
-    case 'unequip':
-      return { kind: 'unequip', slot: firstSlot(character) }
-    case 'buffApply':
-      return { kind: 'buffApply', buffId: '', modifiers: [] }
-    case 'buffRemove':
-      return { kind: 'buffRemove', buffId: '' }
-    case 'rankChange': {
-      const s = firstStatOfType(character, ['rank'])
-      return { kind: 'rankChange', statId: s?.id ?? '', direction: 'up' }
-    }
-    case 'fill': {
-      const s = firstStatOfType(character, ['numberWithMax'])
-      return { kind: 'fill', statId: s?.id ?? '' }
-    }
-    case 'itemAdd': {
-      const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
-      const seed =
-        s && (s.type === 'inventory' || s.type === 'spellList' || s.type === 'skillList')
-          ? defaultItemFields(s.type)
-          : {}
-      return { kind: 'itemAdd', statId: s?.id ?? '', name: '', fields: seed }
-    }
-    case 'itemRemove': {
-      const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
-      return { kind: 'itemRemove', statId: s?.id ?? '', name: '' }
-    }
-    case 'itemFieldAdjust': {
-      const s = firstStatOfType(character, ['inventory', 'spellList', 'skillList'])
-      const field =
-        s && (s.type === 'inventory' || s.type === 'spellList' || s.type === 'skillList')
-          ? LIST_STAT_FIELDS[s.type][0]?.key ?? ''
-          : ''
-      return { kind: 'itemFieldAdjust', statId: s?.id ?? '', name: '', field, delta: 0 }
-    }
-  }
+/** A fresh row: the character's first stat with its first verb. */
+function newDraftOp(character: Character | undefined): StatDeltaOp {
+  const target = targetsFor(character)[0]
+  const verb = verbsForTarget(target, character)[0] ?? 'applyBuff'
+  return opForVerb(verb, target, character)
 }
 
 function numberOr(v: string, fallback: number): number {
@@ -193,6 +82,8 @@ export function DeltaEditorModal({
   const setMarker = useCharacterStore((s) => s.setMarker)
   const removeMarker = useCharacterStore((s) => s.removeMarker)
 
+  const book = useStoryletStore((s) => s.book)
+  const storyletId = useStoryletStore((s) => s.activeStoryletId)
   const [drafts, setDrafts] = useState<StatDelta[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
@@ -232,7 +123,7 @@ export function DeltaEditorModal({
         {
           id: newDeltaId(),
           characterId: firstChar?.id ?? '',
-          op: defaultOpFor('adjust', firstChar),
+          op: newDraftOp(firstChar),
           note: '',
         },
       ])
@@ -260,6 +151,21 @@ export function DeltaEditorModal({
       .map((c) => c.name)
     return names.join(', ')
   }, [drafts, characters])
+
+  // Each character's state just before this marker, then each row applied in order.
+  const previews = useMemo(() => {
+    const text = editorView?.state.doc.toString() ?? ''
+    const at = markerId ? findDocStatMarkers(text).find((m) => m.id === markerId) : undefined
+    const offset = at?.from ?? editorView?.state.selection.main.head ?? 0
+    const stateBefore = stateLookupAt({
+      book: liveBookFor(editorView, book, storyletId),
+      storyletId,
+      characters,
+      markers,
+      offset,
+    })
+    return previewDeltas(drafts, characters, stateBefore)
+  }, [drafts, characters, markers, book, storyletId, editorView, markerId])
 
   if (!open || !markerId) return null
 
@@ -315,7 +221,7 @@ export function DeltaEditorModal({
       {
         id: newDeltaId(),
         characterId: firstChar?.id ?? '',
-        op: defaultOpFor('adjust', firstChar),
+        op: newDraftOp(firstChar),
         note: '',
       },
     ])
@@ -389,6 +295,7 @@ export function DeltaEditorModal({
               draft={draft}
               idx={idx}
               characters={characters}
+              preview={previews[idx]}
               onChange={(next) => updateDraft(idx, next)}
               onRemove={() => removeDraft(idx)}
               canRemove={drafts.length > 1}
@@ -460,14 +367,16 @@ export function DeltaEditorModal({
   )
 }
 
+
 // ---------------------------------------------------------------------------
-// Delta row
+// Delta row: Character → Stat → Verb → details, with a before → after line
 // ---------------------------------------------------------------------------
 
 interface DeltaRowProps {
   draft: StatDelta
   idx: number
   characters: Character[]
+  preview: OpPreview | null
   onChange: (next: StatDelta) => void
   onRemove: () => void
   canRemove: boolean
@@ -481,6 +390,7 @@ function DeltaRow({
   draft,
   idx,
   characters,
+  preview,
   onChange,
   onRemove,
   canRemove,
@@ -490,73 +400,89 @@ function DeltaRow({
   canMoveDown,
 }: DeltaRowProps) {
   const character = characters.find((c) => c.id === draft.characterId)
+  const target = targetForOp(draft.op)
+  // The verb is UI state: "Damage 0" and "Heal 0" are the same op.
+  const [verb, setVerbState] = useState<DeltaVerb>(() => verbForOp(draft.op, character))
+  const offered = verbsForTarget(target, character)
+  const verbs = offered.includes(verb) ? offered : [verb, ...offered]
+  const targets = targetsFor(character)
+  if (!targets.some((t) => targetKey(t) === targetKey(target))) targets.unshift(target)
 
   function setCharacterId(id: string) {
     const nextChar = characters.find((c) => c.id === id)
-    // Reset op defaults relative to new character to keep refs valid.
-    onChange({
-      ...draft,
-      characterId: id,
-      op: defaultOpFor(draft.op.kind, nextChar),
-    })
+    const keep = targetsFor(nextChar).find((t) => targetKey(t) === targetKey(target))
+    const nextTarget = keep ?? targetsFor(nextChar)[0]
+    const nextVerbs = verbsForTarget(nextTarget, nextChar)
+    const nextVerb = nextVerbs.includes(verb) ? verb : nextVerbs[0] ?? verb
+    setVerbState(nextVerb)
+    onChange({ ...draft, characterId: id, op: opForVerb(nextVerb, nextTarget, nextChar, draft.op) })
   }
 
-  function setOpKind(kind: OpKind) {
-    onChange({ ...draft, op: defaultOpFor(kind, character) })
+  function setTarget(key: string) {
+    const next = targetsFor(character).find((t) => targetKey(t) === key)
+    if (!next) return
+    const nextVerbs = verbsForTarget(next, character)
+    const nextVerb = nextVerbs.includes(verb) ? verb : nextVerbs[0] ?? verb
+    setVerbState(nextVerb)
+    onChange({ ...draft, op: opForVerb(nextVerb, next, character, draft.op) })
   }
 
-  function setOp(op: StatDeltaOp) {
-    onChange({ ...draft, op })
-  }
-
-  function setNote(note: string) {
-    onChange({ ...draft, note })
+  function setVerb(v: DeltaVerb) {
+    setVerbState(v)
+    onChange({ ...draft, op: opForVerb(v, target, character, draft.op) })
   }
 
   return (
-    <div
-      data-testid="delta-row"
-      className="bg-gray-800 border border-gray-700 rounded p-3 space-y-3"
-    >
+    <div data-testid="delta-row" className="bg-gray-800 border border-gray-700 rounded p-3 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-400">Character</span>
-          <select
-            data-testid="delta-character"
-            value={draft.characterId}
-            onChange={(e) => setCharacterId(e.target.value)}
-            className={INPUT_CLS}
-          >
-            {characters.length === 0 && <option value="">(none)</option>}
-            {characters.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-400">Op</span>
-          <select
-            data-testid="delta-op-kind"
-            value={draft.op.kind}
-            onChange={(e) => setOpKind(e.target.value as OpKind)}
-            className={INPUT_CLS}
-          >
-            {OP_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {OP_KIND_LABELS[k]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <select
+          data-testid="delta-character"
+          aria-label="Character"
+          value={draft.characterId}
+          onChange={(e) => setCharacterId(e.target.value)}
+          className={INPUT_CLS}
+          style={character ? { color: character.color } : undefined}
+        >
+          {characters.length === 0 && <option value="">(none)</option>}
+          {characters.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <select
+          data-testid="delta-target"
+          aria-label="Stat"
+          value={targetKey(target)}
+          onChange={(e) => setTarget(e.target.value)}
+          className={INPUT_CLS}
+        >
+          {targets.map((t) => (
+            <option key={targetKey(t)} value={targetKey(t)}>
+              {targetLabel(t, character)}
+            </option>
+          ))}
+        </select>
+        <select
+          data-testid="delta-verb"
+          aria-label="Change"
+          value={verb}
+          onChange={(e) => setVerb(e.target.value as DeltaVerb)}
+          className={INPUT_CLS}
+        >
+          {verbs.map((v) => (
+            <option key={v} value={v}>
+              {VERB_LABELS[v]}
+            </option>
+          ))}
+        </select>
         <div className="ml-auto flex items-center gap-1">
           <button
             data-testid={`delta-move-up-${idx}`}
             onClick={onMoveUp}
             disabled={!canMoveUp}
             className="text-xs text-gray-500 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed px-1"
-            title="Move delta up"
+            title="Move up"
           >
             &#x25B2;
           </button>
@@ -565,74 +491,174 @@ function DeltaRow({
             onClick={onMoveDown}
             disabled={!canMoveDown}
             className="text-xs text-gray-500 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed px-1"
-            title="Move delta down"
+            title="Move down"
           >
             &#x25BC;
           </button>
           {canRemove && (
-            <button
-              onClick={onRemove}
-              className="text-xs text-gray-500 hover:text-red-400 px-1"
-              title="Remove delta"
-            >
+            <button onClick={onRemove} className="text-xs text-gray-500 hover:text-red-400 px-1" title="Remove">
               &#x2715;
             </button>
           )}
         </div>
       </div>
 
-      <OpParams op={draft.op} character={character} onChange={setOp} />
+      <VerbParams verb={verb} op={draft.op} character={character} onChange={(op) => onChange({ ...draft, op })} />
 
-      <div>
-        <label className="block text-xs text-gray-400 mb-1">Note</label>
-        <input
-          type="text"
-          value={draft.note ?? ''}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Optional context"
-          className={`${INPUT_CLS} w-full`}
-          data-testid="delta-note"
-        />
-      </div>
+      {preview && (
+        <div data-testid="delta-preview" className="text-xs text-gray-400 tabular-nums">
+          {preview.text}
+          {preview.warning && <span className="ml-2 text-amber-300/90">⚠ {preview.warning}</span>}
+        </div>
+      )}
+
+      <input
+        type="text"
+        value={draft.note ?? ''}
+        onChange={(e) => onChange({ ...draft, note: e.target.value })}
+        placeholder="Note (optional)"
+        className={`${INPUT_CLS} w-full`}
+        data-testid="delta-note"
+      />
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Op parameter panel — discriminated-union narrowing
+// Details per verb — discriminated-union narrowing on the op
 // ---------------------------------------------------------------------------
 
-interface OpParamsProps {
+interface VerbParamsProps {
+  verb: DeltaVerb
   op: StatDeltaOp
   character: Character | undefined
   onChange: (op: StatDeltaOp) => void
 }
 
-function OpParams({ op, character, onChange }: OpParamsProps) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex items-center gap-1.5">
+      <span className="text-xs text-gray-400">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function VerbParams({ verb, op, character, onChange }: VerbParamsProps) {
   switch (op.kind) {
     case 'adjust':
+    case 'maxAdjust': {
+      const def = character?.stats.find((s) => s.id === op.statId)
+      const keys = def?.type === 'attributeSet' ? def.attributeKeys ?? [] : []
       return (
-        <AdjustParams
-          op={op}
-          character={character}
-          statTypes={['number', 'numberWithMax', 'attributeSet']}
-          onChange={onChange}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {op.kind === 'adjust' && keys.length > 0 && (
+            <Field label="Attribute">
+              <select
+                value={op.attributeKey ?? keys[0]}
+                onChange={(e) => onChange({ ...op, attributeKey: e.target.value })}
+                className={INPUT_CLS}
+              >
+                {keys.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label={verb === 'change' ? 'By (±)' : 'Amount'}>
+            <input
+              type="number"
+              data-testid="delta-amount"
+              min={verb === 'change' ? undefined : 0}
+              value={amountForVerb(verb, op.delta)}
+              onChange={(e) => onChange({ ...op, delta: signedForVerb(verb, numberOr(e.target.value, 0)) })}
+              className={`${INPUT_CLS} w-24`}
+            />
+          </Field>
+        </div>
       )
-    case 'maxAdjust':
-      return (
-        <AdjustParams
-          op={op}
-          character={character}
-          statTypes={['numberWithMax']}
-          onChange={onChange}
-        />
-      )
-    case 'set':
-      return <SetParams op={op} character={character} onChange={onChange} />
+    }
+    case 'set': {
+      const def = character?.stats.find((s) => s.id === op.statId)
+      if (!def) return null
+      return <StatFieldEditor definition={def} value={op.value} onChange={(v) => onChange({ ...op, value: v })} />
+    }
+    case 'fill':
+      return <p className="text-xs text-gray-500">Back to full.</p>
     case 'listAdd':
     case 'listRemove':
-      return <ListParams op={op} character={character} onChange={onChange} />
+      return <ListItemsInput op={op} onChange={onChange} />
+    case 'itemAdd':
+    case 'itemRemove':
+    case 'itemFieldAdjust': {
+      const def = character?.stats.find((s) => s.id === op.statId)
+      const kind = def && (def.type === 'inventory' || def.type === 'spellList' || def.type === 'skillList') ? def.type : null
+      const noun = kind === 'spellList' ? 'Spell' : kind === 'skillList' ? 'Skill' : 'Item'
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Field label={noun}>
+            <input
+              type="text"
+              value={op.name}
+              onChange={(e) => onChange({ ...op, name: e.target.value })}
+              placeholder={`${noun.toLowerCase()} name`}
+              className={INPUT_CLS}
+            />
+          </Field>
+          {op.kind === 'itemAdd' && kind === 'inventory' && (
+            <Field label="Qty">
+              <input
+                type="number"
+                min={1}
+                value={op.fields.qty ?? 1}
+                onChange={(e) => onChange({ ...op, fields: { ...op.fields, qty: numberOr(e.target.value, 1) } })}
+                className={`${INPUT_CLS} w-20`}
+              />
+            </Field>
+          )}
+          {op.kind === 'itemFieldAdjust' && kind && verb !== 'changeQty' && (
+            <Field label="Field">
+              <select value={op.field} onChange={(e) => onChange({ ...op, field: e.target.value })} className={INPUT_CLS}>
+                {LIST_STAT_FIELDS[kind].map((f) => (
+                  <option key={f.key} value={f.key}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          {op.kind === 'itemFieldAdjust' && (
+            <Field label="By (±)">
+              <input
+                type="number"
+                data-testid="delta-amount"
+                value={op.delta}
+                onChange={(e) => onChange({ ...op, delta: numberOr(e.target.value, 0) })}
+                className={`${INPUT_CLS} w-24`}
+              />
+            </Field>
+          )}
+        </div>
+      )
+    }
+    case 'rankChange': {
+      if (op.direction !== 'set') return null
+      const tiers = character?.stats.find((s) => s.id === op.statId)?.rankTiers ?? []
+      return (
+        <Field label="Tier">
+          <select value={op.value ?? ''} onChange={(e) => onChange({ ...op, value: e.target.value })} className={INPUT_CLS}>
+            {tiers.length === 0 && <option value="">(none)</option>}
+            {tiers.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )
+    }
     case 'equip':
       return <EquipParams op={op} character={character} onChange={onChange} />
     case 'unequip':
@@ -641,170 +667,7 @@ function OpParams({ op, character, onChange }: OpParamsProps) {
       return <BuffApplyParams op={op} character={character} onChange={onChange} />
     case 'buffRemove':
       return <BuffRemoveParams op={op} onChange={onChange} />
-    case 'rankChange':
-      return <RankChangeParams op={op} character={character} onChange={onChange} />
-    case 'fill':
-      return <FillParams op={op} character={character} onChange={onChange} />
-    case 'itemAdd':
-    case 'itemRemove':
-    case 'itemFieldAdjust':
-      return <ItemOpParams op={op} character={character} onChange={onChange} />
   }
-}
-
-// adjust + maxAdjust share the same UI signature.
-function AdjustParams({
-  op,
-  character,
-  statTypes,
-  onChange,
-}: {
-  op: Extract<StatDeltaOp, { kind: 'adjust' | 'maxAdjust' }>
-  character: Character | undefined
-  statTypes: StatDefinition['type'][]
-  onChange: (op: StatDeltaOp) => void
-}) {
-  const stats = (character?.stats ?? []).filter((s) => statTypes.includes(s.type))
-  const currentStat = stats.find((s) => s.id === op.statId)
-  const showAttrKey = op.kind === 'adjust' && currentStat?.type === 'attributeSet'
-  const attrKeys = currentStat?.attributeKeys ?? []
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label className="flex items-center gap-1.5">
-        <span className="text-xs text-gray-400">Stat</span>
-        <select
-          data-testid="delta-stat"
-          value={op.statId}
-          onChange={(e) => {
-            if (op.kind === 'adjust') {
-              const nextStat = stats.find((s) => s.id === e.target.value)
-              const nextAttrKey =
-                nextStat?.type === 'attributeSet'
-                  ? nextStat.attributeKeys?.[0]
-                  : undefined
-              onChange({ ...op, statId: e.target.value, attributeKey: nextAttrKey })
-            } else {
-              onChange({ ...op, statId: e.target.value })
-            }
-          }}
-          className={INPUT_CLS}
-        >
-          {stats.length === 0 && <option value="">(none)</option>}
-          {stats.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      {showAttrKey && op.kind === 'adjust' && (
-        <label className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-400">Key</span>
-          <select
-            value={op.attributeKey ?? attrKeys[0] ?? ''}
-            onChange={(e) => onChange({ ...op, attributeKey: e.target.value })}
-            className={INPUT_CLS}
-          >
-            {attrKeys.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      <label className="flex items-center gap-1.5">
-        <span className="text-xs text-gray-400">Delta</span>
-        <input
-          type="number"
-          data-testid="delta-amount"
-          value={op.delta}
-          onChange={(e) => onChange({ ...op, delta: numberOr(e.target.value, 0) })}
-          className={`${INPUT_CLS} w-24`}
-        />
-      </label>
-    </div>
-  )
-}
-
-function SetParams({
-  op,
-  character,
-  onChange,
-}: {
-  op: Extract<StatDeltaOp, { kind: 'set' }>
-  character: Character | undefined
-  onChange: (op: StatDeltaOp) => void
-}) {
-  const stats = character?.stats ?? []
-  const currentStat = stats.find((s) => s.id === op.statId)
-
-  return (
-    <div className="space-y-2">
-      <label className="flex items-center gap-1.5">
-        <span className="text-xs text-gray-400">Stat</span>
-        <select
-          value={op.statId}
-          onChange={(e) => {
-            const next = stats.find((s) => s.id === e.target.value)
-            onChange({
-              kind: 'set',
-              statId: e.target.value,
-              value: next ? defaultValueFor(next) : op.value,
-            })
-          }}
-          className={INPUT_CLS}
-        >
-          {stats.length === 0 && <option value="">(none)</option>}
-          {stats.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      {currentStat && (
-        <StatFieldEditor
-          definition={currentStat}
-          value={op.value}
-          onChange={(v) => onChange({ ...op, value: v })}
-        />
-      )}
-    </div>
-  )
-}
-
-function ListParams({
-  op,
-  character,
-  onChange,
-}: {
-  op: Extract<StatDeltaOp, { kind: 'listAdd' | 'listRemove' }>
-  character: Character | undefined
-  onChange: (op: StatDeltaOp) => void
-}) {
-  const stats = (character?.stats ?? []).filter((s) => s.type === 'list')
-  return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <label className="flex items-center gap-1.5">
-        <span className="text-xs text-gray-400">Stat</span>
-        <select
-          value={op.statId}
-          onChange={(e) => onChange({ ...op, statId: e.target.value })}
-          className={INPUT_CLS}
-        >
-          {stats.length === 0 && <option value="">(none)</option>}
-          {stats.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <ListItemsInput op={op} onChange={onChange} />
-    </div>
-  )
 }
 
 function ListItemsInput({
@@ -1090,200 +953,3 @@ function BuffRemoveParams({
   )
 }
 
-function RankChangeParams({
-  op,
-  character,
-  onChange,
-}: {
-  op: Extract<StatDeltaOp, { kind: 'rankChange' }>
-  character: Character | undefined
-  onChange: (op: StatDeltaOp) => void
-}) {
-  const rankStats = (character?.stats ?? []).filter((s) => s.type === 'rank')
-  const currentStat = rankStats.find((s) => s.id === op.statId)
-  const tiers = currentStat?.rankTiers ?? []
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label className="flex items-center gap-1.5">
-        <span className="text-xs text-gray-400">Stat</span>
-        <select
-          value={op.statId}
-          onChange={(e) => onChange({ ...op, statId: e.target.value })}
-          className={INPUT_CLS}
-        >
-          {rankStats.length === 0 && <option value="">(none)</option>}
-          {rankStats.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-1.5">
-        <span className="text-xs text-gray-400">Direction</span>
-        <select
-          value={op.direction}
-          onChange={(e) => {
-            const dir = e.target.value as 'up' | 'down' | 'set'
-            if (dir === 'set') {
-              onChange({ ...op, direction: dir, value: tiers[0] ?? '' })
-            } else {
-              onChange({ ...op, direction: dir, value: undefined })
-            }
-          }}
-          className={INPUT_CLS}
-        >
-          <option value="up">up</option>
-          <option value="down">down</option>
-          <option value="set">set</option>
-        </select>
-      </label>
-      {op.direction === 'set' && (
-        <label className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-400">Tier</span>
-          <select
-            value={op.value ?? ''}
-            onChange={(e) => onChange({ ...op, value: e.target.value })}
-            className={INPUT_CLS}
-          >
-            {tiers.length === 0 && <option value="">(none)</option>}
-            {tiers.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-    </div>
-  )
-}
-
-function FillParams({
-  op,
-  character,
-  onChange,
-}: {
-  op: Extract<StatDeltaOp, { kind: 'fill' }>
-  character: Character | undefined
-  onChange: (op: StatDeltaOp) => void
-}) {
-  const stats = (character?.stats ?? []).filter((s) => s.type === 'numberWithMax')
-  return (
-    <label className="flex items-center gap-1.5">
-      <span className="text-xs text-gray-400">Stat</span>
-      <select
-        data-testid="delta-stat"
-        value={op.statId}
-        onChange={(e) => onChange({ ...op, statId: e.target.value })}
-        className={INPUT_CLS}
-      >
-        {stats.length === 0 && <option value="">(none)</option>}
-        {stats.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// ItemOpParams — shared UI for itemAdd / itemRemove / itemFieldAdjust
-// ---------------------------------------------------------------------------
-
-const LIST_STAT_TYPES: StatDefinition['type'][] = ['inventory', 'spellList', 'skillList']
-
-function ItemOpParams({
-  op,
-  character,
-  onChange,
-}: {
-  op: Extract<StatDeltaOp, { kind: 'itemAdd' | 'itemRemove' | 'itemFieldAdjust' }>
-  character: Character | undefined
-  onChange: (op: StatDeltaOp) => void
-}) {
-  const stats = (character?.stats ?? []).filter((s) => LIST_STAT_TYPES.includes(s.type))
-  const currentStat = stats.find((s) => s.id === op.statId)
-
-  if (stats.length === 0) {
-    return (
-      <p className="text-xs text-gray-600 italic">No list-type stats on this character.</p>
-    )
-  }
-
-  function handleStatChange(statId: string) {
-    const nextStat = stats.find((s) => s.id === statId)
-    if (
-      op.kind === 'itemFieldAdjust' &&
-      nextStat &&
-      (nextStat.type === 'inventory' || nextStat.type === 'spellList' || nextStat.type === 'skillList')
-    ) {
-      const firstField = LIST_STAT_FIELDS[nextStat.type][0]?.key ?? ''
-      onChange({ ...op, statId, field: firstField })
-    } else {
-      onChange({ ...op, statId })
-    }
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label className="flex items-center gap-1.5">
-        <span className="text-xs text-gray-400">Stat</span>
-        <select
-          value={op.statId}
-          onChange={(e) => handleStatChange(e.target.value)}
-          className={INPUT_CLS}
-        >
-          {stats.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex items-center gap-1.5">
-        <span className="text-xs text-gray-400">Name</span>
-        <input
-          type="text"
-          value={op.name}
-          onChange={(e) => onChange({ ...op, name: e.target.value })}
-          placeholder="item name"
-          className={INPUT_CLS}
-        />
-      </label>
-      {op.kind === 'itemFieldAdjust' &&
-        currentStat &&
-        (currentStat.type === 'inventory' ||
-          currentStat.type === 'spellList' ||
-          currentStat.type === 'skillList') && (
-          <>
-            <label className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Field</span>
-              <select
-                value={op.field}
-                onChange={(e) => onChange({ ...op, field: e.target.value })}
-                className={INPUT_CLS}
-              >
-                {LIST_STAT_FIELDS[currentStat.type].map((def) => (
-                  <option key={def.key} value={def.key}>
-                    {def.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-400">Delta</span>
-              <input
-                type="number"
-                value={op.delta}
-                onChange={(e) => onChange({ ...op, delta: numberOr(e.target.value, 0) })}
-                className={`${INPUT_CLS} w-24`}
-              />
-            </label>
-          </>
-        )}
-    </div>
-  )
-}

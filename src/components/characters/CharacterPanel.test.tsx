@@ -35,4 +35,17 @@ describe('character panel', () => {
     const hp = rendered.container.querySelector('[data-testid="character-panel-effective-hero-hp"]')
     expect(hp?.textContent).toBe('7/10')
   })
+
+  it('says where the Stats tab values are computed', () => {
+    seedStore(makeBook([makeStorylet('c1', 'Intro.', { name: 'Chapter 3' })]), 'c1')
+    seedCharacters([hero], {})
+    const live = 'The ogre swung. Kael <!-- stat:m1 -->staggered back. Later.'
+    view = new EditorView({ state: EditorState.create({ doc: live }) })
+    useEditorStore.setState({ cursorOffset: live.indexOf('. Later') })
+
+    rendered = render(createElement(CharacterPanel, { open: true, onClose: () => {}, editorView: view }))
+
+    const label = rendered.container.querySelector('[data-testid="character-panel-position"]')
+    expect(label?.textContent).toBe('At cursor · Chapter 3, after “…ogre swung. Kael staggered back”')
+  })
 })

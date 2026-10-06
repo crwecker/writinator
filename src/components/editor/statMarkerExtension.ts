@@ -14,7 +14,8 @@ import {
 } from '@codemirror/state'
 import type { Character, StatDelta } from '../../types'
 import { STAT_MARKER_REGEX } from '../../lib/markerUtils'
-import { formatOpTooltip, statNameLookup } from '../../lib/statFormat'
+import { buildMarkerChip, formatOpTooltip, statNameLookup, type MarkerChip } from '../../lib/statFormat'
+import { useEditorStore, type StatChipMode } from '../../stores/editorStore'
 import {
   renderModeField,
   setRenderModeEffect,
@@ -54,6 +55,41 @@ export function dispatchCharacterSnapshot(
 ): void {
   view.dispatch({ effects: setCharacterSnapshotEffect.of(snapshot) })
 }
+
+/** StateEffect switching how markers render (chips / dots / hidden). */
+export const setStatChipModeEffect = StateEffect.define<StatChipMode>()
+
+/** Chip display setting, seeded from (and kept in sync with) editorStore. */
+export const statChipModeField = StateField.define<StatChipMode>({
+  create: () => useEditorStore.getState().statChipMode,
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setStatChipModeEffect)) return e.value
+    }
+    return value
+  },
+})
+
+/**
+ * Mirrors editorStore.statChipMode into the view. Lives here (not in the
+ * Editor component) so the extension is self-contained; dispatches from the
+ * store subscription, never inside a CodeMirror update.
+ */
+const statChipModeSync = ViewPlugin.fromClass(
+  class {
+    private unsubscribe: () => void
+    constructor(view: EditorView) {
+      this.unsubscribe = useEditorStore.subscribe((state, prev) => {
+        if (state.statChipMode === prev.statChipMode) return
+        if (view.state.field(statChipModeField, false) === state.statChipMode) return
+        view.dispatch({ effects: setStatChipModeEffect.of(state.statChipMode) })
+      })
+    }
+    destroy(): void {
+      this.unsubscribe()
+    }
+  },
+)
 
 /**
  * One-line summary of a marker's deltas, scoped to the first delta's character
@@ -152,10 +188,71 @@ class StatMarkerWidget extends WidgetType {
   }
 }
 
+class StatChipWidget extends WidgetType {
+  readonly markerId: string
+  readonly chip: MarkerChip
+  readonly tooltip: string
+
+  constructor(markerId: string, chip: MarkerChip, tooltip: string) {
+    super()
+    this.markerId = markerId
+    this.chip = chip
+    this.tooltip = tooltip
+  }
+
+  eq(other: WidgetType): boolean {
+    return (
+      other instanceof StatChipWidget &&
+      other.markerId === this.markerId &&
+      other.tooltip === this.tooltip &&
+      other.chip.text === this.chip.text &&
+      other.chip.groups.map((g) => g.color).join() === this.chip.groups.map((g) => g.color).join()
+    )
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement('span')
+    span.className = 'cm-stat-chip'
+    const accent = this.chip.groups[0]?.color ?? NEUTRAL_COLOR
+    span.style.setProperty('--chip-accent', accent)
+    span.setAttribute('data-marker-id', this.markerId)
+    span.setAttribute('title', this.tooltip)
+    span.setAttribute('role', 'button')
+    span.setAttribute('aria-label', `Stat change — ${this.chip.text || 'empty'}. Click to edit.`)
+    span.tabIndex = 0
+    if (this.chip.groups.length === 0) {
+      span.classList.add('cm-stat-chip-empty')
+      span.textContent = 'empty change'
+      return span
+    }
+    this.chip.groups.forEach((g, i) => {
+      if (i > 0) span.append('  ')
+      const name = document.createElement('span')
+      name.className = 'cm-stat-chip-name'
+      name.style.color = g.color
+      name.textContent = g.name
+      span.append(name)
+      for (const part of g.parts) span.append(` · ${part}`)
+    })
+    if (this.chip.more > 0) {
+      const more = document.createElement('span')
+      more.className = 'cm-stat-chip-more'
+      more.textContent = ` · +${this.chip.more} more`
+      span.append(more)
+    }
+    return span
+  }
+
+  ignoreEvent(): boolean {
+    return false
+  }
+}
+
 function buildDecorations(view: EditorView): DecorationSet {
   const presentation = markerPresentation(view.state.field(renderModeField))
   // In source mode the raw `<!-- stat:uuid -->` text stays visible — no decoration.
   if (presentation === 'raw') return Decoration.none
+  const chipMode = view.state.field(statChipModeField, false) ?? 'chips'
 
   const snapshot = view.state.field(characterSnapshotField)
   const characterById = new Map<string, Character>()
@@ -169,8 +266,8 @@ function buildDecorations(view: EditorView): DecorationSet {
     while ((m = re.exec(text)) !== null) {
       const start = from + m.index
       const end = start + m[0].length
-      // clean mode: hide the marker text entirely with no widget.
-      if (presentation === 'empty') {
+      // clean mode (or chips hidden): hide the marker text entirely with no widget.
+      if (presentation === 'empty' || chipMode === 'hidden') {
         builder.add(start, end, Decoration.replace({}))
         continue
       }
@@ -188,13 +285,11 @@ function buildDecorations(view: EditorView): DecorationSet {
         ? buildMarkerTooltip(deltas, characterById)
         : 'Empty marker'
       const ariaLabel = `Stat marker — ${summary}`
-      builder.add(
-        start,
-        end,
-        Decoration.replace({
-          widget: new StatMarkerWidget(markerId, color, tooltip, ariaLabel),
-        })
-      )
+      const widget =
+        chipMode === 'chips'
+          ? new StatChipWidget(markerId, buildMarkerChip(deltas ?? [], characterById), tooltip)
+          : new StatMarkerWidget(markerId, color, tooltip, ariaLabel)
+      builder.add(start, end, Decoration.replace({ widget }))
     }
   }
   return builder.finish()
@@ -211,7 +306,7 @@ const statMarkerViewPlugin = ViewPlugin.fromClass(
         update.startState.field(characterSnapshotField) !==
         update.state.field(characterSnapshotField)
       const renderModeChanged = update.transactions.some((tr) =>
-        tr.effects.some((e) => e.is(setRenderModeEffect))
+        tr.effects.some((e) => e.is(setRenderModeEffect) || e.is(setStatChipModeEffect))
       )
       if (
         update.docChanged ||
@@ -253,9 +348,45 @@ const statMarkerBaseTheme = EditorView.baseTheme({
     outline: '2px solid #fff',
     outlineOffset: '2px',
   },
+  '.cm-stat-chip': {
+    display: 'inline-block',
+    maxWidth: '32em',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'pre',
+    verticalAlign: 'text-bottom',
+    margin: '0 3px',
+    padding: '0 6px',
+    borderRadius: '4px',
+    borderLeft: '2px solid var(--chip-accent, #6b7280)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    color: '#a8a29e',
+    fontFamily: "ui-sans-serif, system-ui, sans-serif",
+    fontSize: '0.72em',
+    fontStyle: 'normal',
+    fontWeight: '400',
+    lineHeight: '1.7',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  '.cm-stat-chip:hover': {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    color: '#d6d3d1',
+  },
+  '.cm-stat-chip:focus-visible': {
+    outline: '1px solid var(--chip-accent, #fff)',
+    outlineOffset: '1px',
+  },
+  '.cm-stat-chip-name': {
+    fontWeight: '600',
+  },
+  '.cm-stat-chip-more, .cm-stat-chip-empty': {
+    fontStyle: 'italic',
+    color: '#78716c',
+  },
 })
 
 /** Bundle of the StateField, ViewPlugin, and base theme. */
 export function statMarkerExtension(): Extension {
-  return [characterSnapshotField, statMarkerViewPlugin, statMarkerBaseTheme]
+  return [characterSnapshotField, statChipModeField, statChipModeSync, statMarkerViewPlugin, statMarkerBaseTheme]
 }

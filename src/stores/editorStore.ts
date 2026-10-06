@@ -3,11 +3,17 @@ import { persist } from 'zustand/middleware'
 import { localforageJSONStorage } from './localforageStorage'
 import type { EditorPreferences, RightPanelTab } from '../types'
 
+/** How stat-change markers show in the editor: readable chips, bare dots, or nothing. */
+export type StatChipMode = 'chips' | 'dots' | 'hidden'
+
 interface EditorState extends EditorPreferences {
   /** Transient: current CodeMirror main-selection head offset. Not persisted. */
   cursorOffset: number
   /** Recently used text colors (most recent first, capped). */
   recentColors: string[]
+  statChipMode: StatChipMode
+  setStatChipMode: (mode: StatChipMode) => void
+  cycleStatChipMode: () => void
   setVimMode: (enabled: boolean) => void
   toggleVimMode: () => void
   setFontFamily: (family: EditorPreferences['fontFamily']) => void
@@ -42,7 +48,13 @@ export const useEditorStore = create<EditorState>()(
       cursorOffset: 0,
       recentColors: [],
       rightPanelActiveTab: null,
+      statChipMode: 'chips',
 
+      setStatChipMode: (mode: StatChipMode) => set({ statChipMode: mode }),
+      cycleStatChipMode: () => {
+        const next: Record<StatChipMode, StatChipMode> = { chips: 'dots', dots: 'hidden', hidden: 'chips' }
+        set({ statChipMode: next[get().statChipMode] })
+      },
       setVimMode: (enabled: boolean) => set({ vimMode: enabled }),
       toggleVimMode: () => set({ vimMode: !get().vimMode }),
       setFontFamily: (family: EditorPreferences['fontFamily']) =>
@@ -101,6 +113,7 @@ export const useEditorStore = create<EditorState>()(
           collapsedStoryletIds: state.collapsedStoryletIds,
           recentColors: state.recentColors,
           rightPanelActiveTab: state.rightPanelActiveTab,
+          statChipMode: state.statChipMode,
         }) as unknown as EditorState,
     }
   )
